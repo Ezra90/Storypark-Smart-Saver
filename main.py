@@ -1,17 +1,34 @@
 """
-main.py – Orchestrator for the Storypark photo pipeline.
+main.py – Orchestrator for the Storypark Photo Pipeline.
 
-Run with:
-    python main.py
+Quick start
+-----------
+1. Run setup once:   python setup.py
+2. Then run anytime: python main.py
+
+What happens on each run
+------------------------
+First run (full historical backfill)
+    • Logs in to Storypark and scrolls all the way to the very first post.
+    • Downloads every photo that has not been processed before.
+    • Filters for photos containing the configured children (face recognition).
+    • Stamps EXIF with the original Storypark upload date and daycare GPS.
+    • Uploads matches to Google Photos and removes local copies.
+    • Records every processed image URL in a local SQLite database.
+
+Subsequent runs (incremental catch-up)
+    • Same pipeline, but the scraper stops scrolling automatically once it
+      reaches posts already in the state database – making daily runs fast.
 
 Pipeline steps
 --------------
-1. Initialise the SQLite state database.
-2. Scrape Storypark and download new photos to TEMP_DIR.
-3. Filter photos using facial recognition (delete non-matches).
-4. Rewrite EXIF metadata (date + GPS) on matching photos.
-5. Upload matching photos to Google Photos.
-6. Clean up any remaining temporary files.
+1. Verify setup has been completed (face_encodings.pkl exists).
+2. Initialise the SQLite state database.
+3. Scrape Storypark and download new photos to TEMP_DIR.
+4. Filter photos using facial recognition (delete non-matches).
+5. Rewrite EXIF: DateTimeOriginal = Storypark upload date; GPS = daycare.
+6. Upload to Google Photos; delete local copies on success.
+7. Clean up any leftover temporary files.
 """
 
 import logging
@@ -20,7 +37,7 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Logging configuration – set up before importing project modules
+# Logging – configure before importing project modules
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -41,10 +58,38 @@ import scraper
 import face_filter
 import exif_modifier
 import uploader
-from config import TEMP_DIR
+from config import TEMP_DIR, REFERENCE_ENCODINGS_FILE, CHILDREN
 
 
-def cleanup_temp_dir() -> None:
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _check_setup() -> None:
+    """
+    Abort with a clear message if setup.py has not been run yet.
+
+    We check for:
+      • face_encodings.pkl  – built by setup.py from Google Photos samples
+      • At least one child configured in config.CHILDREN
+    """
+    if not os.path.exists(REFERENCE_ENCODINGS_FILE):
+        logger.error(
+            "Face encodings file not found: %s\n"
+            "Run  python setup.py  first to configure the pipeline.",
+            REFERENCE_ENCODINGS_FILE,
+        )
+        sys.exit(1)
+
+    if not CHILDREN:
+        logger.error(
+            "No children configured in config.py.\n"
+            "Run  python setup.py  to set up the pipeline interactively."
+        )
+        sys.exit(1)
+
+
+def _cleanup_temp_dir() -> None:
     """Remove any leftover files in the temporary directory."""
     tmp = Path(TEMP_DIR)
     if not tmp.exists():
@@ -55,13 +100,38 @@ def cleanup_temp_dir() -> None:
             f.unlink()
             removed += 1
     if removed:
-        logger.info("Cleaned up %d leftover file(s) from %s.", removed, TEMP_DIR)
+        logger.info(
+            "Cleaned up %d leftover file(s) from %s.", removed, TEMP_DIR
+        )
 
+
+def _summarise(uploaded: list[dict]) -> None:
+    """Log a per-child upload summary."""
+    if not uploaded:
+        return
+    tally: dict[str, int] = {}
+    for post in uploaded:
+        for name in post.get("matched_children", ["unknown"]):
+            tally[name] = tally.get(name, 0) + 1
+    logger.info("Upload summary by child:")
+    for name, count in sorted(tally.items()):
+        logger.info("  %-20s %d photo(s)", name, count)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     logger.info("=" * 60)
     logger.info("Storypark Photo Pipeline – starting")
+    logger.info("Children: %s", ", ".join(CHILDREN) if CHILDREN else "(none)")
     logger.info("=" * 60)
+
+    # ------------------------------------------------------------------
+    # Pre-flight check
+    # ------------------------------------------------------------------
+    _check_setup()
 
     # ------------------------------------------------------------------
     # Step 1 – State database
@@ -75,7 +145,7 @@ def main() -> None:
     posts = scraper.scrape(conn)
 
     if not posts:
-        logger.info("No new photos found. Exiting.")
+        logger.info("No new photos found. Nothing to do.")
         conn.close()
         return
 
@@ -88,16 +158,18 @@ def main() -> None:
     posts = face_filter.filter_photos(posts)
 
     if not posts:
-        logger.info("No photos matched the reference face. Exiting.")
+        logger.info("No photos matched any of the configured children.")
         conn.close()
+        _cleanup_temp_dir()
         return
 
     logger.info("%d photo(s) matched.", len(posts))
 
     # ------------------------------------------------------------------
     # Step 4 – EXIF metadata
+    # Stamps each photo with the Storypark upload date and daycare GPS.
     # ------------------------------------------------------------------
-    logger.info("STEP 3/4 – Writing EXIF metadata…")
+    logger.info("STEP 3/4 – Writing EXIF metadata (date + GPS)…")
     posts = exif_modifier.apply_exif(posts)
 
     # ------------------------------------------------------------------
@@ -107,13 +179,15 @@ def main() -> None:
     uploaded = uploader.upload_photos(posts, conn)
 
     logger.info(
-        "Pipeline complete: %d photo(s) uploaded to Google Photos.", len(uploaded)
+        "Pipeline complete: %d photo(s) uploaded to Google Photos.",
+        len(uploaded),
     )
+    _summarise(uploaded)
 
     # ------------------------------------------------------------------
-    # Step 6 – Cleanup
+    # Cleanup
     # ------------------------------------------------------------------
-    cleanup_temp_dir()
+    _cleanup_temp_dir()
     conn.close()
 
     logger.info("=" * 60)

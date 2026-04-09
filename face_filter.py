@@ -1,61 +1,86 @@
 """
 face_filter.py – Filter photos using local facial recognition.
 
-Loads a reference headshot of the target child and checks every downloaded
-photo.  Images where the child is NOT detected are deleted from the local
-temporary directory.
+Loads pre-computed face encodings for every configured child (built by
+setup.py and stored in face_encodings.pkl) and checks each downloaded photo.
+
+Photos where NONE of the children are detected are deleted from disk.
+Photos where at least one child is detected are kept, and the matching
+child names are recorded in the post dict under the key 'matched_children'.
 """
 
-import os
 import logging
-from pathlib import Path
+import os
+import pickle
 
 import face_recognition
 
-from config import REFERENCE_IMAGE_PATH
+from config import REFERENCE_ENCODINGS_FILE
 
 logger = logging.getLogger(__name__)
 
 
-def _load_reference_encoding(reference_path: str) -> list:
-    """
-    Load the reference image and return its face encoding(s).
+# ---------------------------------------------------------------------------
+# Loading encodings
+# ---------------------------------------------------------------------------
 
-    Raises FileNotFoundError if the reference image does not exist.
-    Raises ValueError if no face is detected in the reference image.
+def _load_encodings() -> dict[str, list]:
     """
-    if not os.path.exists(reference_path):
+    Load face encodings from the pickle file created by setup.py.
+
+    Returns a dict mapping child name → list of numpy encoding arrays.
+    Raises FileNotFoundError if the encodings file does not exist.
+    """
+    if not os.path.exists(REFERENCE_ENCODINGS_FILE):
         raise FileNotFoundError(
-            f"Reference image not found: {reference_path}\n"
-            "Please place a clear, front-facing headshot at the path configured "
-            "in config.py (REFERENCE_IMAGE_PATH)."
+            f"Face encodings file not found: {REFERENCE_ENCODINGS_FILE}\n"
+            "Run  python setup.py  first to build the face encodings from\n"
+            "your Google Photos library."
         )
 
-    image = face_recognition.load_image_file(reference_path)
-    encodings = face_recognition.face_encodings(image)
+    with open(REFERENCE_ENCODINGS_FILE, "rb") as fh:
+        data = pickle.load(fh)
 
-    if not encodings:
+    if not isinstance(data, dict) or not data:
         raise ValueError(
-            f"No face detected in the reference image: {reference_path}\n"
-            "Use a clear, well-lit, front-facing photo."
+            f"Face encodings file appears empty or corrupt: {REFERENCE_ENCODINGS_FILE}\n"
+            "Delete it and re-run  python setup.py  to rebuild."
         )
 
+    total = sum(len(v) for v in data.values())
     logger.info(
-        "Reference image loaded (%d face(s) found): %s", len(encodings), reference_path
+        "Loaded face encodings for %d child(ren), %d encoding(s) total: %s",
+        len(data),
+        total,
+        ", ".join(f"{name} ({len(enc)})" for name, enc in data.items()),
     )
-    return encodings
+    return data
 
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def filter_photos(posts: list[dict]) -> list[dict]:
     """
-    Filter *posts* to only those where the reference child appears.
+    Filter *posts* to only those where at least one known child appears.
 
-    Each item in *posts* must have a 'local_path' key pointing to a downloaded
-    image.  Items that do NOT match are deleted from disk.
+    Each item in *posts* must have a ``local_path`` key.  Items that do NOT
+    match any child are deleted from disk.  Matched items gain a new key:
 
-    Returns the filtered list (items where the child was found).
+        ``matched_children`` – list of child names found in the photo
+
+    Returns the filtered list.
     """
-    reference_encodings = _load_reference_encoding(REFERENCE_IMAGE_PATH)
+    encodings_by_child = _load_encodings()
+
+    # Flatten all encodings into a single list, keeping track of which child
+    # each encoding belongs to so we can report matches by name.
+    all_encodings: list = []
+    all_labels: list[str] = []
+    for child_name, encs in encodings_by_child.items():
+        all_encodings.extend(encs)
+        all_labels.extend([child_name] * len(encs))
 
     matched: list[dict] = []
 
@@ -66,20 +91,30 @@ def filter_photos(posts: list[dict]) -> list[dict]:
 
         try:
             photo = face_recognition.load_image_file(local_path)
-            face_encodings = face_recognition.face_encodings(photo)
+            face_encodings_in_photo = face_recognition.face_encodings(photo)
 
-            if not face_encodings:
+            if not face_encodings_in_photo:
                 logger.debug("No faces detected in %s – deleting.", local_path)
                 os.remove(local_path)
                 continue
 
-            # Compare every face in the photo against the reference
-            matches = face_recognition.compare_faces(
-                reference_encodings, face_encodings[0], tolerance=0.6
-            )
+            # Check every face found in the photo against every known encoding
+            found_children: set[str] = set()
+            for face_enc in face_encodings_in_photo:
+                matches = face_recognition.compare_faces(
+                    all_encodings, face_enc, tolerance=0.6
+                )
+                for is_match, label in zip(matches, all_labels):
+                    if is_match:
+                        found_children.add(label)
 
-            if any(matches):
-                logger.info("Match found: %s", local_path)
+            if found_children:
+                post["matched_children"] = sorted(found_children)
+                logger.info(
+                    "Match – %s found in: %s",
+                    ", ".join(sorted(found_children)),
+                    local_path,
+                )
                 matched.append(post)
             else:
                 logger.debug("No match in %s – deleting.", local_path)
@@ -89,6 +124,6 @@ def filter_photos(posts: list[dict]) -> list[dict]:
             logger.warning("Error processing %s: %s – skipping.", local_path, exc)
 
     logger.info(
-        "Face filter complete: %d/%d images kept.", len(matched), len(posts)
+        "Face filter complete: %d/%d image(s) kept.", len(matched), len(posts)
     )
     return matched
