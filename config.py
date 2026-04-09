@@ -84,6 +84,12 @@ GOOGLE_CREDENTIALS_FILE: str = _cfg["google_credentials_file"]
 GOOGLE_TOKEN_FILE: str = _cfg["google_token_file"]
 
 # ---------------------------------------------------------------------------
+# Google Photos album (optional – empty string means upload to main library)
+# ---------------------------------------------------------------------------
+ALBUM_ID: str = _cfg["album_id"]
+ALBUM_TITLE: str = _cfg["album_title"]
+
+# ---------------------------------------------------------------------------
 # Scraper behaviour
 # ---------------------------------------------------------------------------
 HEADLESS_BROWSER: bool = _cfg["headless_browser"]

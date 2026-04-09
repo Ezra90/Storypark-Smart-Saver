@@ -164,6 +164,20 @@ def download_media_item(
         return None
 
 
+def create_album(session: requests.Session, title: str) -> dict:
+    """
+    Create a new album in the user's Google Photos library.
+
+    Returns the album dict with at least ``{"id", "title"}``.
+    """
+    body = {"album": {"title": title}}
+    resp = session.post(f"{_BASE}/albums", json=body)
+    resp.raise_for_status()
+    album = resp.json()
+    logger.info("Created album: %s (id=%s)", album.get("title"), album.get("id"))
+    return album
+
+
 # ---------------------------------------------------------------------------
 # Upload (used by uploader.py)
 # ---------------------------------------------------------------------------
@@ -223,15 +237,19 @@ def create_media_item(
     upload_token: str,
     filename: str,
     description: str = "",
+    album_id: str = "",
 ) -> bool:
     """
     Finalise an upload via the ``mediaItems:batchCreate`` endpoint.
+
+    If *album_id* is provided the photo is added to that album;
+    otherwise it goes into the main Google Photos library.
 
     Returns ``True`` on success.
 
     Raises :class:`QuotaExceededError` on HTTP 429 / 500.
     """
-    body = {
+    body: dict = {
         "newMediaItems": [
             {
                 "description": description,
@@ -242,6 +260,8 @@ def create_media_item(
             }
         ]
     }
+    if album_id:
+        body["albumId"] = album_id
     try:
         resp = session.post(f"{_BASE}/mediaItems:batchCreate", json=body)
 

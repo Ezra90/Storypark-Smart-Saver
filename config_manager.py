@@ -40,6 +40,8 @@ DEFAULTS: dict = {
     "headless_browser": True,
     "max_posts": 0,
     "incremental_stop_threshold": 5,
+    "album_id": "",
+    "album_title": "",
 }
 
 # The keyring service name is a constant – never stored in JSON.

@@ -95,6 +95,8 @@ def _write_config(data: dict) -> None:
         "daycare_longitude":    data["longitude"],
         "headless_browser":     data["headless"],
         "max_posts":            data["max_posts"],
+        "album_id":             data.get("album_id", ""),
+        "album_title":          data.get("album_title", ""),
     })
 
 
@@ -172,6 +174,7 @@ class SetupWizard(tk.Toplevel):
     STEP_TITLES = [
         "Storypark Account",
         "Google Photos",
+        "Album (optional)",
         "Your Children",
         "Daycare Location",
         "Options",
@@ -201,6 +204,8 @@ class SetupWizard(tk.Toplevel):
             "longitude":       0.0,
             "headless":        True,
             "max_posts":       0,
+            "album_id":        "",
+            "album_title":     "",
         }
         # Password held separately so it never enters the config dict
         self._pending_pw: str = ""
@@ -270,6 +275,7 @@ class SetupWizard(tk.Toplevel):
         [
             self._show_storypark,
             self._show_google,
+            self._show_album,
             self._show_children,
             self._show_gps,
             self._show_options,
@@ -284,6 +290,7 @@ class SetupWizard(tk.Toplevel):
         validators = [
             self._validate_storypark,
             self._validate_google,
+            self._validate_album,
             self._validate_children,
             self._validate_gps,
             self._finish,
@@ -410,7 +417,157 @@ class SetupWizard(tk.Toplevel):
         self._step += 1
         self._show_step()
 
-    # ── Step 3: Children + albums ─────────────────────────────────────────────
+    # ── Step 3: Album (optional) ──────────────────────────────────────────────
+
+    def _show_album(self) -> None:
+        f = self._body
+        ttk.Label(
+            f,
+            text="Optionally upload synced photos into a dedicated album.\n"
+                 "Leave unchecked to upload directly to your main library.",
+            style="Sub.TLabel",
+        ).pack(anchor="w", pady=(0, 10))
+
+        self._use_album_var = tk.BooleanVar(value=bool(self._d["album_id"]))
+        self._album_check = ttk.Checkbutton(
+            f,
+            text="Upload to a dedicated album",
+            variable=self._use_album_var,
+            command=self._toggle_album_options,
+        )
+        self._album_check.pack(anchor="w", pady=(0, 8))
+
+        self._album_frame = ttk.Frame(f)
+        self._album_frame.pack(fill="x")
+
+        self._album_mode_var = tk.StringVar(value="new")
+        self._album_new_name_var = tk.StringVar(value="Storypark Photos")
+        self._album_existing_var = tk.StringVar()
+        self._album_existing_names: list[str] = []
+        self._album_existing_list: list[dict] = []
+
+        self._toggle_album_options()
+
+    def _toggle_album_options(self) -> None:
+        for w in self._album_frame.winfo_children():
+            w.destroy()
+
+        if not self._use_album_var.get():
+            return
+
+        f = self._album_frame
+
+        ttk.Radiobutton(
+            f, text="Create a new album", variable=self._album_mode_var,
+            value="new", command=self._toggle_album_options,
+        ).pack(anchor="w", padx=(16, 0), pady=2)
+        ttk.Radiobutton(
+            f, text="Pick an existing album", variable=self._album_mode_var,
+            value="existing", command=self._toggle_album_options,
+        ).pack(anchor="w", padx=(16, 0), pady=2)
+
+        if self._album_mode_var.get() == "new":
+            row = ttk.Frame(f)
+            row.pack(anchor="w", padx=(32, 0), pady=(6, 0))
+            ttk.Label(row, text="Album name:").pack(side="left")
+            ttk.Entry(row, textvariable=self._album_new_name_var,
+                      width=30).pack(side="left", padx=6)
+        else:
+            # Load existing albums
+            album_names = [
+                a.get("title", f"Album {i + 1}")
+                for i, a in enumerate(self._d["albums"])
+            ]
+            self._album_existing_names = album_names
+            self._album_existing_list = self._d["albums"]
+
+            if album_names:
+                row = ttk.Frame(f)
+                row.pack(anchor="w", padx=(32, 0), pady=(6, 0))
+                ttk.Label(row, text="Album:").pack(side="left")
+                combo = ttk.Combobox(
+                    row, textvariable=self._album_existing_var,
+                    values=album_names, state="readonly", width=36,
+                )
+                combo.pack(side="left", padx=6)
+                if album_names:
+                    combo.current(0)
+            else:
+                ttk.Label(
+                    f, text="No albums found – create a new one instead.",
+                    style="Small.TLabel",
+                ).pack(anchor="w", padx=(32, 0), pady=(6, 0))
+
+    def _validate_album(self) -> None:
+        if not self._use_album_var.get():
+            self._d["album_id"] = ""
+            self._d["album_title"] = ""
+            self._step += 1
+            self._show_step()
+            return
+
+        if self._album_mode_var.get() == "new":
+            name = self._album_new_name_var.get().strip()
+            if not name:
+                messagebox.showerror(
+                    "Missing Name",
+                    "Please enter a name for the new album.",
+                    parent=self,
+                )
+                return
+            # Create album in background
+            self._next_btn.config(state="disabled")
+
+            def worker() -> None:
+                try:
+                    import google_photos as gp
+                    session = self._d["google_session"]
+                    album = gp.create_album(session, name)
+                    self._bg_q.put(("album_ok", album))
+                except Exception as exc:
+                    self._bg_q.put(("album_err", str(exc)))
+
+            threading.Thread(target=worker, daemon=True).start()
+            self._poll_album_create()
+        else:
+            # Existing album
+            title = self._album_existing_var.get()
+            if not title:
+                messagebox.showerror(
+                    "No Album Selected",
+                    "Please select an album from the list.",
+                    parent=self,
+                )
+                return
+            idx = self._album_existing_names.index(title) if title in self._album_existing_names else 0
+            chosen = self._album_existing_list[idx]
+            self._d["album_id"] = chosen["id"]
+            self._d["album_title"] = chosen.get("title", "")
+            self._step += 1
+            self._show_step()
+
+    def _poll_album_create(self) -> None:
+        try:
+            msg = self._bg_q.get_nowait()
+        except queue.Empty:
+            self.after(200, self._poll_album_create)
+            return
+
+        self._next_btn.config(state="normal")
+        if msg[0] == "album_ok":
+            album = msg[1]
+            self._d["album_id"] = album["id"]
+            self._d["album_title"] = album.get("title", "")
+            self._step += 1
+            self._show_step()
+        else:
+            messagebox.showerror(
+                "Album Creation Failed",
+                f"Could not create album:\n{msg[1]}",
+                parent=self,
+            )
+
+    # ── Step 4: Children + albums ─────────────────────────────────────────────
 
     def _show_children(self) -> None:
         f = self._body
@@ -503,7 +660,7 @@ class SetupWizard(tk.Toplevel):
         # Kick off face encoding build while user fills in GPS
         self._start_encoding_build()
 
-    # ── Step 4: Daycare GPS (encodings build in background) ───────────────────
+    # ── Step 5: Daycare GPS (encodings build in background) ───────────────────
 
     def _start_encoding_build(self) -> None:
         self._encodings_ready = False
@@ -663,7 +820,7 @@ class SetupWizard(tk.Toplevel):
         self._step += 1
         self._show_step()
 
-    # ── Step 5: Options ───────────────────────────────────────────────────────
+    # ── Step 6: Options ───────────────────────────────────────────────────────
 
     def _show_options(self) -> None:
         f = self._body
