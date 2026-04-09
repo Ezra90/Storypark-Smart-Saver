@@ -539,7 +539,14 @@ class SetupWizard(tk.Toplevel):
                     parent=self,
                 )
                 return
-            idx = self._album_existing_names.index(title) if title in self._album_existing_names else 0
+            if title not in self._album_existing_names:
+                messagebox.showerror(
+                    "Invalid Album",
+                    "The selected album was not found. Please select a valid album.",
+                    parent=self,
+                )
+                return
+            idx = self._album_existing_names.index(title)
             chosen = self._album_existing_list[idx]
             self._d["album_id"] = chosen["id"]
             self._d["album_title"] = chosen.get("title", "")

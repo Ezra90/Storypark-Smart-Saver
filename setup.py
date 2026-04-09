@@ -270,6 +270,9 @@ def run_wizard() -> None:
         print("    2. Pick an existing album")
         print()
         album_choice = _ask_int("Enter 1 or 2", default=1, min_val=1)
+        while album_choice not in (1, 2):
+            print("    Please enter 1 or 2.")
+            album_choice = _ask_int("Enter 1 or 2", default=1, min_val=1)
 
         if album_choice == 1:
             album_name = _ask("New album name", default="Storypark Photos")
