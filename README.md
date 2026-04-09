@@ -4,6 +4,24 @@ Automatically scrapes photos of your children from [Storypark](https://app.story
 
 > 🪟 **Windows user?** See the dedicated **[Windows Setup Guide](WINDOWS.md)** for step-by-step instructions including Visual C++ Build Tools, CMake, virtual environments, and Task Scheduler automation.
 
+> 🍓 **Raspberry Pi user?** See the dedicated **[Raspberry Pi Setup Guide](RASPBERRY_PI.md)** for the recommended "always-on, runs every night" setup.
+
+---
+
+## Which device should I run this on?
+
+| Device | Verdict | Best for |
+|--------|---------|----------|
+| **Windows PC / laptop** | ✅ Easiest | People who already have a PC and don't mind running it manually or via Task Scheduler |
+| **Raspberry Pi 4/5** | ✅ Best "set and forget" | Always-on, low power, automated nightly sync with no PC needed |
+| **Mac** | ✅ Works out of the box | macOS users – follow the Quick Start below |
+| **Android phone/tablet** | ❌ Not supported | Playwright (the browser automation library) does not run on Android, and the face recognition library cannot be compiled for Android |
+
+**Recommendation for most people:**
+- If you have a **Windows PC that stays on** → use Windows with Task Scheduler (see [WINDOWS.md](WINDOWS.md))
+- If you want it **fully automated without keeping a PC running** → use a Raspberry Pi 4 or 5 (see [RASPBERRY_PI.md](RASPBERRY_PI.md))
+- If you have a **Mac** → follow the Quick Start below
+
 ---
 
 ## What it does
@@ -80,6 +98,13 @@ python main.py
 ```
 
 That's it.  Run this daily (or set up a scheduled task / cron job) to keep Google Photos up to date.
+
+```bash
+# macOS / Linux – add to crontab for daily runs at 2 AM:
+# crontab -e  →  add:  0 2 * * * /path/to/venv/bin/python /path/to/main.py
+```
+
+See [WINDOWS.md](WINDOWS.md) for Task Scheduler instructions, or [RASPBERRY_PI.md](RASPBERRY_PI.md) for cron on a Pi.
 
 ---
 
