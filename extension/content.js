@@ -201,7 +201,7 @@
   /* ---------- Message listener ---------- */
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type !== "SCRAPE_FEED") return false;
+    if (!msg || msg.type !== "SCRAPE_FEED") return false;
 
     const knownUrls = new Set(msg.knownUrls || []);
     const sendProgress = (text) => {
