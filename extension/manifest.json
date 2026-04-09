@@ -14,7 +14,8 @@
     "identity",
     "activeTab",
     "scripting",
-    "offscreen"
+    "offscreen",
+    "alarms"
   ],
   "host_permissions": [
     "https://app.storypark.com/*",
