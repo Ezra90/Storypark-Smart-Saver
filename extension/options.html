@@ -64,13 +64,21 @@
 
     .child-row {
       display: flex;
-      gap: 8px;
-      align-items: flex-end;
-      margin-bottom: 8px;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
     }
-    .child-row input[type="text"] { flex: 1; margin-bottom: 0; }
-    .child-row input[type="file"] { flex: 1; font-size: 12px; }
-    .child-row button {
+    .child-row-main {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .child-row-main input[type="text"] { flex: 1; margin-bottom: 0; }
+    .child-row-main input[type="file"] { flex: 1; font-size: 12px; }
+    .child-row-main button {
       padding: 6px 12px;
       font-size: 13px;
       border-radius: 6px;
@@ -79,6 +87,24 @@
       background: var(--accent);
       color: #fff;
       flex-shrink: 0;
+    }
+    .child-album-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .child-album-row label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 0;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .child-album-row select {
+      flex: 1;
+      font-size: 12px;
+      padding: 4px 8px;
+      margin-bottom: 0;
     }
 
     .btn-add {
@@ -385,6 +411,29 @@
         ⬇ Import from selected album
       </button>
       <p id="importStatus" style="font-size:12px;color:var(--muted);margin-top:8px;"></p>
+    </div>
+  </div>
+
+  <!-- Auto-Sync -->
+  <div class="card">
+    <h2>⏰ Auto-Sync</h2>
+    <p class="help" style="margin-bottom:14px;">
+      When enabled, the extension will automatically run a sync in the background
+      without you needing to click the popup. Storypark must be open in a tab for
+      the sync to scrape new photos.
+    </p>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <input type="checkbox" id="autoSyncEnabled" style="width:auto;margin-bottom:0;">
+      <label for="autoSyncEnabled" style="font-size:14px;color:var(--text);margin-bottom:0;font-weight:600;">
+        Enable Auto-Sync
+      </label>
+    </div>
+    <div id="autoSyncFreqRow">
+      <label for="autoSyncFrequency">Frequency</label>
+      <select id="autoSyncFrequency">
+        <option value="daily">Daily</option>
+        <option value="weekly-friday">Weekly on Fridays</option>
+      </select>
     </div>
   </div>
 

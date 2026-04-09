@@ -7,13 +7,13 @@
  *   3. Downloads images, converts to base64 for offscreen face filtering
  *   4. Offscreen document classifies photos: auto-approve / review queue / discard
  *   5. Applies EXIF metadata (date + GPS) to approved images
- *   6. Uploads to Google Photos Library API
+ *   6. Uploads to Google Photos Library API (per-child album routing)
  *   7. Persists review queue items in chrome.storage.local for HITL review
- *   8. Tracks processed URLs in IndexedDB (lib/db.js) to avoid re-uploading
+ *   8. Tracks processed URLs in IndexedDB (lib/db.js) ONLY after confirmed upload
  *
  * Message handlers exposed to popup / options:
  *   GOOGLE_CONNECT   GOOGLE_DISCONNECT   GOOGLE_STATUS
- *   SYNC_NOW
+ *   SYNC_NOW         SET_AUTO_SYNC
  *   LIST_ALBUMS      CREATE_ALBUM
  *   GET_REVIEW_QUEUE REVIEW_APPROVE      REVIEW_REJECT
  *   IMPORT_TRAINING_ALBUM
@@ -112,8 +112,11 @@ async function uploadBytes(token, blob, filename) {
     body: blob,
   });
 
-  if (res.status === 429 || res.status === 500) {
+  if (res.status === 429) {
     throw new Error("QUOTA_EXCEEDED");
+  }
+  if (res.status === 500) {
+    throw new Error("SERVER_ERROR");
   }
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   return res.text();
@@ -138,8 +141,11 @@ async function createMediaItem(token, uploadToken, filename, description, albumI
     },
     body: JSON.stringify(body),
   });
-  if (res.status === 429 || res.status === 500) {
+  if (res.status === 429) {
     throw new Error("QUOTA_EXCEEDED");
+  }
+  if (res.status === 500) {
+    throw new Error("SERVER_ERROR");
   }
   if (!res.ok) throw new Error(`Create media item failed: ${res.status}`);
   const data = await res.json();
@@ -299,7 +305,7 @@ async function runSync() {
   const lat = settings.daycareLat ?? null;
   const lon = settings.daycareLon ?? null;
   const daycareName = settings.daycareName || "Storypark";
-  const albumId = settings.albumId || "";
+  const globalAlbumId = settings.albumId || "";
   const autoThreshold = settings.autoThreshold ?? 85;
   const minThreshold = settings.minThreshold ?? 50;
   const childEncodings = settings.childEncodings || [];
@@ -446,12 +452,24 @@ async function runSync() {
       ? `${daycareName} – ${childLabel}`
       : daycareName;
 
+    // Smart album routing: use the first matched child's albumId, fall back to global
+    let targetAlbumId = globalAlbumId;
+    if (post.matchedChildren?.length > 0) {
+      for (const childName of post.matchedChildren) {
+        const enc = childEncodings.find((c) => c.name === childName);
+        if (enc?.albumId) {
+          targetAlbumId = enc.albumId;
+          break;
+        }
+      }
+    }
+
     try {
       const uploadToken = await uploadBytes(token, post.blob, filename);
-      const ok = await createMediaItem(token, uploadToken, filename, desc, albumId);
+      const ok = await createMediaItem(token, uploadToken, filename, desc, targetAlbumId);
       if (ok) {
         uploadedUrls.push(post.imageUrl);
-        await log(`  ✓ Uploaded ${filename}`);
+        await log(`  ✓ Uploaded ${filename}${targetAlbumId ? ` → album ${targetAlbumId}` : ""}`);
       } else {
         await log(`  ⚠ Unexpected status for ${filename}`);
       }
@@ -459,6 +477,9 @@ async function runSync() {
       if (err.message === "QUOTA_EXCEEDED") {
         await log("⚠ Google Photos daily quota reached. Try again tomorrow.");
         quotaHit = true;
+      } else if (err.message === "SERVER_ERROR") {
+        await log(`  ✗ Server error uploading ${filename} – will retry on next sync.`);
+        // Do NOT add to uploadedUrls; the URL stays out of the ledger for automatic retry.
       } else {
         await log(`  ✗ Upload failed: ${err.message}`);
       }
@@ -487,18 +508,15 @@ async function runSync() {
   }
 
   /* ---- Step 9: Mark as processed ---- */
+  // Only mark URLs that were either successfully uploaded or added to the review
+  // queue.  Photos that failed to download, failed to upload (network / server
+  // errors), or were discarded by face-recognition are intentionally left out of
+  // the ledger so the next sync run will automatically retry them.
   const allProcessedUrls = [
     ...uploadedUrls,
-    // Also mark review-queued items so we don't re-process them on next sync
+    // Review-queued items are tracked here so they are not re-scraped on the
+    // next sync; they will be uploaded (and permanently marked) when approved.
     ...reviewQueueItems.map((p) => p.imageUrl),
-    // Mark discarded items (those not in autoApprove or reviewQueue) as processed
-    ...downloaded
-      .filter(
-        (p) =>
-          !autoApprove.some((a) => a.imageUrl === p.imageUrl) &&
-          !reviewQueueItems.some((r) => r.imageUrl === p.imageUrl)
-      )
-      .map((p) => p.imageUrl),
   ];
   if (allProcessedUrls.length > 0) {
     await markProcessed(allProcessedUrls);
@@ -532,11 +550,25 @@ async function approveReviewItem(id) {
     "daycareLon",
     "daycareName",
     "albumId",
+    "childEncodings",
   ]);
   const lat = settings.daycareLat ?? null;
   const lon = settings.daycareLon ?? null;
   const daycareName = settings.daycareName || "Storypark";
-  const albumId = settings.albumId || "";
+  const globalAlbumId = settings.albumId || "";
+  const childEncodings = settings.childEncodings || [];
+
+  // Smart album routing: use the first matched child's albumId, fall back to global
+  let targetAlbumId = globalAlbumId;
+  if (item.matchedChildren?.length > 0) {
+    for (const childName of item.matchedChildren) {
+      const enc = childEncodings.find((c) => c.name === childName);
+      if (enc?.albumId) {
+        targetAlbumId = enc.albumId;
+        break;
+      }
+    }
+  }
 
   const token = await getAuthToken(false);
 
@@ -556,15 +588,16 @@ async function approveReviewItem(id) {
   const desc = childLabel ? `${daycareName} – ${childLabel}` : daycareName;
 
   const uploadToken = await uploadBytes(token, exifBlob, filename);
-  const ok = await createMediaItem(token, uploadToken, filename, desc, albumId);
+  const ok = await createMediaItem(token, uploadToken, filename, desc, targetAlbumId);
   if (!ok) throw new Error("Google Photos upload returned unexpected status.");
 
+  // Only mark as processed AFTER confirmed successful upload
   await markProcessed([item.imageUrl]);
 
   // Remove from queue
   const updated = queue.filter((q) => q.id !== id);
   await saveReviewQueue(updated);
-  await log(`  ✓ Approved and uploaded: ${filename}`);
+  await log(`  ✓ Approved and uploaded: ${filename}${targetAlbumId ? ` → album ${targetAlbumId}` : ""}`);
   return updated;
 }
 
@@ -626,14 +659,103 @@ async function importTrainingFromAlbum(albumId, childName) {
     throw new Error("No faces detected in the selected album photos.");
   }
 
-  // Store as child encoding (replace existing for this child)
+  // Store as child encoding (replace existing for this child, preserving albumId)
   const { childEncodings = [] } = await chrome.storage.local.get("childEncodings");
+  const existing = childEncodings.find((c) => c.name === childName);
   const filtered = childEncodings.filter((c) => c.name !== childName);
-  filtered.push({ name: childName, descriptor: descriptors[0], allDescriptors: descriptors });
+  filtered.push({
+    name: childName,
+    albumId: existing?.albumId || "",
+    descriptor: descriptors[0],
+    allDescriptors: descriptors,
+  });
   await chrome.storage.local.set({ childEncodings: filtered });
 
   return { count: descriptors.length };
 }
+
+/* ================================================================== */
+/*  Auto-Sync Alarm                                                   */
+/* ================================================================== */
+
+/**
+ * Compute the timestamp (ms) for the next occurrence of a given weekday at
+ * the specified hour (local time).  weekday: 0=Sun … 6=Sat.
+ * If today is the target weekday and the target hour hasn't passed yet,
+ * the alarm is scheduled for later today; otherwise it's scheduled for the
+ * next occurrence (at least 1 day away).
+ */
+function nextWeekdayAt(weekday, hourLocal = 9) {
+  const now = new Date();
+  const result = new Date(now);
+  result.setHours(hourLocal, 0, 0, 0);
+
+  // If today is the right weekday and the time hasn't passed yet, use today
+  if (now.getDay() === weekday && now < result) {
+    return result.getTime();
+  }
+
+  // Otherwise advance to the next occurrence (1–7 days away)
+  const daysUntil = (weekday - now.getDay() + 7) % 7 || 7;
+  result.setDate(result.getDate() + daysUntil);
+  return result.getTime();
+}
+
+/**
+ * Create (or recreate) the auto-sync alarm based on current settings.
+ * Clears any existing alarm first.
+ */
+async function setupAutoSyncAlarm() {
+  await chrome.alarms.clear("autoSync");
+
+  const { autoSyncEnabled, autoSyncFrequency } =
+    await chrome.storage.local.get(["autoSyncEnabled", "autoSyncFrequency"]);
+
+  if (!autoSyncEnabled) return;
+
+  if (autoSyncFrequency === "weekly-friday") {
+    // Fire every Friday at 09:00 local time
+    chrome.alarms.create("autoSync", {
+      when: nextWeekdayAt(5, 9), // 5 = Friday
+      periodInMinutes: 7 * 24 * 60, // repeat weekly
+    });
+    await log("Auto-sync alarm set: weekly on Fridays at 09:00.");
+  } else {
+    // Default: daily, firing 24 h from now (and every 24 h thereafter)
+    chrome.alarms.create("autoSync", {
+      delayInMinutes: 24 * 60,
+      periodInMinutes: 24 * 60,
+    });
+    await log("Auto-sync alarm set: daily.");
+  }
+}
+
+// Set up the alarm on first install and on every browser start
+chrome.runtime.onInstalled.addListener(() => {
+  setupAutoSyncAlarm().catch((err) =>
+    console.error("[bg] alarm setup failed on install:", err)
+  );
+});
+chrome.runtime.onStartup.addListener(() => {
+  setupAutoSyncAlarm().catch((err) =>
+    console.error("[bg] alarm setup failed on startup:", err)
+  );
+});
+
+// Fire the sync pipeline whenever the alarm triggers
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "autoSync") return;
+  await log("Auto-sync alarm fired – starting background sync…");
+  try {
+    const summary = await runSync();
+    await log(
+      `Auto-sync complete: ${summary.uploaded} uploaded, ` +
+        `${summary.reviewQueued} queued for review.`
+    );
+  } catch (err) {
+    await log(`Auto-sync error: ${err.message}`);
+  }
+});
 
 /* ================================================================== */
 /*  Message router                                                     */
@@ -662,6 +784,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case "SYNC_NOW":
       runSync()
         .then((summary) => sendResponse({ ok: true, summary }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "SET_AUTO_SYNC":
+      chrome.storage.local
+        .set({
+          autoSyncEnabled: msg.enabled,
+          autoSyncFrequency: msg.frequency,
+        })
+        .then(() => setupAutoSyncAlarm())
+        .then(() => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
 

@@ -28,6 +28,8 @@ const btnCreateAlbum    = document.getElementById("btnCreateAlbum");
 const btnSave           = document.getElementById("btnSave");
 const toast             = document.getElementById("toast");
 const faceApiWarning    = document.getElementById("faceApiWarning");
+const autoSyncEnabled   = document.getElementById("autoSyncEnabled");
+const autoSyncFrequency = document.getElementById("autoSyncFrequency");
 
 const autoThresholdSlider = document.getElementById("autoThreshold");
 const autoThresholdVal    = document.getElementById("autoThresholdVal");
@@ -71,7 +73,7 @@ let faceApiAvailable = false;
 /*  Children UI                                                        */
 /* ------------------------------------------------------------------ */
 
-let childRows = []; // { nameInput, fileInput, encodingIdx }
+let childRows = []; // { nameInput, fileInput, albumSelect, encodingIdx }
 
 function syncTrainingChildDropdown() {
   const current = trainingChildSelect.value;
@@ -90,13 +92,19 @@ function syncTrainingChildDropdown() {
 function renderChildren(children) {
   childrenList.innerHTML = "";
   childRows = [];
-  children.forEach((child, idx) => addChildRow(child.name, idx));
+  children.forEach((child, idx) =>
+    addChildRow(child.name, idx, child.albumId || "")
+  );
   syncTrainingChildDropdown();
 }
 
-function addChildRow(name = "", encodingIdx = null) {
+function addChildRow(name = "", encodingIdx = null, savedAlbumId = "") {
   const row = document.createElement("div");
   row.className = "child-row";
+
+  // Main row: name + file + remove button
+  const rowMain = document.createElement("div");
+  rowMain.className = "child-row-main";
 
   const nameInput = document.createElement("input");
   nameInput.type = "text";
@@ -119,12 +127,35 @@ function addChildRow(name = "", encodingIdx = null) {
     syncTrainingChildDropdown();
   });
 
-  row.appendChild(nameInput);
-  row.appendChild(fileInput);
-  row.appendChild(removeBtn);
+  rowMain.appendChild(nameInput);
+  rowMain.appendChild(fileInput);
+  rowMain.appendChild(removeBtn);
+  row.appendChild(rowMain);
+
+  // Album sub-row: per-child Google Photos album selector
+  const albumRow = document.createElement("div");
+  albumRow.className = "child-album-row";
+
+  const albumLabel = document.createElement("label");
+  albumLabel.textContent = "Google Photos Album:";
+
+  const childAlbumSelect = document.createElement("select");
+  childAlbumSelect.className = "child-album-select";
+  // Placeholder option; will be populated by loadAlbums()
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "None (use default album)";
+  childAlbumSelect.appendChild(noneOpt);
+  // Remember the saved value so it can be restored after albums load
+  childAlbumSelect.dataset.savedAlbumId = savedAlbumId;
+
+  albumRow.appendChild(albumLabel);
+  albumRow.appendChild(childAlbumSelect);
+  row.appendChild(albumRow);
+
   childrenList.appendChild(row);
 
-  const entry = { nameInput, fileInput, encodingIdx };
+  const entry = { nameInput, fileInput, albumSelect: childAlbumSelect, encodingIdx };
   childRows.push(entry);
   return entry;
 }
@@ -185,6 +216,22 @@ function populateAlbumSelect(select, albums, savedId) {
   if (savedId) select.value = savedId;
 }
 
+/** Populate all per-child album selects, restoring each child's saved albumId. */
+function populateChildAlbumSelects(albums) {
+  for (const row of childRows) {
+    const saved = row.albumSelect.dataset.savedAlbumId || "";
+    // Preserve the "None" option header text for child rows
+    row.albumSelect.innerHTML = '<option value="">None (use default album)</option>';
+    for (const album of albums) {
+      const opt = document.createElement("option");
+      opt.value = album.id;
+      opt.textContent = album.title || album.id;
+      row.albumSelect.appendChild(opt);
+    }
+    if (saved) row.albumSelect.value = saved;
+  }
+}
+
 function loadAlbums() {
   albumSelect.disabled = true;
   chrome.runtime.sendMessage({ type: "LIST_ALBUMS" }, (res) => {
@@ -193,9 +240,11 @@ function loadAlbums() {
       chrome.storage.local.get("albumId", ({ albumId }) => {
         populateAlbumSelect(albumSelect, res.albums, albumId);
       });
-      // Also populate training album dropdown
+      // Populate training album dropdown
       populateAlbumSelect(trainingAlbumSelect, res.albums, "");
       trainingAlbumSelect.dispatchEvent(new Event("change"));
+      // Populate per-child album selects
+      populateChildAlbumSelects(res.albums);
     }
   });
 }
@@ -455,22 +504,28 @@ btnSave.addEventListener("click", async () => {
     const name = row.nameInput.value.trim();
     if (!name) continue;
 
-    const childData = { name };
+    // Per-child album ID (empty string = use global default)
+    const childAlbumId = row.albumSelect.value || "";
+
+    const childData = { name, albumId: childAlbumId };
 
     if (row.fileInput.files.length > 0) {
       const dataUrl = await readFileAsDataURL(row.fileInput.files[0]);
       childData.referencePhoto = dataUrl;
       childEncodings.push({
         name,
+        albumId: childAlbumId,
         referencePhoto: dataUrl,
         descriptor: null, // computed lazily by offscreen doc or training section
       });
     } else {
-      // Preserve existing encoding
+      // Preserve existing encoding, but update albumId
       const { childEncodings: existing = [] } =
         await chrome.storage.local.get("childEncodings");
       const prev = existing.find((c) => c.name === name);
-      if (prev) childEncodings.push(prev);
+      if (prev) {
+        childEncodings.push({ ...prev, albumId: childAlbumId });
+      }
     }
 
     children.push(childData);
@@ -510,6 +565,19 @@ btnSave.addEventListener("click", async () => {
     minThreshold,
   });
 
+  // Persist auto-sync settings and notify background to reconfigure alarm
+  const syncEnabled = autoSyncEnabled.checked;
+  const syncFrequency = autoSyncFrequency.value;
+  chrome.runtime.sendMessage(
+    { type: "SET_AUTO_SYNC", enabled: syncEnabled, frequency: syncFrequency },
+    (res) => {
+      if (res && !res.ok) {
+        console.warn("[options] Auto-sync alarm setup failed:", res.error);
+        showToast("⚠ Settings saved, but auto-sync alarm setup failed.");
+      }
+    }
+  );
+
   btnSave.disabled = false;
   btnSave.textContent = "💾 Save Settings";
   showToast();
@@ -528,9 +596,11 @@ btnSave.addEventListener("click", async () => {
     "albumId",
     "autoThreshold",
     "minThreshold",
+    "autoSyncEnabled",
+    "autoSyncFrequency",
   ]);
 
-  // Children
+  // Children (restored with per-child albumId via renderChildren → addChildRow)
   const children = data.children || [];
   if (children.length > 0) {
     renderChildren(children);
@@ -555,6 +625,10 @@ btnSave.addEventListener("click", async () => {
   }
   updateThresholdDesc();
 
-  // Albums
+  // Auto-sync
+  autoSyncEnabled.checked = data.autoSyncEnabled === true;
+  if (data.autoSyncFrequency) autoSyncFrequency.value = data.autoSyncFrequency;
+
+  // Albums (also populates per-child album selects after fetch)
   loadAlbums();
 })();
