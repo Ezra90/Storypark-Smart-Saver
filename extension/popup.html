@@ -83,18 +83,101 @@
       background: var(--surface);
       border-radius: 8px;
       padding: 10px;
-      max-height: 180px;
+      max-height: 140px;
       overflow-y: auto;
       font-family: "SF Mono", "Fira Code", monospace;
       font-size: 11px;
       line-height: 1.5;
       color: var(--muted);
+      margin-bottom: 12px;
     }
     .log-container p {
       margin: 0;
       white-space: pre-wrap;
       word-break: break-all;
     }
+
+    /* ---- Review Queue ---- */
+    #reviewSection {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    #reviewSection h2 {
+      font-size: 13px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #reviewBadge {
+      background: var(--warning);
+      color: #000;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 1px 7px;
+      min-width: 20px;
+      text-align: center;
+    }
+    .review-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .review-item:first-of-type { border-top: none; }
+    .review-thumb {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 4px;
+      flex-shrink: 0;
+      background: var(--primary);
+    }
+    .review-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .review-meta .child-name {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .review-meta .match-pct {
+      font-size: 11px;
+      color: var(--warning);
+    }
+    .review-meta .post-date {
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .review-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .btn-approve,
+    .btn-reject {
+      width: auto;
+      padding: 4px 8px;
+      font-size: 16px;
+      border-radius: 6px;
+      line-height: 1;
+    }
+    .btn-approve {
+      background: rgba(74,222,128,0.15);
+      color: var(--success);
+    }
+    .btn-approve:hover:not(:disabled) { background: rgba(74,222,128,0.3); opacity: 1; }
+    .btn-reject {
+      background: rgba(233,69,96,0.15);
+      color: var(--accent);
+    }
+    .btn-reject:hover:not(:disabled) { background: rgba(233,69,96,0.3); opacity: 1; }
 
     .footer {
       margin-top: 10px;
@@ -125,6 +208,18 @@
   <!-- Progress log -->
   <div class="log-container" id="logBox">
     <p>Waiting for action…</p>
+  </div>
+
+  <!-- Review Queue (HITL) -->
+  <div id="reviewSection" style="display:none;">
+    <h2>
+      👀 Review Queue
+      <span id="reviewBadge">0</span>
+    </h2>
+    <p id="reviewEmpty" style="font-size:12px;color:var(--muted);display:none;">
+      No photos pending review.
+    </p>
+    <div id="reviewItems"></div>
   </div>
 
   <div class="footer">
