@@ -26,11 +26,35 @@ import tkinter as tk
 from tkinter import ttk
 
 # ---------------------------------------------------------------------------
+# PyInstaller frozen-exe compatibility
+#
+# When running as a PyInstaller single-file bundle:
+#   • sys.frozen is True
+#   • sys._MEIPASS is the temp extraction directory (read-only assets)
+#   • The exe itself lives at sys.executable
+#
+# All mutable state files (config.json, face_encodings.pkl, state.db,
+# client_secret.json, google_token.json) must be placed next to the exe,
+# NOT inside the read-only _MEIPASS temp directory.
+# ---------------------------------------------------------------------------
+if getattr(sys, "frozen", False):
+    # Directory containing StoryparkSync.exe — writable, survives restarts
+    APP_DIR = Path(sys.executable).resolve().parent
+else:
+    APP_DIR = Path(__file__).resolve().parent
+
+# ---------------------------------------------------------------------------
 # Make sure we can import project modules from the same directory
 # ---------------------------------------------------------------------------
-APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
+
+# When frozen, project modules are extracted to _MEIPASS; add that too so
+# imports like `import scraper` still work.
+if getattr(sys, "frozen", False):
+    _meipass = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    if str(_meipass) not in sys.path:
+        sys.path.insert(0, str(_meipass))
 
 # ---------------------------------------------------------------------------
 # Route all logging through a queue so the GUI can display it live

@@ -4,6 +4,10 @@
 # Web scraping
 playwright>=1.44.0
 
+# Pre-compiled dlib for Windows (no CMake/MSVC needed).
+# Falls back to source build on Linux/macOS where compilers are readily available.
+dlib-bin; sys_platform == "win32"
+
 # Facial recognition
 face_recognition>=1.3.0
 numpy>=1.24.0
