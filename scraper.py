@@ -226,16 +226,14 @@ def scrape(state_conn) -> list[dict]:
 
         try:
             page.fill(SELECTORS["password_input"], storypark_password)
-        except Exception as exc:
+        except Exception:
             logger.error(
                 "Could not locate the password field – Storypark may have "
-                "updated their website.  (selector: %s, error: %s)",
-                SELECTORS["password_input"], exc,
+                "updated their website.  (selector: %s)",
+                SELECTORS["password_input"],
             )
             browser.close()
             return results
-        finally:
-            storypark_password = ""  # wipe from memory
 
         try:
             page.click(SELECTORS["submit_button"])

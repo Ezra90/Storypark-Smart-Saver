@@ -56,14 +56,16 @@ def upload_photos(posts: list[dict], state_conn) -> list[dict]:
 
         try:
             upload_token = google_photos.upload_bytes(session, local_path)
-        except QuotaExceededError:
+        except QuotaExceededError as exc:
             logger.warning(
                 "API quota exceeded during upload – saving state and stopping.  "
                 "%d photo(s) uploaded before the limit was reached.",
                 len(uploaded),
             )
             state_conn.commit()
-            raise QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err = QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err.uploaded_count = len(uploaded)
+            raise quota_err from exc
 
         if not upload_token:
             continue
@@ -75,14 +77,16 @@ def upload_photos(posts: list[dict], state_conn) -> list[dict]:
             success = google_photos.create_media_item(
                 session, upload_token, filename, description
             )
-        except QuotaExceededError:
+        except QuotaExceededError as exc:
             logger.warning(
                 "API quota exceeded during batchCreate – saving state and "
                 "stopping.  %d photo(s) uploaded before the limit was reached.",
                 len(uploaded),
             )
             state_conn.commit()
-            raise QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err = QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err.uploaded_count = len(uploaded)
+            raise quota_err from exc
 
         if success:
             mark_processed(state_conn, image_url, post_url)

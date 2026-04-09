@@ -224,7 +224,7 @@ def run_wizard() -> None:
         print(f"\n  ✗ Could not save password to keychain: {exc}")
         sys.exit(1)
     finally:
-        storypark_password = ""  # wipe in-memory copy
+        storypark_password = ""  # best-effort clear
 
     # ------------------------------------------------------------------
     # Step 2 – Google Photos OAuth

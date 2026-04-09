@@ -176,13 +176,14 @@ def run_pipeline(progress_callback=None) -> dict:
         uploaded = uploader.upload_photos(posts, conn)
     except QuotaExceededError as exc:
         quota_msg = str(exc)
+        uploaded_count = getattr(exc, "uploaded_count", 0)
         _progress("done", quota_msg, 100)
         _cleanup_temp_dir()
         conn.close()
         return {
             "scraped": scraped,
             "matched": matched,
-            "uploaded": 0,
+            "uploaded": uploaded_count,
             "quota_message": quota_msg,
         }
 
