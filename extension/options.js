@@ -52,7 +52,7 @@ const importStatus          = document.getElementById("importStatus");
 let faceApiAvailable = false;
 
 (async () => {
-  if (window.__faceApiMissing || typeof faceapi === "undefined") {
+  if (window._faceApiMissing || typeof faceapi === "undefined") {
     faceApiWarning.style.display = "block";
     return;
   }
@@ -230,8 +230,7 @@ document.querySelectorAll(".training-tab").forEach((tab) => {
     document.querySelectorAll(".training-tab").forEach((t) => t.classList.remove("active"));
     document.querySelectorAll(".training-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
-    document.getElementById(`panel${tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1)}`)
-      .classList.add("active");
+    document.getElementById(tab.dataset.panel).classList.add("active");
   });
 });
 

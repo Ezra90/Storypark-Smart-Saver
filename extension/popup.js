@@ -126,11 +126,10 @@ btnSync.addEventListener("click", () => {
       const s = res.summary;
       statusDot.className = "dot green";
       statusText.textContent = "Sync complete";
-      let msg =
-        `✓ Done! Scraped: ${s.scraped}, Uploaded: ${s.uploaded}`;
-      if (s.reviewQueued > 0) msg += `, Review queue: ${s.reviewQueued}`;
-      if (s.quotaHit) msg += " (quota reached)";
-      appendLog(msg);
+      const parts = [`✓ Done! Scraped: ${s.scraped}, Uploaded: ${s.uploaded}`];
+      if (s.reviewQueued > 0) parts.push(`Review queue: ${s.reviewQueued}`);
+      if (s.quotaHit) parts.push("quota reached");
+      appendLog(parts.join(", "));
       // Refresh review queue if new items were queued
       if (s.reviewQueued > 0) loadReviewQueue();
     } else {
@@ -166,7 +165,7 @@ function buildReviewItem(item) {
   thumb.alt = "Photo";
   // Load thumbnail from the scraped image URL
   thumb.src = item.imageUrl;
-  thumb.onerror = () => { thumb.style.background = "#333"; };
+  thumb.onerror = () => { thumb.style.background = "var(--primary)"; };
 
   const meta = document.createElement("div");
   meta.className = "review-meta";

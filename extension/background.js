@@ -212,11 +212,11 @@ async function blobToBase64(blob) {
   const buf = await blob.arrayBuffer();
   const bytes = new Uint8Array(buf);
   const CHUNK = 8192;
-  let binary = "";
+  const chunks = [];
   for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.slice(i, i + CHUNK));
+    chunks.push(String.fromCharCode(...bytes.slice(i, i + CHUNK)));
   }
-  return "data:" + (blob.type || "image/jpeg") + ";base64," + btoa(binary);
+  return "data:" + (blob.type || "image/jpeg") + ";base64," + btoa(chunks.join(""));
 }
 
 /* ================================================================== */
@@ -363,10 +363,9 @@ async function runSync() {
 
         // Convert blobs to base64 data URLs for the offscreen document
         const postsWithData = await Promise.all(
-          batch.map(async (post) => ({
-            ...post,
-            imageDataUrl: await blobToBase64(post.blob),
-            blob: undefined,
+          batch.map(async ({ blob, ...postData }) => ({
+            ...postData,
+            imageDataUrl: await blobToBase64(blob),
           }))
         );
 
@@ -470,8 +469,9 @@ async function runSync() {
     // Notify popup to refresh its queue display
     try {
       chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" });
-    } catch {
-      /* popup may not be open */
+    } catch (err) {
+      // Expected when the popup is not open; safe to ignore.
+      console.debug("[bg] REVIEW_QUEUE_UPDATED not delivered:", err.message);
     }
   }
 

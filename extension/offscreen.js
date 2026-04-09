@@ -111,11 +111,10 @@ async function filterPosts(posts, childEncodings, autoThreshold, minThreshold) {
   if (refs.length === 0) {
     console.warn("[offscreen] No reference encodings – all photos pass through.");
     return {
-      autoApprove: posts.map((p) => ({
-        ...p,
+      autoApprove: posts.map(({ imageDataUrl: _dropped, ...rest }) => ({
+        ...rest,
         matchPct: 100,
         matchedChildren: [],
-        imageDataUrl: undefined, // strip heavy field from return payload
       })),
       reviewQueue: [],
     };
@@ -167,11 +166,11 @@ async function filterPosts(posts, childEncodings, autoThreshold, minThreshold) {
 
     if (bestPct < minThreshold) continue; // below minimum → discard
 
+    const { imageDataUrl: _dropped, ...postWithoutData } = post;
     const result = {
-      ...post,
+      ...postWithoutData,
       matchPct: bestPct,
       matchedChildren: [...matchedSet].sort(),
-      imageDataUrl: undefined, // strip heavy field from return payload
     };
 
     if (bestPct >= autoThreshold) {

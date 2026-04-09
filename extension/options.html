@@ -349,8 +349,8 @@
     </div>
 
     <div class="training-tabs">
-      <button class="training-tab active" data-tab="manual">📤 Manual Upload</button>
-      <button class="training-tab" data-tab="album">📷 Import from Album</button>
+      <button class="training-tab active" data-tab="manual" data-panel="panelManual">📤 Manual Upload</button>
+      <button class="training-tab" data-tab="album" data-panel="panelAlbum">📷 Import from Album</button>
     </div>
 
     <!-- Manual upload panel -->
@@ -401,7 +401,7 @@
     https://github.com/justadudewhohacks/face-api.js/releases and place it in
     extension/lib/.
   -->
-  <script src="lib/face-api.min.js" onerror="window.__faceApiMissing=true"></script>
+  <script src="lib/face-api.min.js" onerror="window._faceApiMissing=true"></script>
   <script type="module" src="options.js"></script>
 </body>
 </html>
