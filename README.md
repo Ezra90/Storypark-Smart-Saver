@@ -1,193 +1,184 @@
-# Storypark Photo Pipeline
+# Storypark Photo Sync – Chrome Extension
 
-Automatically scrapes photos of your children from [Storypark](https://app.storypark.com), identifies them using facial recognition, stamps the correct upload date and daycare GPS location into the EXIF metadata, and uploads the results to Google Photos.
+A Google Chrome extension that automatically syncs your children's daycare photos from [Storypark](https://app.storypark.com) to your [Google Photos](https://photos.google.com) account.
 
-> 🪟 **Windows user?** See the dedicated **[Windows Setup Guide](WINDOWS.md)** for step-by-step instructions including Visual C++ Build Tools, CMake, virtual environments, and Task Scheduler automation.
+**What it does:**
 
-> 🍓 **Raspberry Pi user?** See the dedicated **[Raspberry Pi Setup Guide](RASPBERRY_PI.md)** for the recommended "always-on, runs every night" setup.
+1. **Scrapes** your Storypark activity feed for photos.
+2. **Filters** photos using client-side facial recognition (only keeps pictures of *your* children).
+3. **Stamps EXIF metadata** — embeds the original Storypark post date and your daycare's GPS coordinates so photos sort correctly in Google Photos.
+4. **Uploads** directly to Google Photos (optionally into a specific album).
 
----
-
-## Which device should I run this on?
-
-| Device | Verdict | Best for |
-|--------|---------|----------|
-| **Windows PC / laptop** | ✅ Easiest | People who already have a PC and don't mind running it manually or via Task Scheduler |
-| **Raspberry Pi 4/5** | ✅ Best "set and forget" | Always-on, low power, automated nightly sync with no PC needed |
-| **Mac** | ✅ Works out of the box | macOS users – follow the Quick Start below |
-| **Android phone/tablet** | ❌ Not supported | Playwright (the browser automation library) does not run on Android, and the face recognition library cannot be compiled for Android |
-
-**Recommendation for most people:**
-- If you have a **Windows PC that stays on** → run `install_windows.bat` then `run_windows.bat` (see [WINDOWS.md](WINDOWS.md))
-- If you want it **fully automated without keeping a PC running** → use a Raspberry Pi 4 or 5 – run `install_rpi.sh` then `run_rpi.sh` (see [RASPBERRY_PI.md](RASPBERRY_PI.md))
-- If you have a **Mac** → follow the Quick Start below
+No server, no Python, no command-line — just install the extension and click **Sync Now**.
 
 ---
 
-## What it does
+## Quick Start
 
-| Step | Module | Description |
-|------|--------|-------------|
-| 1 | `scraper.py` | Logs in to Storypark with Playwright and downloads every photo post |
-| 2 | `face_filter.py` | Keeps only photos where one of your children appears (face recognition) |
-| 3 | `exif_modifier.py` | Stamps each photo with the **exact Storypark upload date** and the **daycare GPS coordinates** |
-| 4 | `uploader.py` | Uploads matched photos to Google Photos via OAuth 2.0 |
-| 5 | `state_manager.py` | SQLite database that tracks processed images so nothing is duplicated |
+### Prerequisites
 
-**First run** – scrapes the entire Storypark history (all old posts).  
-**Subsequent runs** – stops as soon as it reaches posts already processed, so daily catch-up is fast.
+| Requirement | Details |
+|---|---|
+| **Google Chrome** | Version 116 or later (Manifest V3 support) |
+| **Storypark account** | You must already have a parent account on [app.storypark.com](https://app.storypark.com) |
+| **Google Cloud OAuth Client ID** | Required so the extension can authenticate with Google Photos (see [Setup](#1-create-a-google-cloud-oauth-client-id) below) |
 
----
+### 1. Create a Google Cloud OAuth Client ID
 
-## Quick start
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project (or select an existing one).
+3. Navigate to **APIs & Services → Library** and enable the **Google Photos Library API**.
+4. Go to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**.
+5. Set the application type to **Chrome Extension**.
+6. Enter your extension's ID (found on `chrome://extensions` after loading it — see step 3 below).
+7. Download the client ID. You'll need the **Client ID** string (e.g. `123456.apps.googleusercontent.com`).
 
-### 1 – Install dependencies
+### 2. Configure the Extension
 
-> Requires Python 3.10 or later.
+1. Clone or download this repository.
+2. Open `extension/manifest.json` and replace `YOUR_CLIENT_ID.apps.googleusercontent.com` in the `oauth2.client_id` field with your actual Client ID from step 1.
 
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
+### 3. Load the Extension in Chrome
 
-`face_recognition` also needs `cmake` and `dlib`.  On most systems:
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Enable **Developer mode** (toggle in the top-right corner).
+3. Click **Load unpacked** and select the `extension/` folder from this repository.
+4. The Storypark Photo Sync icon will appear in your toolbar.
 
-```bash
-# macOS
-brew install cmake
+> **Tip:** After loading, copy the extension's **ID** from the extensions page and paste it into your Google Cloud OAuth credentials (step 1.6) if you haven't already.
 
-# Ubuntu / Debian
-sudo apt-get install cmake build-essential
-```
+### 4. Set Up Face Recognition Models (Optional)
 
-### 2 – Set up Google Cloud credentials
+To enable facial recognition filtering:
 
-You need an OAuth 2.0 client ID that lets the pipeline read your Google Photos albums (to build face encodings during setup) and upload new photos.
+1. Download the face-api.js model weights from [justadudewhohacks/face-api.js/weights](https://github.com/justadudewhohacks/face-api.js/tree/master/weights).
+2. You need these three models:
+   - `ssd_mobilenetv1_model-weights_manifest.json` + shard files
+   - `face_landmark_68_model-weights_manifest.json` + shard files
+   - `face_recognition_model-weights_manifest.json` + shard files
+3. Place all downloaded files into the `extension/models/` directory.
+4. Download [`face-api.min.js` (v0.22.2)](https://raw.githubusercontent.com/justadudewhohacks/face-api.js/v0.22.2/dist/face-api.min.js) and place it in `extension/lib/`.
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project (or use an existing one).
-2. Navigate to **APIs & Services → Library** and enable the **Google Photos Library API**.
-3. Go to **APIs & Services → OAuth consent screen**.
-   - Choose **External**.
-   - Fill in an app name (e.g. "Storypark Scraper") and your email.
-   - Add the scope `../auth/photoslibrary` (or both `readonly` and `appendonly`).
-   - Add your Google account as a **Test user**.
-4. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-   - Application type: **Desktop app**.
-   - Download the JSON file and save it as **`client_secret.json`** in the project folder.
-
-### 3 – Run the setup wizard (once only)
-
-**With the GUI (easiest – Windows and Raspberry Pi):**
-
-Double-click `run_windows.bat` (Windows) or run `./run_rpi.sh` (Raspberry Pi).  
-The app opens and guides you through setup with a visual step-by-step wizard.
-
-**From the command line (macOS / Linux):**
-
-```bash
-python setup.py
-```
-
-The wizard will:
-- Ask for your **Storypark email and password**.
-- Open a **browser window** for Google authorisation.
-- Show your **Google Photos albums** and let you pick one for each child.
-- Automatically download sample photos and **build face encodings**.
-- Ask for the **daycare GPS coordinates** (right-click the daycare in Google Maps → *What's here?*).
-- Save everything to `config.py` and `face_encodings.pkl`.
-
-You only need to run setup once.  Re-run it if you add a new child or change the daycare.
-
-### 4 – Run the pipeline
-
-**With the GUI:**  
-Double-click `run_windows.bat` (Windows) or `./run_rpi.sh` (Raspberry Pi) and click **▶ Sync Photos Now**.
-
-**From the command line:**
-
-```bash
-python main.py
-```
-
-That's it.  Run this daily (or set up a scheduled task / cron job) to keep Google Photos up to date.
-
-```bash
-# macOS / Linux – add to crontab for daily runs at 2 AM:
-# crontab -e  →  add:  0 2 * * * /path/to/venv/bin/python /path/to/main.py
-```
-
-See [WINDOWS.md](WINDOWS.md) for Task Scheduler instructions, or [RASPBERRY_PI.md](RASPBERRY_PI.md) for cron on a Pi.
+> Without these models, the extension will still scrape and upload **all** photos from your feed (no filtering).
 
 ---
 
-## File overview
+## Usage
 
-```
-.
-├── setup.py              ← Run once to configure everything interactively
-├── main.py               ← Run daily to sync new Storypark photos
-├── config.py             ← Generated by setup.py (edit manually if needed)
-├── google_photos.py      ← Google Photos API client (auth, albums, upload)
-├── scraper.py            ← Playwright-based Storypark scraper
-├── face_filter.py        ← Facial recognition filter (multi-child)
-├── exif_modifier.py      ← EXIF date + GPS writer
-├── uploader.py           ← Google Photos upload orchestration
-├── state_manager.py      ← SQLite deduplication database
-├── requirements.txt      ← Python dependencies
-│
-├── client_secret.json    ← ⚠ Download from Google Cloud Console (not committed)
-├── token.json            ← Auto-generated after first Google login (not committed)
-├── face_encodings.pkl    ← Auto-generated by setup.py (not committed)
-├── processed_posts.db    ← Auto-generated state database (not committed)
-└── tmp_photos/           ← Temporary download folder (auto-created/cleaned)
-```
+### First-Time Setup
 
----
+1. Click the extension icon → **Connect to Google** → authorize with your Google account.
+2. Click **⚙ Settings** (or right-click the icon → Options) to open the Settings page.
+3. Configure:
+   - **Children**: Add names and upload a clear reference photo for each child.
+   - **Daycare Location**: Enter your daycare's GPS coordinates (latitude/longitude). [Find on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?" to get coordinates.
+   - **Album**: Choose an existing Google Photos album or create a new one.
+4. Click **💾 Save Settings**.
 
-## Configuration reference (`config.py`)
+### Syncing Photos
 
-| Variable | Description |
-|----------|-------------|
-| `STORYPARK_EMAIL` | Your Storypark login email |
-| `STORYPARK_PASSWORD` | Your Storypark password |
-| `CHILDREN` | List of child names (e.g. `["Hugo", "Mia"]`) |
-| `REFERENCE_ENCODINGS_FILE` | Path to face encodings pickle (`face_encodings.pkl`) |
-| `DAYCARE_LATITUDE` | GPS latitude of the daycare |
-| `DAYCARE_LONGITUDE` | GPS longitude of the daycare |
-| `HEADLESS_BROWSER` | `True` = run Chrome invisibly; `False` = show window |
-| `MAX_POSTS` | Max posts per run (`0` = unlimited; set to `10` for testing) |
-| `INCREMENTAL_STOP_THRESHOLD` | How many consecutive known posts before stopping scroll |
+1. Open a tab with [app.storypark.com](https://app.storypark.com) and log in.
+2. Click the extension icon → **🔄 Sync Now**.
+3. The extension will:
+   - Scroll your Storypark feed to discover photos
+   - Download new images
+   - Apply facial recognition (if configured)
+   - Stamp EXIF date & GPS metadata
+   - Upload matching photos to Google Photos
+4. Progress is shown in the popup's log panel.
+
+### Incremental Sync
+
+The extension remembers which images have already been processed. On subsequent syncs, it stops scrolling early once it encounters previously-seen photos, making follow-up syncs much faster.
 
 ---
 
-## EXIF metadata behaviour
+## Project Structure
 
-Every matched photo gets:
+```
+extension/
+├── manifest.json          # Chrome Extension manifest (V3)
+├── background.js          # Service worker – orchestrates the sync pipeline
+├── content.js             # Content script – injected into Storypark, scrapes the feed
+├── popup.html / popup.js  # Popup UI – Connect, Sync, progress log
+├── options.html / options.js  # Settings page – children, GPS, album
+├── lib/
+│   ├── utils.js           # Shared constants and helpers
+│   ├── exif.js            # EXIF metadata writer (date + GPS)
+│   └── face.js            # Face detection/recognition via face-api.js
+├── models/                # face-api.js model weights (user-supplied)
+└── icons/                 # Extension icons
+```
 
-- **`DateTimeOriginal`** – set to the date and time the story was **posted on Storypark** (extracted from the `<time datetime="…">` element).  If the date cannot be found the timestamp is left unchanged – the pipeline never substitutes the current time.
-- **`GPSLatitude` / `GPSLongitude`** – always set to the daycare coordinates you entered in setup, so photos appear at the daycare in Google Photos / Apple Photos location views.
+### Module Responsibilities
+
+| Module | Role |
+|---|---|
+| `background.js` | Service worker: Google OAuth, image download, EXIF stamping, Google Photos upload, state tracking |
+| `content.js` | Content script: scrolls Storypark feed, extracts image URLs and post dates from the DOM |
+| `popup.js` | Popup UI: 1-click sync, connection status, live progress log |
+| `options.js` | Settings page: children management, GPS input, album selection |
+| `lib/exif.js` | Pure-JS EXIF writer — stamps DateTimeOriginal and GPS into JPEG blobs |
+| `lib/face.js` | Face detection/recognition via face-api.js (TensorFlow.js, runs 100% client-side) |
+| `lib/utils.js` | Shared selectors, timing constants, logging, date parsing |
 
 ---
 
-## Adding a second child later
+## Architecture Notes
 
-Re-run the setup wizard:
+### Manifest V3 Compliance
 
-```bash
-python setup.py
-```
+- Uses a **service worker** (`background.js`) instead of a persistent background page.
+- All network requests use `fetch()` (no XMLHttpRequest).
+- OAuth handled through `chrome.identity.getAuthToken()`.
+- State stored in `chrome.storage.local` (replaces the Python app's SQLite database and config.json).
 
-Enter both children when prompted.  The wizard rebuilds `face_encodings.pkl` with encodings for all children and updates `config.py`.
+### Anti-Bot Measures
+
+The content script mimics human browsing to avoid triggering Storypark's rate limiting:
+- Random delays (1.5–3.5 seconds) between scroll actions.
+- Prefers clicking "Load more" buttons over infinite scroll.
+- Stops early during incremental syncs.
+
+### EXIF Metadata
+
+Every uploaded photo is stamped with:
+- **DateTimeOriginal / DateTimeDigitized** → the Storypark post date (so photos sort chronologically).
+- **GPS coordinates** → your daycare's location (so photos appear on the Google Photos map).
+
+### Quota Handling
+
+Google Photos API has daily upload limits. If the quota is reached mid-sync, the extension:
+- Saves progress (already-uploaded images are marked as processed).
+- Displays a friendly message: *"Daily quota reached. Try again tomorrow."*
+- The next sync picks up where it left off.
+
+---
+
+## Privacy & Security
+
+- **No external servers.** Everything runs locally in your browser.
+- **No passwords stored.** Storypark login happens in your existing browser session; the extension reads the DOM while you're logged in.
+- **Google OAuth tokens** are managed by Chrome's built-in `chrome.identity` API and are never exposed to the extension's code as raw strings on disk.
+- **Face recognition** runs entirely client-side via TensorFlow.js — no images are sent to any remote service.
+- **Reference photos** are stored in `chrome.storage.local` (encrypted at rest by Chrome).
 
 ---
 
 ## Troubleshooting
 
 | Problem | Solution |
-|---------|----------|
-| `face_encodings.pkl not found` | Run `python setup.py` first |
-| Login fails on Storypark | Check credentials in `config.py`; try `HEADLESS_BROWSER = False` to watch the browser |
-| No faces found in sample album | Choose an album with larger, clearer photos of the child's face |
-| Google auth fails | Ensure `client_secret.json` is present and the Photos Library API is enabled |
-| Photos upload but date is wrong | The Storypark post `<time>` element may use a different attribute – open an issue with the page HTML |
-| Want to reprocess everything | Delete `processed_posts.db` and re-run `python main.py` |
+|---|---|
+| "No Storypark tab found" | Open [app.storypark.com](https://app.storypark.com) in a tab and log in before syncing |
+| "Not connected to Google" | Click **Connect to Google** in the popup |
+| Google connection fails | Verify your OAuth Client ID is correct in `manifest.json` and the Photos Library API is enabled |
+| No photos uploaded | Check that your Storypark feed has images; try scrolling manually first to confirm they load |
+| Face recognition not working | Ensure model weight files are in `extension/models/` (see [Setup](#4-set-up-face-recognition-models-optional)) |
+| "Daily quota reached" | Google Photos limits uploads per day; wait 24 hours and sync again |
+| Want to reprocess everything | Open Chrome DevTools → Application → Storage → Clear `processedUrls` from extension storage |
+
+---
+
+## License
+
+This project is provided as-is for personal use. See the repository for license details.

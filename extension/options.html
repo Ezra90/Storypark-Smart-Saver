@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Storypark Photo Sync – Settings</title>
+  <style>
+    :root {
+      --bg: #f4f4f8;
+      --surface: #ffffff;
+      --border: #ddd;
+      --primary: #0f3460;
+      --accent: #e94560;
+      --text: #222;
+      --muted: #666;
+      --success: #16a34a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 15px;
+      margin-bottom: 14px;
+      color: var(--primary);
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .child-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      margin-bottom: 8px;
+    }
+    .child-row input[type="text"] { flex: 1; margin-bottom: 0; }
+    .child-row input[type="file"] { flex: 1; font-size: 12px; }
+    .child-row button {
+      padding: 6px 12px;
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .btn-add {
+      background: none;
+      border: 1px dashed var(--border);
+      color: var(--primary);
+      padding: 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      width: 100%;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .btn-add:hover { border-color: var(--primary); }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+    }
+    .btn-save {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 10px 28px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-save:hover { opacity: 0.9; }
+
+    #toast {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--success);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    }
+    .gps-row {
+      display: flex;
+      gap: 12px;
+    }
+    .gps-row > div { flex: 1; }
+    .help {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -8px;
+      margin-bottom: 12px;
+    }
+
+    #albumSection select { margin-bottom: 0; }
+    #albumRefresh {
+      font-size: 12px;
+      background: none;
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 8px;
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <h1>⚙ Settings</h1>
+  <p class="subtitle">Configure your children, daycare location, and upload preferences.</p>
+
+  <!-- Children -->
+  <div class="card">
+    <h2>👶 Children</h2>
+    <p class="help">Add your children's names and upload a clear reference face photo for each.</p>
+    <div id="childrenList"></div>
+    <button class="btn-add" id="btnAddChild">+ Add child</button>
+  </div>
+
+  <!-- GPS -->
+  <div class="card">
+    <h2>📍 Daycare Location</h2>
+    <p class="help">
+      Enter the GPS coordinates of your daycare. These are embedded in every photo's EXIF data
+      so they appear in the correct location in Google Photos.
+      <a href="https://www.google.com/maps" target="_blank">Find on Google Maps →</a>
+    </p>
+    <div class="gps-row">
+      <div>
+        <label for="lat">Latitude</label>
+        <input type="number" id="lat" step="any" placeholder="-33.8688">
+      </div>
+      <div>
+        <label for="lon">Longitude</label>
+        <input type="number" id="lon" step="any" placeholder="151.2093">
+      </div>
+    </div>
+  </div>
+
+  <!-- Album -->
+  <div class="card" id="albumSection">
+    <h2>📁 Google Photos Album</h2>
+    <p class="help">Choose an album for uploads, or select "None" to add to the main library.</p>
+    <div style="display:flex;align-items:center;">
+      <select id="albumSelect" style="flex:1;">
+        <option value="">None (main library)</option>
+      </select>
+      <button id="albumRefresh">↻ Refresh</button>
+    </div>
+    <div style="margin-top:10px;">
+      <label for="newAlbumName">Or create a new album:</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="newAlbumName" placeholder="My Daycare Photos" style="flex:1;margin-bottom:0;">
+        <button class="btn-add" id="btnCreateAlbum" style="width:auto;margin-top:0;padding:8px 14px;">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save -->
+  <div class="actions">
+    <button class="btn-save" id="btnSave">💾 Save Settings</button>
+  </div>
+
+  <div id="toast">✓ Settings saved!</div>
+
+  <script src="options.js"></script>
+</body>
+</html>
