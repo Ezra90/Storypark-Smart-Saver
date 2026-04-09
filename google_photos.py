@@ -33,6 +33,18 @@ _BASE = "https://photoslibrary.googleapis.com/v1"
 
 
 # ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class QuotaExceededError(Exception):
+    """Raised when the Google Photos API returns HTTP 429 or 500.
+
+    This typically means the daily upload quota has been reached.
+    The caller should save state and inform the user to try again tomorrow.
+    """
+
+
+# ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
 
@@ -162,6 +174,10 @@ def upload_bytes(session: requests.Session, local_path: str) -> str | None:
 
     Returns the upload token needed for ``create_media_item``, or ``None``
     on failure.
+
+    Raises :class:`QuotaExceededError` if the API responds with HTTP 429
+    (Too Many Requests) or HTTP 500 (Internal Server Error), which
+    typically indicates the daily quota has been reached.
     """
     mime_type, _ = mimetypes.guess_type(local_path)
     mime_type = mime_type or "image/jpeg"
@@ -181,9 +197,22 @@ def upload_bytes(session: requests.Session, local_path: str) -> str | None:
                 "X-Goog-Upload-File-Name": filename,
             },
         )
+
+        if resp.status_code in (429, 500):
+            logger.warning(
+                "Google Photos API returned HTTP %d for %s – quota likely exceeded.",
+                resp.status_code, filename,
+            )
+            raise QuotaExceededError(
+                f"Google Photos API returned HTTP {resp.status_code} "
+                f"during upload of {filename}."
+            )
+
         resp.raise_for_status()
         logger.debug("Upload token received for %s", filename)
         return resp.text.strip()
+    except QuotaExceededError:
+        raise  # propagate without wrapping
     except Exception as exc:
         logger.warning("Upload failed for %s: %s", local_path, exc)
         return None
@@ -199,6 +228,8 @@ def create_media_item(
     Finalise an upload via the ``mediaItems:batchCreate`` endpoint.
 
     Returns ``True`` on success.
+
+    Raises :class:`QuotaExceededError` on HTTP 429 / 500.
     """
     body = {
         "newMediaItems": [
@@ -213,6 +244,18 @@ def create_media_item(
     }
     try:
         resp = session.post(f"{_BASE}/mediaItems:batchCreate", json=body)
+
+        if resp.status_code in (429, 500):
+            logger.warning(
+                "Google Photos API returned HTTP %d for batchCreate (%s) "
+                "– quota likely exceeded.",
+                resp.status_code, filename,
+            )
+            raise QuotaExceededError(
+                f"Google Photos API returned HTTP {resp.status_code} "
+                f"during batchCreate for {filename}."
+            )
+
         resp.raise_for_status()
         result = resp.json()
         status = (
@@ -225,6 +268,8 @@ def create_media_item(
             return True
         logger.warning("Unexpected batchCreate response for %s: %s", filename, result)
         return False
+    except QuotaExceededError:
+        raise  # propagate without wrapping
     except Exception as exc:
         logger.warning("batchCreate failed for %s: %s", filename, exc)
         return False

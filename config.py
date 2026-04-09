@@ -1,24 +1,28 @@
 """
 config.py – Settings for the Storypark Photo Pipeline.
 
-The easiest way to configure this file is to run setup.py, which fills in
-all values interactively.  You can also edit the values here directly if
-you prefer.
+All user-configurable values are stored in ``config.json`` (written by
+setup.py or the GUI wizard).  This module reads that file on import and
+exposes the settings as module-level constants so existing ``from config
+import X`` statements throughout the codebase continue to work unchanged.
 
-NOTE: The Storypark password is NOT stored here.  It is saved in the
-operating system's secure keychain by setup.py and retrieved at runtime
-via the get_storypark_password() function below.
+The Storypark password is the only secret: it lives in the operating
+system's secure keychain, never in any file.  Retrieve it at runtime
+with :func:`get_storypark_password`.
 """
+
+from config_manager import load_config as _load_config, KEYRING_SERVICE
+
+# ---------------------------------------------------------------------------
+# Load settings from config.json (falls back to built-in defaults)
+# ---------------------------------------------------------------------------
+_cfg = _load_config()
 
 # ---------------------------------------------------------------------------
 # Storypark credentials
 # ---------------------------------------------------------------------------
-# Filled in by the setup wizard (setup.py or the GUI Settings button).
-# Do not edit STORYPARK_EMAIL by hand unless you also update the keychain
-# entry – run the setup wizard instead.
-STORYPARK_EMAIL = ""
-# Password is stored in the OS keychain – call get_storypark_password()
-STORYPARK_KEYRING_SERVICE = "storypark-scraper"
+STORYPARK_EMAIL: str = _cfg["storypark_email"]
+STORYPARK_KEYRING_SERVICE: str = KEYRING_SERVICE
 
 
 def get_storypark_password() -> str:
@@ -49,55 +53,39 @@ def get_storypark_password() -> str:
 
 # ---------------------------------------------------------------------------
 # Children
-# Names must match those entered during setup.py.
-# Face encodings are stored in REFERENCE_ENCODINGS_FILE.
 # ---------------------------------------------------------------------------
-CHILDREN: list[str] = []
+CHILDREN: list[str] = _cfg["children"]
 
 # ---------------------------------------------------------------------------
 # Face encodings file  (built automatically by setup.py)
 # ---------------------------------------------------------------------------
-REFERENCE_ENCODINGS_FILE = "face_encodings.pkl"
+REFERENCE_ENCODINGS_FILE: str = _cfg["reference_encodings_file"]
 
 # ---------------------------------------------------------------------------
 # Daycare GPS coordinates
-# These are written into the EXIF of every matched photo so it appears
-# at the daycare location in Google Photos / Apple Photos timelines.
-# Obtain from Google Maps: right-click the location → "What's here?"
 # ---------------------------------------------------------------------------
-DAYCARE_LATITUDE = 0.0    # e.g. -33.8688
-DAYCARE_LONGITUDE = 0.0   # e.g. 151.2093
+DAYCARE_LATITUDE: float = _cfg["daycare_latitude"]
+DAYCARE_LONGITUDE: float = _cfg["daycare_longitude"]
 
 # ---------------------------------------------------------------------------
 # Local directories
 # ---------------------------------------------------------------------------
-TEMP_DIR = "tmp_photos"
+TEMP_DIR: str = _cfg["temp_dir"]
 
 # ---------------------------------------------------------------------------
 # State management – SQLite database tracking processed images
 # ---------------------------------------------------------------------------
-STATE_DB_PATH = "processed_posts.db"
+STATE_DB_PATH: str = _cfg["state_db_path"]
 
 # ---------------------------------------------------------------------------
 # Google Photos OAuth 2.0
 # ---------------------------------------------------------------------------
-# client_secret.json – downloaded from Google Cloud Console (see README.md)
-GOOGLE_CREDENTIALS_FILE = "client_secret.json"
-# Cached OAuth token (written automatically after first login)
-GOOGLE_TOKEN_FILE = "token.json"
+GOOGLE_CREDENTIALS_FILE: str = _cfg["google_credentials_file"]
+GOOGLE_TOKEN_FILE: str = _cfg["google_token_file"]
 
 # ---------------------------------------------------------------------------
 # Scraper behaviour
 # ---------------------------------------------------------------------------
-# True  → run Chrome in the background (recommended for regular use)
-# False → show the browser window (useful for debugging)
-HEADLESS_BROWSER = True
-
-# Maximum posts to process per run (0 = unlimited).
-# Set to a small number (e.g. 10) when testing for the first time.
-MAX_POSTS = 0
-
-# How many consecutive already-processed posts trigger an early stop when
-# doing an incremental (catch-up) run.  Increase if posts are sometimes
-# missed; decrease to speed up daily runs.
-INCREMENTAL_STOP_THRESHOLD = 5
+HEADLESS_BROWSER: bool = _cfg["headless_browser"]
+MAX_POSTS: int = _cfg["max_posts"]
+INCREMENTAL_STOP_THRESHOLD: int = _cfg["incremental_stop_threshold"]

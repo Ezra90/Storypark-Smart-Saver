@@ -59,6 +59,7 @@ import face_filter
 import exif_modifier
 import uploader
 from config import TEMP_DIR, REFERENCE_ENCODINGS_FILE, CHILDREN
+from google_photos import QuotaExceededError
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +172,19 @@ def run_pipeline(progress_callback=None) -> dict:
     posts = exif_modifier.apply_exif(posts)
 
     _progress("upload", f"Uploading {len(posts)} photo(s) to Google Photos…", 85)
-    uploaded = uploader.upload_photos(posts, conn)
+    try:
+        uploaded = uploader.upload_photos(posts, conn)
+    except QuotaExceededError as exc:
+        quota_msg = str(exc)
+        _progress("done", quota_msg, 100)
+        _cleanup_temp_dir()
+        conn.close()
+        return {
+            "scraped": scraped,
+            "matched": matched,
+            "uploaded": 0,
+            "quota_message": quota_msg,
+        }
 
     _progress("done", f"Done – {len(uploaded)} photo(s) uploaded to Google Photos.", 100)
     _summarise(uploaded)
