@@ -2,6 +2,8 @@
 
 Automatically scrapes photos of your children from [Storypark](https://app.storypark.com), identifies them using facial recognition, stamps the correct upload date and daycare GPS location into the EXIF metadata, and uploads the results to Google Photos.
 
+> 🪟 **Windows user?** See the dedicated **[Windows Setup Guide](WINDOWS.md)** for step-by-step instructions including Visual C++ Build Tools, CMake, virtual environments, and Task Scheduler automation.
+
 ---
 
 ## What it does
