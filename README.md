@@ -1,2 +1,193 @@
-# Storypark-Scraper
-Storypark
+# Storypark Photo Pipeline
+
+Automatically scrapes photos of your children from [Storypark](https://app.storypark.com), identifies them using facial recognition, stamps the correct upload date and daycare GPS location into the EXIF metadata, and uploads the results to Google Photos.
+
+> 🪟 **Windows user?** See the dedicated **[Windows Setup Guide](WINDOWS.md)** for step-by-step instructions including Visual C++ Build Tools, CMake, virtual environments, and Task Scheduler automation.
+
+> 🍓 **Raspberry Pi user?** See the dedicated **[Raspberry Pi Setup Guide](RASPBERRY_PI.md)** for the recommended "always-on, runs every night" setup.
+
+---
+
+## Which device should I run this on?
+
+| Device | Verdict | Best for |
+|--------|---------|----------|
+| **Windows PC / laptop** | ✅ Easiest | People who already have a PC and don't mind running it manually or via Task Scheduler |
+| **Raspberry Pi 4/5** | ✅ Best "set and forget" | Always-on, low power, automated nightly sync with no PC needed |
+| **Mac** | ✅ Works out of the box | macOS users – follow the Quick Start below |
+| **Android phone/tablet** | ❌ Not supported | Playwright (the browser automation library) does not run on Android, and the face recognition library cannot be compiled for Android |
+
+**Recommendation for most people:**
+- If you have a **Windows PC that stays on** → run `install_windows.bat` then `run_windows.bat` (see [WINDOWS.md](WINDOWS.md))
+- If you want it **fully automated without keeping a PC running** → use a Raspberry Pi 4 or 5 – run `install_rpi.sh` then `run_rpi.sh` (see [RASPBERRY_PI.md](RASPBERRY_PI.md))
+- If you have a **Mac** → follow the Quick Start below
+
+---
+
+## What it does
+
+| Step | Module | Description |
+|------|--------|-------------|
+| 1 | `scraper.py` | Logs in to Storypark with Playwright and downloads every photo post |
+| 2 | `face_filter.py` | Keeps only photos where one of your children appears (face recognition) |
+| 3 | `exif_modifier.py` | Stamps each photo with the **exact Storypark upload date** and the **daycare GPS coordinates** |
+| 4 | `uploader.py` | Uploads matched photos to Google Photos via OAuth 2.0 |
+| 5 | `state_manager.py` | SQLite database that tracks processed images so nothing is duplicated |
+
+**First run** – scrapes the entire Storypark history (all old posts).  
+**Subsequent runs** – stops as soon as it reaches posts already processed, so daily catch-up is fast.
+
+---
+
+## Quick start
+
+### 1 – Install dependencies
+
+> Requires Python 3.10 or later.
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+`face_recognition` also needs `cmake` and `dlib`.  On most systems:
+
+```bash
+# macOS
+brew install cmake
+
+# Ubuntu / Debian
+sudo apt-get install cmake build-essential
+```
+
+### 2 – Set up Google Cloud credentials
+
+You need an OAuth 2.0 client ID that lets the pipeline read your Google Photos albums (to build face encodings during setup) and upload new photos.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project (or use an existing one).
+2. Navigate to **APIs & Services → Library** and enable the **Google Photos Library API**.
+3. Go to **APIs & Services → OAuth consent screen**.
+   - Choose **External**.
+   - Fill in an app name (e.g. "Storypark Scraper") and your email.
+   - Add the scope `../auth/photoslibrary` (or both `readonly` and `appendonly`).
+   - Add your Google account as a **Test user**.
+4. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.
+   - Application type: **Desktop app**.
+   - Download the JSON file and save it as **`client_secret.json`** in the project folder.
+
+### 3 – Run the setup wizard (once only)
+
+**With the GUI (easiest – Windows and Raspberry Pi):**
+
+Double-click `run_windows.bat` (Windows) or run `./run_rpi.sh` (Raspberry Pi).  
+The app opens and guides you through setup with a visual step-by-step wizard.
+
+**From the command line (macOS / Linux):**
+
+```bash
+python setup.py
+```
+
+The wizard will:
+- Ask for your **Storypark email and password**.
+- Open a **browser window** for Google authorisation.
+- Show your **Google Photos albums** and let you pick one for each child.
+- Automatically download sample photos and **build face encodings**.
+- Ask for the **daycare GPS coordinates** (right-click the daycare in Google Maps → *What's here?*).
+- Save everything to `config.py` and `face_encodings.pkl`.
+
+You only need to run setup once.  Re-run it if you add a new child or change the daycare.
+
+### 4 – Run the pipeline
+
+**With the GUI:**  
+Double-click `run_windows.bat` (Windows) or `./run_rpi.sh` (Raspberry Pi) and click **▶ Sync Photos Now**.
+
+**From the command line:**
+
+```bash
+python main.py
+```
+
+That's it.  Run this daily (or set up a scheduled task / cron job) to keep Google Photos up to date.
+
+```bash
+# macOS / Linux – add to crontab for daily runs at 2 AM:
+# crontab -e  →  add:  0 2 * * * /path/to/venv/bin/python /path/to/main.py
+```
+
+See [WINDOWS.md](WINDOWS.md) for Task Scheduler instructions, or [RASPBERRY_PI.md](RASPBERRY_PI.md) for cron on a Pi.
+
+---
+
+## File overview
+
+```
+.
+├── setup.py              ← Run once to configure everything interactively
+├── main.py               ← Run daily to sync new Storypark photos
+├── config.py             ← Generated by setup.py (edit manually if needed)
+├── google_photos.py      ← Google Photos API client (auth, albums, upload)
+├── scraper.py            ← Playwright-based Storypark scraper
+├── face_filter.py        ← Facial recognition filter (multi-child)
+├── exif_modifier.py      ← EXIF date + GPS writer
+├── uploader.py           ← Google Photos upload orchestration
+├── state_manager.py      ← SQLite deduplication database
+├── requirements.txt      ← Python dependencies
+│
+├── client_secret.json    ← ⚠ Download from Google Cloud Console (not committed)
+├── token.json            ← Auto-generated after first Google login (not committed)
+├── face_encodings.pkl    ← Auto-generated by setup.py (not committed)
+├── processed_posts.db    ← Auto-generated state database (not committed)
+└── tmp_photos/           ← Temporary download folder (auto-created/cleaned)
+```
+
+---
+
+## Configuration reference (`config.py`)
+
+| Variable | Description |
+|----------|-------------|
+| `STORYPARK_EMAIL` | Your Storypark login email |
+| `STORYPARK_PASSWORD` | Your Storypark password |
+| `CHILDREN` | List of child names (e.g. `["Hugo", "Mia"]`) |
+| `REFERENCE_ENCODINGS_FILE` | Path to face encodings pickle (`face_encodings.pkl`) |
+| `DAYCARE_LATITUDE` | GPS latitude of the daycare |
+| `DAYCARE_LONGITUDE` | GPS longitude of the daycare |
+| `HEADLESS_BROWSER` | `True` = run Chrome invisibly; `False` = show window |
+| `MAX_POSTS` | Max posts per run (`0` = unlimited; set to `10` for testing) |
+| `INCREMENTAL_STOP_THRESHOLD` | How many consecutive known posts before stopping scroll |
+
+---
+
+## EXIF metadata behaviour
+
+Every matched photo gets:
+
+- **`DateTimeOriginal`** – set to the date and time the story was **posted on Storypark** (extracted from the `<time datetime="…">` element).  If the date cannot be found the timestamp is left unchanged – the pipeline never substitutes the current time.
+- **`GPSLatitude` / `GPSLongitude`** – always set to the daycare coordinates you entered in setup, so photos appear at the daycare in Google Photos / Apple Photos location views.
+
+---
+
+## Adding a second child later
+
+Re-run the setup wizard:
+
+```bash
+python setup.py
+```
+
+Enter both children when prompted.  The wizard rebuilds `face_encodings.pkl` with encodings for all children and updates `config.py`.
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `face_encodings.pkl not found` | Run `python setup.py` first |
+| Login fails on Storypark | Check credentials in `config.py`; try `HEADLESS_BROWSER = False` to watch the browser |
+| No faces found in sample album | Choose an album with larger, clearer photos of the child's face |
+| Google auth fails | Ensure `client_secret.json` is present and the Photos Library API is enabled |
+| Photos upload but date is wrong | The Storypark post `<time>` element may use a different attribute – open an issue with the page HTML |
+| Want to reprocess everything | Delete `processed_posts.db` and re-run `python main.py` |
