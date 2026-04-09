@@ -21,45 +21,38 @@ No server, no Python, no command-line — just install the extension and click *
 |---|---|
 | **Google Chrome** | Version 116 or later (Manifest V3 support) |
 | **Storypark account** | You must already have a parent account on [app.storypark.com](https://app.storypark.com) |
-| **Google Cloud OAuth Client ID** | Required so the extension can authenticate with Google Photos (see [Setup](#1-create-a-google-cloud-oauth-client-id) below) |
+| **Google account** | The Google account you want to save photos to |
 
-### 1. Create a Google Cloud OAuth Client ID
+### 1. Install the Extension
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (or select an existing one).
-3. Navigate to **APIs & Services → Library** and enable the **Google Photos Library API**.
-4. Go to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**.
-5. Set the application type to **Chrome Extension**.
-6. Enter your extension's ID (found on `chrome://extensions` after loading it — see step 3 below).
-7. Download the client ID. You'll need the **Client ID** string (e.g. `123456.apps.googleusercontent.com`).
+1. Open the [Chrome Web Store listing](#) *(link will be available once the extension is published — ask whoever shared this with you for the install link)*.
+2. Click **Add to Chrome** → **Add extension**.
+3. The Storypark Photo Sync icon will appear in your Chrome toolbar. 🎉
 
-### 2. Configure the Extension
+### 2. Connect Your Google Account
 
-1. Clone or download this repository.
-2. Open `extension/manifest.json` and replace `YOUR_CLIENT_ID.apps.googleusercontent.com` in the `oauth2.client_id` field with your actual Client ID from step 1.
+1. Click the extension icon in your toolbar.
+2. Click **Connect to Google** and sign in with the Google account you want photos saved to.
+3. Grant the requested permissions (the extension only accesses Google Photos).
 
-### 3. Load the Extension in Chrome
+### 3. Open Storypark
 
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Enable **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** and select the `extension/` folder from this repository.
-4. The Storypark Photo Sync icon will appear in your toolbar.
+Open a new tab, go to [app.storypark.com](https://app.storypark.com), and log in to your account. The extension needs this tab open to find new photos.
 
-> **Tip:** After loading, copy the extension's **ID** from the extensions page and paste it into your Google Cloud OAuth credentials (step 1.6) if you haven't already.
+### 4. Configure Your Settings (Optional)
 
-### 4. Set Up Face Recognition Models (Optional)
+Click **⚙ Settings** (or right-click the extension icon → **Options**) to personalise:
 
-To enable facial recognition filtering:
+- **Children**: Add your child's name and a clear reference photo so the extension can recognise them.
+- **Daycare Location**: Enter your daycare's name and GPS coordinates so photos sort correctly on the Google Photos map. ([Find coordinates on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?")
+- **Face Recognition Strictness**: Choose how carefully the extension checks faces (Normal is recommended for most families).
+- **Album**: Choose or create a Google Photos album for uploads.
 
-1. Download the face-api.js model weights from [justadudewhohacks/face-api.js/weights](https://github.com/justadudewhohacks/face-api.js/tree/master/weights).
-2. You need these three models:
-   - `ssd_mobilenetv1_model-weights_manifest.json` + shard files
-   - `face_landmark_68_model-weights_manifest.json` + shard files
-   - `face_recognition_model-weights_manifest.json` + shard files
-3. Place all downloaded files into the `extension/models/` directory.
-4. Download [`face-api.min.js` (v0.22.2)](https://raw.githubusercontent.com/justadudewhohacks/face-api.js/v0.22.2/dist/face-api.min.js) and place it in `extension/lib/`.
+Click **💾 Save Settings** when done.
 
-> Without these models, the extension will still scrape and upload **all** photos from your feed (no filtering).
+### 5. Sync!
+
+Click the extension icon → **🔄 Sync Now**. The extension will find new daycare photos and save them straight to your Google Photos. Progress appears in the popup — sit back and enjoy! ☕
 
 ---
 
@@ -72,7 +65,7 @@ To enable facial recognition filtering:
 3. Configure:
    - **Children**: Add names and upload a clear reference photo for each child.
    - **Daycare Location**: Enter your daycare's name and GPS coordinates (latitude/longitude). [Find on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?" to get coordinates.
-   - **Confidence Thresholds**: Set how strict the facial recognition is (see below).
+   - **Face Recognition Strictness**: Choose how carefully the extension checks faces (Normal is recommended).
    - **Album**: Choose an existing Google Photos album or create a new one.
 4. Click **💾 Save Settings**.
 5. *(Optional)* In the **Face Training Data** section, upload 5–10 clear face photos of each child to build the recognition model. A live match % is shown for each photo to help you choose high-quality training images. You can also import photos directly from a Google Photos album.
@@ -92,16 +85,17 @@ To enable facial recognition filtering:
    - Upload approved photos to Google Photos
 4. Progress is shown in the popup's log panel.
 
-### Confidence Thresholds
+### Face Recognition Strictness
 
-The **Settings** page lets you configure two thresholds for facial recognition:
+The **Settings** page lets you choose how carefully the extension checks that a photo contains your child's face:
 
-| Setting | Default | Behaviour |
-|---|---|---|
-| **Auto-Approve Threshold** | 85% | Photos with a match ≥ this % are uploaded automatically |
-| **Minimum Review Threshold** | 50% | Photos with a match between this and Auto-Approve go to the Review Queue |
+| Setting | Auto-Approve | Minimum Review | Behaviour |
+|---|---|---|---|
+| **Strict** | 90% | 60% | Fewer mistakes, might miss some photos |
+| **Normal** *(recommended)* | 85% | 50% | Balanced for most families |
+| **Loose** | 70% | 30% | Catches everything, might include other kids |
 
-> **Tip:** Set Auto-Approve to 100% and Minimum Review to 0% to send every matched photo to the Review Queue and approve them all manually.
+> **Tip:** Start with **Normal**. If too many wrong kids appear, switch to **Strict**. If you're missing photos of your child, try **Loose**.
 
 ### Review Queue
 
@@ -199,12 +193,10 @@ Google Photos API has daily upload limits. If the quota is reached mid-sync, the
 |---|---|
 | "No Storypark tab found" | Open [app.storypark.com](https://app.storypark.com) in a tab and log in before syncing |
 | "Not connected to Google" | Click **Connect to Google** in the popup |
-| Google connection fails | Verify your OAuth Client ID is correct in `manifest.json` and the Photos Library API is enabled |
 | No photos uploaded | Check that your Storypark feed has images; try scrolling manually first to confirm they load |
-| All photos going to Review Queue | Lower the Auto-Approve Threshold in Settings, or set it below 100% |
-| Too many wrong photos uploaded | Raise the Auto-Approve Threshold and/or add more training photos |
-| face-api.js warning in Settings | Download `face-api.min.js` (v0.22.2) from the [face-api.js releases page](https://github.com/justadudewhohacks/face-api.js/releases) and place it in `extension/lib/` |
-| Face recognition not working | Ensure model weight files are in `extension/models/` (see [Setup](#4-set-up-face-recognition-models-optional)) |
+| All photos going to Review Queue | Change Face Recognition Strictness to **Normal** or **Loose** in Settings |
+| Too many wrong photos uploaded | Change Face Recognition Strictness to **Strict** and/or add more training photos |
+| Face recognition not working | Add training photos in Settings → Face Training Data |
 | "Daily quota reached" | Google Photos limits uploads per day; wait 24 hours and sync again |
 | Want to reprocess everything | Open Chrome DevTools → Application → Storage → IndexedDB → `storyparkSyncDB` → `processedUrls` → clear the object store |
 | Review Queue not clearing | Use ✅ Approve or ❌ Reject buttons in the popup for each item |

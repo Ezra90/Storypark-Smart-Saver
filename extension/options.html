@@ -173,34 +173,11 @@
       color: var(--primary);
     }
 
-    /* ---- Threshold sliders ---- */
-    .threshold-row {
-      display: grid;
-      grid-template-columns: 1fr auto auto;
-      align-items: center;
-      gap: 10px;
+    /* ---- Face Recognition Strictness ---- */
+    .strictness-row {
       margin-bottom: 14px;
     }
-    .threshold-row label { margin-bottom: 0; }
-    .threshold-row input[type="range"] {
-      width: 100%;
-      margin-bottom: 0;
-      cursor: pointer;
-    }
-    .threshold-row .pct-display {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--primary);
-      min-width: 42px;
-      text-align: right;
-    }
-    .threshold-desc {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: -8px;
-      margin-bottom: 10px;
-      line-height: 1.5;
-    }
+    .strictness-row label { margin-bottom: 6px; }
 
     /* ---- Face training ---- */
     .training-tabs {
@@ -271,7 +248,7 @@
 </head>
 <body>
   <h1>⚙ Settings</h1>
-  <p class="subtitle">Configure your children, daycare location, confidence thresholds, and upload preferences.</p>
+  <p class="subtitle">Configure your children, daycare location, face recognition, and upload preferences.</p>
 
   <!-- face-api.js warning (shown when library is absent) -->
   <div id="faceApiWarning">
@@ -311,33 +288,20 @@
     </div>
   </div>
 
-  <!-- Confidence Thresholds -->
+  <!-- Face Recognition Strictness -->
   <div class="card">
-    <h2>🎯 Confidence Thresholds</h2>
+    <h2>🎯 Face Recognition Strictness</h2>
     <p class="help" style="margin-bottom:16px;">
-      Photos above the <strong>Auto-Approve</strong> threshold are uploaded immediately.
-      Photos between both thresholds go to the <strong>Review Queue</strong> for manual approval.
-      Photos below the <strong>Minimum</strong> threshold are discarded.
+      Choose how carefully the extension checks that a photo contains your child's face.
     </p>
-
-    <div class="threshold-row">
-      <label for="autoThreshold">Auto-Approve</label>
-      <input type="range" id="autoThreshold" min="0" max="100" step="1" value="85">
-      <span class="pct-display" id="autoThresholdVal">85%</span>
+    <div class="strictness-row">
+      <label for="faceStrictness">Strictness Level</label>
+      <select id="faceStrictness">
+        <option value="strict">Strict (Fewer mistakes, might miss some photos)</option>
+        <option value="normal" selected>Normal (Recommended)</option>
+        <option value="loose">Loose (Catches everything, might include other kids)</option>
+      </select>
     </div>
-    <p class="threshold-desc" id="autoThresholdDesc">
-      Photos with ≥ 85% match are uploaded automatically.
-    </p>
-
-    <div class="threshold-row">
-      <label for="minThreshold">Minimum Review</label>
-      <input type="range" id="minThreshold" min="0" max="100" step="1" value="50">
-      <span class="pct-display" id="minThresholdVal">50%</span>
-    </div>
-    <p class="threshold-desc" id="minThresholdDesc">
-      Photos with 50–84% match go to the Review Queue.
-      Photos below 50% are discarded.
-    </p>
   </div>
 
   <!-- Album -->

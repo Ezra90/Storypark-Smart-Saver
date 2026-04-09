@@ -1,9 +1,6 @@
 # Chrome Extension – never commit OAuth client secret
 extension/client_secret.json
 
-# face-api.js model weight files (downloaded separately)
-extension/models/*.weights
-
 # Bundled dependencies (if using npm/webpack build)
 node_modules/
 dist/

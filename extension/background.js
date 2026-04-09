@@ -4,12 +4,9 @@
  * Orchestrates the full sync pipeline:
  *   1. Google OAuth via chrome.identity
  *   2. Sends SCRAPE_FEED to the content script
- *   3. Downloads images, converts to base64 for offscreen face filtering
- *   4. Offscreen document classifies photos: auto-approve / review queue / discard
- *   5. Applies EXIF metadata (date + GPS) to approved images
- *   6. Uploads to Google Photos Library API (per-child album routing)
- *   7. Persists review queue items in chrome.storage.local for HITL review
- *   8. Tracks processed URLs in IndexedDB (lib/db.js) ONLY after confirmed upload
+ *   3. For each post: download → face-filter → EXIF → upload → mark processed
+ *   4. Persists review queue items in chrome.storage.local for HITL review
+ *   5. Tracks processed URLs in IndexedDB (lib/db.js) ONLY after confirmed upload
  *
  * Message handlers exposed to popup / options:
  *   GOOGLE_CONNECT   GOOGLE_DISCONNECT   GOOGLE_STATUS
@@ -112,6 +109,9 @@ async function uploadBytes(token, blob, filename) {
     body: blob,
   });
 
+  if (res.status === 401) {
+    throw new Error("UNAUTHORIZED");
+  }
   if (res.status === 429) {
     throw new Error("QUOTA_EXCEEDED");
   }
@@ -310,6 +310,10 @@ async function runSync() {
   const minThreshold = settings.minThreshold ?? 50;
   const childEncodings = settings.childEncodings || [];
 
+  const hasEncodings = childEncodings.some(
+    (c) => Array.isArray(c.descriptor) && c.descriptor.length === 128
+  );
+
   /* ---- Step 1: Get auth token ---- */
   await log("Authenticating with Google…");
   let token;
@@ -339,114 +343,103 @@ async function runSync() {
     throw new Error(scrapeResult?.error || "Scraping failed.");
   }
   const posts = scrapeResult.posts;
-  await log(`Scraper returned ${posts.length} new images.`);
+  await log(`Found ${posts.length} new photo(s) to check.`);
 
   if (posts.length === 0) {
-    await log("Nothing new to process. Sync complete.");
-    return { scraped: 0, uploaded: 0, reviewQueued: 0 };
+    await log("All caught up! No new photos since the last sync.");
+    return { scraped: 0, downloaded: 0, uploaded: 0, reviewQueued: 0 };
   }
-
-  /* ---- Step 4: Download images ---- */
-  await log("Downloading images…");
-  const downloaded = [];
-  for (const post of posts) {
-    try {
-      const blob = await downloadImage(post.imageUrl);
-      downloaded.push({ ...post, blob });
-    } catch (err) {
-      await log(`  ⚠ Failed to download: ${err.message}`);
-    }
-  }
-  await log(`Downloaded ${downloaded.length} / ${posts.length} images.`);
-
-  /* ---- Step 5: Face filtering via offscreen document ---- */
-  let autoApprove = downloaded;
-  let reviewQueueItems = [];
-  const hasEncodings = childEncodings.some(
-    (c) => Array.isArray(c.descriptor) && c.descriptor.length === 128
-  );
 
   if (hasEncodings) {
-    await log("Running face recognition via offscreen document…");
+    await ensureOffscreenDocument();
+  } else {
+    await log("No face recognition set up – uploading all photos.");
+  }
+
+  /* ---- Steps 4–8: Stream each post through the full pipeline ---- */
+  const uploadedUrls = [];
+  const reviewQueueItems = [];
+  let quotaHit = false;
+  let downloadedCount = 0;
+
+  for (const post of posts) {
+    if (quotaHit) break;
+
+    /* 4a: Download ONE image */
+    let blob;
     try {
-      await ensureOffscreenDocument();
+      blob = await downloadImage(post.imageUrl);
+      downloadedCount++;
+    } catch (err) {
+      await log(`  ⚠ Couldn't download a photo, skipping for now: ${err.message}`);
+      // Give the Service Worker a breath before moving on
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
 
-      // Process in batches of 5 to keep message sizes manageable
-      const BATCH = 5;
-      autoApprove = [];
+    /* 4b: Send ONE image to offscreen for face filtering */
+    let approvedPost = { ...post, blob };
+    let isReviewItem = false;
+    let isDiscarded = false;
 
-      for (let i = 0; i < downloaded.length; i += BATCH) {
-        const batch = downloaded.slice(i, i + BATCH);
-
-        // Convert blobs to base64 data URLs for the offscreen document
-        const postsWithData = await Promise.all(
-          batch.map(async ({ blob, ...postData }) => ({
-            ...postData,
-            imageDataUrl: await blobToBase64(blob),
-          }))
-        );
-
+    if (hasEncodings) {
+      try {
+        const imageDataUrl = await blobToBase64(blob);
         const result = await faceFilterBatch(
-          postsWithData,
+          [{ ...post, imageDataUrl }],
           childEncodings,
           autoThreshold,
           minThreshold
         );
 
         if (result) {
-          // Re-attach original blobs to auto-approve items
-          for (const p of result.autoApprove) {
-            const orig = batch.find((b) => b.imageUrl === p.imageUrl);
-            autoApprove.push({ ...p, blob: orig?.blob });
+          if (result.autoApprove.length > 0) {
+            // Re-attach blob to the approved post data
+            approvedPost = { ...result.autoApprove[0], blob };
+          } else if (result.reviewQueue.length > 0) {
+            isReviewItem = true;
+            reviewQueueItems.push(result.reviewQueue[0]);
+          } else {
+            isDiscarded = true;
           }
-          // Review queue items don't need blobs (we re-download on approve)
-          reviewQueueItems.push(...result.reviewQueue);
         } else {
-          // Offscreen failed (e.g., face-api.js not installed) → pass through
-          await log("  ⚠ Face filter unavailable – passing batch through.");
-          autoApprove.push(...batch);
+          // Offscreen unavailable – pass through
+          await log("  Had trouble checking faces on one photo, uploading it anyway.");
         }
+      } catch (err) {
+        await log("  Had trouble checking faces on one photo, skipping for now.");
+        // Give the Service Worker a breath before moving on
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
       }
-
-      await log(
-        `Face filter: ${autoApprove.length} auto-approve, ` +
-          `${reviewQueueItems.length} queued for review, ` +
-          `${downloaded.length - autoApprove.length - reviewQueueItems.length} discarded.`
-      );
-    } catch (err) {
-      await log(`  ⚠ Face filter error (${err.message}) – uploading all.`);
-      autoApprove = downloaded;
     }
-  } else {
-    await log(
-      "No face encodings configured – all images will be uploaded without filtering."
-    );
-  }
 
-  /* ---- Step 6: EXIF stamping ---- */
-  await log("Applying EXIF metadata…");
-  const stamped = [];
-  for (const post of autoApprove) {
+    if (isDiscarded) {
+      // Give the Service Worker a breath before moving on
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
+
+    if (isReviewItem) {
+      // Mark as processed so it isn't re-scraped; will upload when approved
+      await markProcessed([post.imageUrl]);
+      // Give the Service Worker a breath before moving on
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
+
+    /* 4c: Apply EXIF */
     try {
-      const date = post.postDate ? new Date(post.postDate) : null;
-      const exifBlob = await applyExif(post.blob, date, lat, lon);
-      stamped.push({ ...post, blob: exifBlob });
+      const date = approvedPost.postDate ? new Date(approvedPost.postDate) : null;
+      approvedPost.blob = await applyExif(approvedPost.blob, date, lat, lon);
     } catch (err) {
-      await log(`  ⚠ EXIF failed for ${post.imageUrl}: ${err.message}`);
-      stamped.push(post); // upload without EXIF rather than skip
+      // Upload without EXIF rather than skip
     }
-  }
 
-  /* ---- Step 7: Upload auto-approved photos to Google Photos ---- */
-  await log("Uploading to Google Photos…");
-  const uploadedUrls = [];
-  let quotaHit = false;
-
-  for (const post of stamped) {
-    if (quotaHit) break;
-    const filename = safeFilename(post.imageUrl);
-    const childLabel = post.matchedChildren?.length
-      ? post.matchedChildren.join(", ")
+    /* 4d: Upload to Google Photos */
+    const filename = safeFilename(approvedPost.imageUrl);
+    const childLabel = approvedPost.matchedChildren?.length
+      ? approvedPost.matchedChildren.join(", ")
       : null;
     const desc = childLabel
       ? `${daycareName} – ${childLabel}`
@@ -454,8 +447,8 @@ async function runSync() {
 
     // Smart album routing: use the first matched child's albumId, fall back to global
     let targetAlbumId = globalAlbumId;
-    if (post.matchedChildren?.length > 0) {
-      for (const childName of post.matchedChildren) {
+    if (approvedPost.matchedChildren?.length > 0) {
+      for (const childName of approvedPost.matchedChildren) {
         const enc = childEncodings.find((c) => c.name === childName);
         if (enc?.albumId) {
           targetAlbumId = enc.albumId;
@@ -465,31 +458,54 @@ async function runSync() {
     }
 
     try {
-      const uploadToken = await uploadBytes(token, post.blob, filename);
+      let uploadToken;
+      try {
+        uploadToken = await uploadBytes(token, approvedPost.blob, filename);
+      } catch (err) {
+        if (err.message === "UNAUTHORIZED") {
+          // Token expired mid-sync – silently refresh and retry once
+          try {
+            token = await getAuthToken(false);
+          } catch {
+            await log("  Had trouble reconnecting to Google – please try syncing again.");
+            throw err;
+          }
+          uploadToken = await uploadBytes(token, approvedPost.blob, filename);
+        } else {
+          throw err;
+        }
+      }
+
       const ok = await createMediaItem(token, uploadToken, filename, desc, targetAlbumId);
       if (ok) {
-        uploadedUrls.push(post.imageUrl);
-        await log(`  ✓ Uploaded ${filename}${targetAlbumId ? ` → album ${targetAlbumId}` : ""}`);
+        /* 4e: Mark as processed immediately after confirmed upload */
+        uploadedUrls.push(approvedPost.imageUrl);
+        await markProcessed([approvedPost.imageUrl]);
+        await log(`  ✓ Saved ${filename}${targetAlbumId ? ` → album ${targetAlbumId}` : ""}`);
       } else {
-        await log(`  ⚠ Unexpected status for ${filename}`);
+        await log(`  ⚠ Something unexpected happened saving ${filename} – will try again next sync.`);
       }
     } catch (err) {
       if (err.message === "QUOTA_EXCEEDED") {
-        await log("⚠ Google Photos daily quota reached. Try again tomorrow.");
         quotaHit = true;
+        await log(
+          "Sync paused to take a breather! We've saved your progress and will pick up exactly where we left off next time."
+        );
       } else if (err.message === "SERVER_ERROR") {
-        await log(`  ✗ Server error uploading ${filename} – will retry on next sync.`);
-        // Do NOT add to uploadedUrls; the URL stays out of the ledger for automatic retry.
+        await log(`  Something went wrong on Google's end for one photo – we'll try again next sync.`);
       } else {
-        await log(`  ✗ Upload failed: ${err.message}`);
+        await log(`  Couldn't save one photo (${err.message}) – moving on.`);
       }
     }
+
+    /* 4f: Give the Service Worker breathing room */
+    await new Promise((r) => setTimeout(r, 50));
   }
 
-  /* ---- Step 8: Save review queue items ---- */
+  /* ---- Step 9: Save review queue items ---- */
   if (reviewQueueItems.length > 0) {
     const queueEntries = reviewQueueItems.map((p) => ({
-      id: p.imageUrl, // imageUrl is the stable key
+      id: p.imageUrl,
       imageUrl: p.imageUrl,
       postDate: p.postDate || null,
       postUrl: p.postUrl || null,
@@ -497,7 +513,7 @@ async function runSync() {
       matchedChildren: p.matchedChildren || [],
     }));
     await addToReviewQueue(queueEntries);
-    await log(`${reviewQueueItems.length} photo(s) added to the review queue.`);
+    await log(`${reviewQueueItems.length} photo(s) added to the review queue for your approval.`);
     // Notify popup to refresh its queue display
     try {
       chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" });
@@ -507,31 +523,17 @@ async function runSync() {
     }
   }
 
-  /* ---- Step 9: Mark as processed ---- */
-  // Only mark URLs that were either successfully uploaded or added to the review
-  // queue.  Photos that failed to download, failed to upload (network / server
-  // errors), or were discarded by face-recognition are intentionally left out of
-  // the ledger so the next sync run will automatically retry them.
-  const allProcessedUrls = [
-    ...uploadedUrls,
-    // Review-queued items are tracked here so they are not re-scraped on the
-    // next sync; they will be uploaded (and permanently marked) when approved.
-    ...reviewQueueItems.map((p) => p.imageUrl),
-  ];
-  if (allProcessedUrls.length > 0) {
-    await markProcessed(allProcessedUrls);
-  }
-
   const summary = {
     scraped: posts.length,
-    downloaded: downloaded.length,
+    downloaded: downloadedCount,
     uploaded: uploadedUrls.length,
     reviewQueued: reviewQueueItems.length,
     quotaHit,
   };
   await log(
-    `=== Sync complete: ${summary.uploaded} uploaded, ` +
-      `${summary.reviewQueued} queued for review ===`
+    `=== All done! ${summary.uploaded} photo(s) saved to Google Photos` +
+      (summary.reviewQueued ? `, ${summary.reviewQueued} waiting for your review` : "") +
+      " ==="
   );
   return summary;
 }

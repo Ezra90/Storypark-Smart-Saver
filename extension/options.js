@@ -4,7 +4,7 @@
  * Manages:
  *  - Children names + reference face photo uploads
  *  - Daycare name, GPS coordinates
- *  - Confidence thresholds (Auto-Approve, Minimum Review)
+ *  - Face Recognition Strictness (maps to autoThreshold / minThreshold internally)
  *  - Google Photos album selection / creation
  *  - Face Training Data (manual upload with live match %, import from album)
  *  - Persists everything to chrome.storage.local
@@ -31,12 +31,25 @@ const faceApiWarning    = document.getElementById("faceApiWarning");
 const autoSyncEnabled   = document.getElementById("autoSyncEnabled");
 const autoSyncFrequency = document.getElementById("autoSyncFrequency");
 
-const autoThresholdSlider = document.getElementById("autoThreshold");
-const autoThresholdVal    = document.getElementById("autoThresholdVal");
-const autoThresholdDesc   = document.getElementById("autoThresholdDesc");
-const minThresholdSlider  = document.getElementById("minThreshold");
-const minThresholdVal     = document.getElementById("minThresholdVal");
-const minThresholdDesc    = document.getElementById("minThresholdDesc");
+const faceStrictnessSelect = document.getElementById("faceStrictness");
+
+/** Map strictness dropdown value → { autoThreshold, minThreshold } */
+const STRICTNESS_MAP = {
+  strict: { autoThreshold: 90, minThreshold: 60 },
+  normal: { autoThreshold: 85, minThreshold: 50 },
+  loose:  { autoThreshold: 70, minThreshold: 30 },
+};
+
+/**
+ * Infer the closest strictness level from stored numeric thresholds.
+ * Ranges are intentionally slightly wider than the exact STRICTNESS_MAP
+ * values to handle settings saved by older versions of the extension.
+ */
+function thresholdsToStrictness(auto, min) {
+  if (auto >= 90 && min >= 60) return "strict";
+  if (auto >= 70 && min >= 30) return "normal";
+  return "loose";
+}
 
 const trainingChildSelect   = document.getElementById("trainingChildSelect");
 const trainingFileInput     = document.getElementById("trainingFileInput");
@@ -164,42 +177,6 @@ btnAddChild.addEventListener("click", () => {
   addChildRow();
   syncTrainingChildDropdown();
 });
-
-/* ------------------------------------------------------------------ */
-/*  Threshold sliders                                                  */
-/* ------------------------------------------------------------------ */
-
-function updateThresholdDesc() {
-  const auto = parseInt(autoThresholdSlider.value, 10);
-  const min  = parseInt(minThresholdSlider.value, 10);
-
-  autoThresholdVal.textContent = `${auto}%`;
-  minThresholdVal.textContent  = `${min}%`;
-
-  if (auto === 100 && min === 0) {
-    autoThresholdDesc.textContent =
-      "All detected photos will be sent to the Review Queue (no auto-uploads).";
-    minThresholdDesc.textContent =
-      "Photos below 0% (i.e. no face match) are discarded.";
-    return;
-  }
-
-  autoThresholdDesc.textContent =
-    `Photos with ≥ ${auto}% match are uploaded automatically.`;
-
-  if (min >= auto) {
-    minThresholdDesc.textContent =
-      "⚠ Minimum is ≥ Auto-Approve – all matched photos go to the Review Queue.";
-  } else {
-    minThresholdDesc.textContent =
-      `Photos with ${min}–${auto - 1}% match go to the Review Queue. ` +
-      `Photos below ${min}% are discarded.`;
-  }
-}
-
-autoThresholdSlider.addEventListener("input", updateThresholdDesc);
-minThresholdSlider.addEventListener("input",  updateThresholdDesc);
-updateThresholdDesc();
 
 /* ------------------------------------------------------------------ */
 /*  Album management (upload target)                                   */
@@ -550,9 +527,9 @@ btnSave.addEventListener("click", async () => {
     return;
   }
 
-  // Validate thresholds
-  const autoThreshold = parseInt(autoThresholdSlider.value, 10);
-  const minThreshold  = parseInt(minThresholdSlider.value, 10);
+  // Validate thresholds from strictness dropdown
+  const strictness = faceStrictnessSelect.value;
+  const { autoThreshold, minThreshold } = STRICTNESS_MAP[strictness] || STRICTNESS_MAP.normal;
 
   await chrome.storage.local.set({
     children,
@@ -616,14 +593,12 @@ btnSave.addEventListener("click", async () => {
   if (data.daycareLat != null) latInput.value = data.daycareLat;
   if (data.daycareLon != null) lonInput.value = data.daycareLon;
 
-  // Thresholds
-  if (data.autoThreshold != null) {
-    autoThresholdSlider.value = data.autoThreshold;
+  // Thresholds → strictness dropdown
+  if (data.autoThreshold != null || data.minThreshold != null) {
+    const auto = data.autoThreshold ?? 85;
+    const min  = data.minThreshold  ?? 50;
+    faceStrictnessSelect.value = thresholdsToStrictness(auto, min);
   }
-  if (data.minThreshold != null) {
-    minThresholdSlider.value = data.minThreshold;
-  }
-  updateThresholdDesc();
 
   // Auto-sync
   autoSyncEnabled.checked = data.autoSyncEnabled === true;
