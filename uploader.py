@@ -4,14 +4,24 @@ uploader.py – Upload photos to Google Photos via the Library API.
 Delegates all authentication and HTTP logic to google_photos.py.
 The token is cached in GOOGLE_TOKEN_FILE so re-authorisation is only
 needed when the refresh token expires (~6 months of inactivity).
+
+Handles Google Photos daily API quota limits (HTTP 429 / 500) by saving
+the current database state and raising :class:`google_photos.QuotaExceededError`
+with a user-friendly message.
 """
 
 import logging
 import os
 
 import google_photos
+from google_photos import QuotaExceededError
 
 logger = logging.getLogger(__name__)
+
+# User-facing message shown when the quota is hit.
+_QUOTA_MESSAGE = (
+    "Daily Google Photos limit reached. Please click Sync again tomorrow."
+)
 
 
 def upload_photos(posts: list[dict], state_conn) -> list[dict]:
@@ -23,6 +33,10 @@ def upload_photos(posts: list[dict], state_conn) -> list[dict]:
       re-uploaded on a future run.
 
     Returns the subset of *posts* that were successfully uploaded.
+
+    Raises :class:`google_photos.QuotaExceededError` (with a clear,
+    user-friendly message) if the daily API limit is hit.  The database
+    state is committed before the exception is raised so no work is lost.
     """
     from state_manager import mark_processed
 
@@ -40,15 +54,39 @@ def upload_photos(posts: list[dict], state_conn) -> list[dict]:
         if not local_path or not os.path.exists(local_path):
             continue
 
-        upload_token = google_photos.upload_bytes(session, local_path)
+        try:
+            upload_token = google_photos.upload_bytes(session, local_path)
+        except QuotaExceededError as exc:
+            logger.warning(
+                "API quota exceeded during upload – saving state and stopping.  "
+                "%d photo(s) uploaded before the limit was reached.",
+                len(uploaded),
+            )
+            state_conn.commit()
+            quota_err = QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err.uploaded_count = len(uploaded)
+            raise quota_err from exc
+
         if not upload_token:
             continue
 
         filename = os.path.basename(local_path)
         description = f"Storypark – {', '.join(children)}" if children else "Storypark"
-        success = google_photos.create_media_item(
-            session, upload_token, filename, description
-        )
+
+        try:
+            success = google_photos.create_media_item(
+                session, upload_token, filename, description
+            )
+        except QuotaExceededError as exc:
+            logger.warning(
+                "API quota exceeded during batchCreate – saving state and "
+                "stopping.  %d photo(s) uploaded before the limit was reached.",
+                len(uploaded),
+            )
+            state_conn.commit()
+            quota_err = QuotaExceededError(_QUOTA_MESSAGE)
+            quota_err.uploaded_count = len(uploaded)
+            raise quota_err from exc
 
         if success:
             mark_processed(state_conn, image_url, post_url)

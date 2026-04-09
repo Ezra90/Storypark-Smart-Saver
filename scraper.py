@@ -35,7 +35,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 
 from config import (
     STORYPARK_EMAIL,
-    STORYPARK_PASSWORD,
+    get_storypark_password,
     TEMP_DIR,
     HEADLESS_BROWSER,
     MAX_POSTS,
@@ -211,9 +211,40 @@ def scrape(state_conn) -> list[dict]:
         logger.info("Navigating to Storypark login page…")
         page.goto(LOGIN_URL, wait_until="networkidle")
 
-        page.fill(SELECTORS["email_input"], STORYPARK_EMAIL)
-        page.fill(SELECTORS["password_input"], STORYPARK_PASSWORD)
-        page.click(SELECTORS["submit_button"])
+        storypark_password = get_storypark_password()
+
+        try:
+            page.fill(SELECTORS["email_input"], STORYPARK_EMAIL)
+        except Exception as exc:
+            logger.error(
+                "Could not locate the email field – Storypark may have "
+                "updated their website.  (selector: %s, error: %s)",
+                SELECTORS["email_input"], exc,
+            )
+            browser.close()
+            return results
+
+        try:
+            page.fill(SELECTORS["password_input"], storypark_password)
+        except Exception:
+            logger.error(
+                "Could not locate the password field – Storypark may have "
+                "updated their website.  (selector: %s)",
+                SELECTORS["password_input"],
+            )
+            browser.close()
+            return results
+
+        try:
+            page.click(SELECTORS["submit_button"])
+        except Exception as exc:
+            logger.error(
+                "Could not locate the login button – Storypark may have "
+                "updated their website.  (selector: %s, error: %s)",
+                SELECTORS["submit_button"], exc,
+            )
+            browser.close()
+            return results
 
         try:
             page.wait_for_url(
@@ -289,11 +320,21 @@ def scrape(state_conn) -> list[dict]:
         # ------------------------------------------------------------------
         # 3. Collect posts (newest → oldest; stop early in incremental mode)
         # ------------------------------------------------------------------
-        posts = page.locator(SELECTORS["post_container"]).all()
+        try:
+            posts = page.locator(SELECTORS["post_container"]).all()
+        except Exception as exc:
+            logger.warning(
+                "Could not locate post containers – Storypark may have "
+                "updated their website.  (selector: %s, error: %s)",
+                SELECTORS["post_container"], exc,
+            )
+            posts = []
+
         logger.info("Found %d post element(s) in the DOM.", len(posts))
 
         processed_count = 0
         consecutive_all_known = 0  # post-level early stop for incremental
+        dates_missing_count = 0    # track how many posts have no date
 
         for post in posts:
             if MAX_POSTS and processed_count >= MAX_POSTS:
@@ -313,10 +354,11 @@ def scrape(state_conn) -> list[dict]:
                 pass
 
             # ----------------------------------------------------------
-            # Extract post date – try <time datetime="…"> first, then
-            # visible text, then data-* attributes.
+            # Extract post date – cascading fallback selectors
             # ----------------------------------------------------------
             post_date: datetime | None = None
+
+            # Attempt 1: <time datetime="…">
             try:
                 time_el = post.locator("time").first
                 raw = (
@@ -329,8 +371,8 @@ def scrape(state_conn) -> list[dict]:
             except Exception:
                 pass
 
+            # Attempt 2: element matching date/time class selectors
             if post_date is None:
-                # Fallback: look for any element with a date-like class
                 try:
                     date_el = post.locator(SELECTORS["post_date"]).first
                     raw = (
@@ -343,15 +385,56 @@ def scrape(state_conn) -> list[dict]:
                 except Exception:
                     pass
 
+            # Attempt 3: any element with a data-date or data-time attribute
+            if post_date is None:
+                try:
+                    data_el = post.locator(
+                        "[data-date], [data-time], [data-timestamp]"
+                    ).first
+                    raw = (
+                        data_el.get_attribute("data-date")
+                        or data_el.get_attribute("data-time")
+                        or data_el.get_attribute("data-timestamp")
+                    )
+                    if raw:
+                        post_date = _parse_date(raw)
+                except Exception:
+                    pass
+
+            if post_date is None:
+                dates_missing_count += 1
+
             # ----------------------------------------------------------
-            # Collect images in this post
+            # Collect images in this post – primary + fallback selectors
             # ----------------------------------------------------------
-            images = post.locator(SELECTORS["post_image"]).all()
-            image_urls = [
-                img.get_attribute("src") or ""
-                for img in images
-            ]
-            image_urls = [u for u in image_urls if u]
+            image_urls: list[str] = []
+
+            # Primary: src-based selectors
+            try:
+                images = post.locator(SELECTORS["post_image"]).all()
+                image_urls = [
+                    img.get_attribute("src") or ""
+                    for img in images
+                ]
+                image_urls = [u for u in image_urls if u]
+            except Exception:
+                pass
+
+            # Fallback: data-src / srcset (lazy-loaded images)
+            if not image_urls:
+                try:
+                    lazy_imgs = post.locator(
+                        "img[data-src*='storypark'], "
+                        "img[data-src*='amazonaws'], "
+                        "img[data-src*='cloudfront']"
+                    ).all()
+                    image_urls = [
+                        img.get_attribute("data-src") or ""
+                        for img in lazy_imgs
+                    ]
+                    image_urls = [u for u in image_urls if u]
+                except Exception:
+                    pass
 
             # Check if all images in this post are already known
             if image_urls and all(
@@ -387,6 +470,16 @@ def scrape(state_conn) -> list[dict]:
                         }
                     )
                     processed_count += 1
+
+        # Emit a single clear warning if many dates were missing
+        if dates_missing_count > 0:
+            logger.warning(
+                "Could not locate image dates for %d post(s) – "
+                "Storypark may have updated their website.  "
+                "Photos without dates will still be downloaded but their "
+                "EXIF timestamps will not be set.",
+                dates_missing_count,
+            )
 
         browser.close()
 
