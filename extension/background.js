@@ -360,6 +360,7 @@ async function runSync() {
   const uploadedUrls = [];
   const reviewQueueItems = [];
   let quotaHit = false;
+  let downloadedCount = 0;
 
   for (const post of posts) {
     if (quotaHit) break;
@@ -368,6 +369,7 @@ async function runSync() {
     let blob;
     try {
       blob = await downloadImage(post.imageUrl);
+      downloadedCount++;
     } catch (err) {
       await log(`  ⚠ Couldn't download a photo, skipping for now: ${err.message}`);
       // Give the Service Worker a breath before moving on
@@ -462,7 +464,12 @@ async function runSync() {
       } catch (err) {
         if (err.message === "UNAUTHORIZED") {
           // Token expired mid-sync – silently refresh and retry once
-          token = await getAuthToken(false);
+          try {
+            token = await getAuthToken(false);
+          } catch {
+            await log("  Had trouble reconnecting to Google – please try syncing again.");
+            throw err;
+          }
           uploadToken = await uploadBytes(token, approvedPost.blob, filename);
         } else {
           throw err;
@@ -518,7 +525,7 @@ async function runSync() {
 
   const summary = {
     scraped: posts.length,
-    downloaded: posts.length,
+    downloaded: downloadedCount,
     uploaded: uploadedUrls.length,
     reviewQueued: reviewQueueItems.length,
     quotaHit,

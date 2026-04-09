@@ -25,7 +25,7 @@ No server, no Python, no command-line — just install the extension and click *
 
 ### 1. Install the Extension
 
-1. Open the [Chrome Web Store listing](#) (or ask whoever shared the extension with you for the install link).
+1. Open the [Chrome Web Store listing](#) *(link will be available once the extension is published — ask whoever shared this with you for the install link)*.
 2. Click **Add to Chrome** → **Add extension**.
 3. The Storypark Photo Sync icon will appear in your Chrome toolbar. 🎉
 

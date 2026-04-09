@@ -40,10 +40,14 @@ const STRICTNESS_MAP = {
   loose:  { autoThreshold: 70, minThreshold: 30 },
 };
 
-/** Infer the closest strictness level from stored numeric thresholds. */
+/**
+ * Infer the closest strictness level from stored numeric thresholds.
+ * Ranges are intentionally slightly wider than the exact STRICTNESS_MAP
+ * values to handle settings saved by older versions of the extension.
+ */
 function thresholdsToStrictness(auto, min) {
-  if (auto >= 88 && min >= 55) return "strict";
-  if (auto >= 78 && min >= 40) return "normal";
+  if (auto >= 90 && min >= 60) return "strict";
+  if (auto >= 70 && min >= 30) return "normal";
   return "loose";
 }
 
