@@ -127,6 +127,7 @@ extension/
 ├── popup.html / popup.js  # Popup UI – Connect, Sync, progress log, Review Queue
 ├── options.html / options.js  # Settings page – children, thresholds, GPS, album, training
 ├── lib/
+│   ├── db.js              # IndexedDB helper – processed-URL ledger (unlimited storage)
 │   ├── utils.js           # Shared constants and helpers
 │   ├── exif.js            # EXIF metadata writer (date + GPS)
 │   └── face.js            # Face detection/recognition helpers (used by options page)
@@ -143,6 +144,7 @@ extension/
 | `offscreen.js` | Offscreen document worker: face-api.js face recognition (requires Canvas/DOM APIs unavailable in service worker) |
 | `popup.js` | Popup UI: 1-click sync, connection status, live progress log, Review Queue HITL |
 | `options.js` | Settings page: children, daycare name/GPS, confidence thresholds, album selection, face training |
+| `lib/db.js` | IndexedDB helper: stores the processed-URL ledger with virtually unlimited capacity |
 | `lib/exif.js` | Pure-JS EXIF writer — stamps DateTimeOriginal and GPS into JPEG blobs |
 | `lib/face.js` | Face detection/recognition via face-api.js (TensorFlow.js, runs 100% client-side) |
 | `lib/utils.js` | Shared selectors, timing constants, logging, date parsing |
@@ -156,7 +158,8 @@ extension/
 - Uses a **service worker** (`background.js`) instead of a persistent background page.
 - All network requests use `fetch()` (no XMLHttpRequest).
 - OAuth handled through `chrome.identity.getAuthToken()`.
-- State stored in `chrome.storage.local` (replaces the Python app's SQLite database and config.json).
+- User settings, thresholds, and face descriptors stored in `chrome.storage.local`.
+- The **processed-URL ledger** (history of every image already handled) is stored in **IndexedDB** via `lib/db.js`. This provides virtually unlimited capacity and avoids the 5 MB hard limit that `chrome.storage.local` would hit for users with years of Storypark history.
 
 ### Anti-Bot Measures
 
@@ -203,7 +206,7 @@ Google Photos API has daily upload limits. If the quota is reached mid-sync, the
 | face-api.js warning in Settings | Download `face-api.min.js` (v0.22.2) from the [face-api.js releases page](https://github.com/justadudewhohacks/face-api.js/releases) and place it in `extension/lib/` |
 | Face recognition not working | Ensure model weight files are in `extension/models/` (see [Setup](#4-set-up-face-recognition-models-optional)) |
 | "Daily quota reached" | Google Photos limits uploads per day; wait 24 hours and sync again |
-| Want to reprocess everything | Open Chrome DevTools → Application → Storage → Clear `processedUrls` from extension storage |
+| Want to reprocess everything | Open Chrome DevTools → Application → Storage → IndexedDB → `storyparkSyncDB` → `processedUrls` → clear the object store |
 | Review Queue not clearing | Use ✅ Approve or ❌ Reject buttons in the popup for each item |
 
 ---
