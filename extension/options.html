@@ -13,6 +13,7 @@
       --text: #222;
       --muted: #666;
       --success: #16a34a;
+      --warning: #d97706;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -145,11 +146,114 @@
       margin-left: 8px;
       color: var(--primary);
     }
+
+    /* ---- Threshold sliders ---- */
+    .threshold-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .threshold-row label { margin-bottom: 0; }
+    .threshold-row input[type="range"] {
+      width: 100%;
+      margin-bottom: 0;
+      cursor: pointer;
+    }
+    .threshold-row .pct-display {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      min-width: 42px;
+      text-align: right;
+    }
+    .threshold-desc {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -8px;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    /* ---- Face training ---- */
+    .training-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .training-tab {
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .training-tab.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .training-panel { display: none; }
+    .training-panel.active { display: block; }
+
+    .training-child-select {
+      margin-bottom: 12px;
+    }
+    .match-preview {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border-radius: 6px;
+      font-size: 13px;
+      min-height: 40px;
+      margin-bottom: 8px;
+    }
+    .match-preview img {
+      width: 40px;
+      height: 40px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .match-badge {
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+    .match-badge.good  { background: #dcfce7; color: #166534; }
+    .match-badge.ok    { background: #fef9c3; color: #854d0e; }
+    .match-badge.bad   { background: #fee2e2; color: #991b1b; }
+    .match-badge.none  { background: #f3f4f6; color: #6b7280; }
+
+    #faceApiWarning {
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--warning);
+      margin-bottom: 14px;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <h1>⚙ Settings</h1>
-  <p class="subtitle">Configure your children, daycare location, and upload preferences.</p>
+  <p class="subtitle">Configure your children, daycare location, confidence thresholds, and upload preferences.</p>
+
+  <!-- face-api.js warning (shown when library is absent) -->
+  <div id="faceApiWarning">
+    ⚠ <strong>face-api.js not found.</strong>
+    Face recognition features are disabled. Download
+    <a href="https://github.com/justadudewhohacks/face-api.js/releases" target="_blank">face-api.min.js</a>
+    and place it in <code>extension/lib/</code>, then reload the extension.
+  </div>
 
   <!-- Children -->
   <div class="card">
@@ -159,14 +263,16 @@
     <button class="btn-add" id="btnAddChild">+ Add child</button>
   </div>
 
-  <!-- GPS -->
+  <!-- GPS + Daycare Name -->
   <div class="card">
     <h2>📍 Daycare Location</h2>
     <p class="help">
-      Enter the GPS coordinates of your daycare. These are embedded in every photo's EXIF data
-      so they appear in the correct location in Google Photos.
+      GPS coordinates are embedded in every photo's EXIF data so they appear in the correct
+      location in Google Photos.
       <a href="https://www.google.com/maps" target="_blank">Find on Google Maps →</a>
     </p>
+    <label for="daycareName">Daycare Name</label>
+    <input type="text" id="daycareName" placeholder="e.g. Bahrs Scrub Early Learning">
     <div class="gps-row">
       <div>
         <label for="lat">Latitude</label>
@@ -177,6 +283,35 @@
         <input type="number" id="lon" step="any" placeholder="151.2093">
       </div>
     </div>
+  </div>
+
+  <!-- Confidence Thresholds -->
+  <div class="card">
+    <h2>🎯 Confidence Thresholds</h2>
+    <p class="help" style="margin-bottom:16px;">
+      Photos above the <strong>Auto-Approve</strong> threshold are uploaded immediately.
+      Photos between both thresholds go to the <strong>Review Queue</strong> for manual approval.
+      Photos below the <strong>Minimum</strong> threshold are discarded.
+    </p>
+
+    <div class="threshold-row">
+      <label for="autoThreshold">Auto-Approve</label>
+      <input type="range" id="autoThreshold" min="0" max="100" step="1" value="85">
+      <span class="pct-display" id="autoThresholdVal">85%</span>
+    </div>
+    <p class="threshold-desc" id="autoThresholdDesc">
+      Photos with ≥ 85% match are uploaded automatically.
+    </p>
+
+    <div class="threshold-row">
+      <label for="minThreshold">Minimum Review</label>
+      <input type="range" id="minThreshold" min="0" max="100" step="1" value="50">
+      <span class="pct-display" id="minThresholdVal">50%</span>
+    </div>
+    <p class="threshold-desc" id="minThresholdDesc">
+      Photos with 50–84% match go to the Review Queue.
+      Photos below 50% are discarded.
+    </p>
   </div>
 
   <!-- Album -->
@@ -198,6 +333,61 @@
     </div>
   </div>
 
+  <!-- Face Training -->
+  <div class="card" id="trainingCard">
+    <h2>🧠 Face Training Data</h2>
+    <p class="help" style="margin-bottom:14px;">
+      Provide 5–10 clear face photos of each child to train the recognition model.
+      Use photos where the child's face is well-lit, unobstructed, and roughly centred.
+    </p>
+
+    <div class="training-child-select">
+      <label for="trainingChildSelect">Training for child:</label>
+      <select id="trainingChildSelect">
+        <option value="">— select a child —</option>
+      </select>
+    </div>
+
+    <div class="training-tabs">
+      <button class="training-tab active" data-tab="manual" data-panel="panelManual">📤 Manual Upload</button>
+      <button class="training-tab" data-tab="album" data-panel="panelAlbum">📷 Import from Album</button>
+    </div>
+
+    <!-- Manual upload panel -->
+    <div class="training-panel active" id="panelManual">
+      <p class="help" style="margin-bottom:10px;">
+        Select up to 10 face photos. A live match % is shown for each to help you
+        choose high-quality training images.
+      </p>
+      <input type="file" id="trainingFileInput" accept="image/*" multiple>
+      <div id="trainingPreviews" style="margin-top:10px;"></div>
+      <button class="btn-add" id="btnSaveTraining" style="margin-top:10px;" disabled>
+        💾 Save training photos
+      </button>
+    </div>
+
+    <!-- Album import panel -->
+    <div class="training-panel" id="panelAlbum">
+      <p class="help" style="margin-bottom:10px;">
+        Pick an album containing face photos of this child.
+        Up to 10 photos will be used to build the recognition model.
+      </p>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <select id="trainingAlbumSelect" style="flex:1;margin-bottom:0;">
+          <option value="">— select album —</option>
+        </select>
+        <button id="trainingAlbumRefresh" style="
+          font-size:12px;background:none;border:1px solid var(--border);
+          padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--primary);
+          width:auto;">↻</button>
+      </div>
+      <button class="btn-add" id="btnImportAlbum" disabled>
+        ⬇ Import from selected album
+      </button>
+      <p id="importStatus" style="font-size:12px;color:var(--muted);margin-top:8px;"></p>
+    </div>
+  </div>
+
   <!-- Save -->
   <div class="actions">
     <button class="btn-save" id="btnSave">💾 Save Settings</button>
@@ -205,6 +395,13 @@
 
   <div id="toast">✓ Settings saved!</div>
 
-  <script src="options.js"></script>
+  <!--
+    face-api.js is optional – if absent the training preview is disabled but
+    all other settings still work.  Download face-api.min.js (v0.22.2) from
+    https://github.com/justadudewhohacks/face-api.js/releases and place it in
+    extension/lib/.
+  -->
+  <script src="lib/face-api.min.js" onerror="window._faceApiMissing=true"></script>
+  <script type="module" src="options.js"></script>
 </body>
 </html>

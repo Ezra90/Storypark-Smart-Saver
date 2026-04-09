@@ -5,24 +5,44 @@
  * round-trips are needed. Model weights must be placed in extension/models/.
  *
  * Workflow:
- *   1. loadModels()           – one-time model init (called at extension startup).
- *   2. buildEncoding(blob)    – compute a 128-D descriptor from a reference photo.
- *   3. filterPhotos(posts)    – keep only photos that match at least one known child.
+ *   1. loadModels()              – one-time model init.
+ *   2. buildEncoding(img)        – compute a 128-D descriptor from an HTMLImageElement.
+ *   3. computeMatchPercent(img)  – compare image against stored encodings for a child.
+ *
+ * NOTE: The full sync-time face filtering is performed in offscreen.js (which
+ * also has DOM/Canvas access). This module is used by the Options page for
+ * live training-photo quality feedback.
  *
  * Required face-api.js models (place weight files in extension/models/):
  *   - ssd_mobilenetv1     (face detector)
  *   - face_landmark_68    (alignment)
  *   - face_recognition    (128-D descriptor)
  *
- * To obtain the models, download them from:
+ * Download from:
  *   https://github.com/justadudewhohacks/face-api.js/tree/master/weights
  */
 
 /* global faceapi */
-/* face-api.js is loaded via <script> in options.html / popup.html, or
-   importScripts() in the service worker offscreen document. */
+/* face-api.js is loaded via <script> in options.html / offscreen.html.
+   The service worker (background.js) delegates face operations to
+   offscreen.js via the offscreen document API. */
 
-const MATCH_THRESHOLD = 0.6; // Euclidean distance; lower = stricter
+/* ------------------------------------------------------------------ */
+/*  Distance ↔ percentage conversion                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Convert a face-api.js Euclidean distance to a 0–100 match percentage.
+ * dist = 0   → 100 % (identical descriptor)
+ * dist = 0.5 → 50 %
+ * dist ≥ 1   → 0 %
+ *
+ * @param {number} dist – L2 distance from faceapi.euclideanDistance().
+ * @returns {number} – Integer percentage in [0, 100].
+ */
+export function distanceToPercent(dist) {
+  return Math.max(0, Math.round((1 - dist) * 100));
+}
 
 let modelsLoaded = false;
 
@@ -36,6 +56,11 @@ let modelsLoaded = false;
  */
 export async function loadModels() {
   if (modelsLoaded) return;
+  if (typeof faceapi === "undefined") {
+    throw new Error(
+      "face-api.js not found. Place face-api.min.js in extension/lib/."
+    );
+  }
   const modelPath = chrome.runtime.getURL("models");
   await Promise.all([
     faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
@@ -51,14 +76,13 @@ export async function loadModels() {
 /* ------------------------------------------------------------------ */
 
 /**
- * Compute a 128-D face descriptor from a single reference photo Blob.
+ * Compute a 128-D face descriptor from an HTMLImageElement.
  *
- * @param {Blob} blob – JPEG/PNG image of the child's face.
+ * @param {HTMLImageElement} img – Reference face image.
  * @returns {Promise<Float32Array|null>} – Descriptor, or null if no face found.
  */
-export async function buildEncoding(blob) {
+export async function buildEncoding(img) {
   await loadModels();
-  const img = await blobToImage(blob);
   const detection = await faceapi
     .detectSingleFace(img)
     .withFaceLandmarks()
@@ -71,87 +95,41 @@ export async function buildEncoding(blob) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Photo filtering                                                    */
+/*  Live match preview (used in Options page training section)         */
 /* ------------------------------------------------------------------ */
 
 /**
- * Filter an array of scraped post objects, keeping only those whose images
- * contain a face matching at least one known child.
+ * Compare an image against a list of stored descriptors and return the
+ * best match percentage. Used for live quality feedback during training.
  *
- * @param {Array<Object>} posts – Each must have a `blob` (Blob) property.
- * @returns {Promise<Array<Object>>} – Filtered posts, each gains a
- *          `matchedChildren` (string[]) property.
+ * @param {HTMLImageElement} img              – Image to test.
+ * @param {Array<number[]>}  storedDescriptors – Previously stored descriptors
+ *                                              for the same child.
+ * @returns {Promise<{ faceFound: boolean, matchPct: number|null }>}
  */
-export async function filterPhotos(posts) {
+export async function computeMatchPercent(img, storedDescriptors) {
   await loadModels();
 
-  // Load stored reference encodings: { name: string, descriptor: number[] }[]
-  const { childEncodings = [] } = await chrome.storage.local.get(
-    "childEncodings"
-  );
+  const result = await faceapi
+    .detectSingleFace(img)
+    .withFaceLandmarks()
+    .withFaceDescriptor();
 
-  if (childEncodings.length === 0) {
-    console.warn("[face] No reference encodings stored – skipping filter.");
-    // Return all posts unfiltered (no face recognition configured).
-    return posts.map((p) => ({ ...p, matchedChildren: [] }));
+  if (!result) return { faceFound: false, matchPct: null };
+
+  if (!storedDescriptors || storedDescriptors.length === 0) {
+    // No existing encodings to compare against → just confirm face found
+    return { faceFound: true, matchPct: null };
   }
 
-  const refs = childEncodings.map((c) => ({
-    name: c.name,
-    descriptor: new Float32Array(c.descriptor),
-  }));
-
-  const kept = [];
-
-  for (const post of posts) {
-    const img = await blobToImage(post.blob);
-    const detections = await faceapi
-      .detectAllFaces(img)
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    if (detections.length === 0) continue; // no faces → skip photo
-
-    const matched = new Set();
-    for (const det of detections) {
-      for (const ref of refs) {
-        const dist = faceapi.euclideanDistance(det.descriptor, ref.descriptor);
-        if (dist < MATCH_THRESHOLD) {
-          matched.add(ref.name);
-        }
-      }
-    }
-
-    if (matched.size > 0) {
-      kept.push({
-        ...post,
-        matchedChildren: [...matched].sort(),
-      });
-    }
+  // Compare against all stored descriptors; return best match
+  let bestPct = 0;
+  for (const stored of storedDescriptors) {
+    const ref = new Float32Array(stored);
+    const dist = faceapi.euclideanDistance(result.descriptor, ref);
+    const pct = distanceToPercent(dist);
+    if (pct > bestPct) bestPct = pct;
   }
 
-  return kept;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-/**
- * Convert a Blob to an HTMLImageElement (needed by face-api.js).
- */
-function blobToImage(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(img);
-    };
-    img.onerror = (e) => {
-      URL.revokeObjectURL(url);
-      reject(e);
-    };
-    img.src = url;
-  });
+  return { faceFound: true, matchPct: bestPct };
 }

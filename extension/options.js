@@ -3,35 +3,95 @@
  *
  * Manages:
  *  - Children names + reference face photo uploads
- *  - Daycare GPS coordinates
+ *  - Daycare name, GPS coordinates
+ *  - Confidence thresholds (Auto-Approve, Minimum Review)
  *  - Google Photos album selection / creation
+ *  - Face Training Data (manual upload with live match %, import from album)
  *  - Persists everything to chrome.storage.local
  */
 
-const childrenList = document.getElementById("childrenList");
-const btnAddChild = document.getElementById("btnAddChild");
-const latInput = document.getElementById("lat");
-const lonInput = document.getElementById("lon");
-const albumSelect = document.getElementById("albumSelect");
-const albumRefresh = document.getElementById("albumRefresh");
-const newAlbumName = document.getElementById("newAlbumName");
-const btnCreateAlbum = document.getElementById("btnCreateAlbum");
-const btnSave = document.getElementById("btnSave");
-const toast = document.getElementById("toast");
+import { loadModels, buildEncoding, computeMatchPercent } from "./lib/face.js";
+
+/* ------------------------------------------------------------------ */
+/*  Element references                                                 */
+/* ------------------------------------------------------------------ */
+
+const childrenList      = document.getElementById("childrenList");
+const btnAddChild       = document.getElementById("btnAddChild");
+const daycareNameInput  = document.getElementById("daycareName");
+const latInput          = document.getElementById("lat");
+const lonInput          = document.getElementById("lon");
+const albumSelect       = document.getElementById("albumSelect");
+const albumRefresh      = document.getElementById("albumRefresh");
+const newAlbumName      = document.getElementById("newAlbumName");
+const btnCreateAlbum    = document.getElementById("btnCreateAlbum");
+const btnSave           = document.getElementById("btnSave");
+const toast             = document.getElementById("toast");
+const faceApiWarning    = document.getElementById("faceApiWarning");
+
+const autoThresholdSlider = document.getElementById("autoThreshold");
+const autoThresholdVal    = document.getElementById("autoThresholdVal");
+const autoThresholdDesc   = document.getElementById("autoThresholdDesc");
+const minThresholdSlider  = document.getElementById("minThreshold");
+const minThresholdVal     = document.getElementById("minThresholdVal");
+const minThresholdDesc    = document.getElementById("minThresholdDesc");
+
+const trainingChildSelect   = document.getElementById("trainingChildSelect");
+const trainingFileInput     = document.getElementById("trainingFileInput");
+const trainingPreviews      = document.getElementById("trainingPreviews");
+const btnSaveTraining       = document.getElementById("btnSaveTraining");
+const trainingAlbumSelect   = document.getElementById("trainingAlbumSelect");
+const trainingAlbumRefresh  = document.getElementById("trainingAlbumRefresh");
+const btnImportAlbum        = document.getElementById("btnImportAlbum");
+const importStatus          = document.getElementById("importStatus");
+
+/* ------------------------------------------------------------------ */
+/*  face-api.js availability check                                     */
+/* ------------------------------------------------------------------ */
+
+let faceApiAvailable = false;
+
+(async () => {
+  if (window._faceApiMissing || typeof faceapi === "undefined") {
+    faceApiWarning.style.display = "block";
+    return;
+  }
+  try {
+    await loadModels();
+    faceApiAvailable = true;
+  } catch (err) {
+    console.warn("[options] face-api.js models failed to load:", err.message);
+    faceApiWarning.style.display = "block";
+    faceApiWarning.textContent =
+      `⚠ Face recognition unavailable: ${err.message}`;
+  }
+})();
 
 /* ------------------------------------------------------------------ */
 /*  Children UI                                                        */
 /* ------------------------------------------------------------------ */
 
-let childRows = []; // { name: string, encodingIndex: number|null }
+let childRows = []; // { nameInput, fileInput, encodingIdx }
+
+function syncTrainingChildDropdown() {
+  const current = trainingChildSelect.value;
+  trainingChildSelect.innerHTML = '<option value="">— select a child —</option>';
+  for (const row of childRows) {
+    const name = row.nameInput.value.trim();
+    if (!name) continue;
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    trainingChildSelect.appendChild(opt);
+  }
+  if (current) trainingChildSelect.value = current;
+}
 
 function renderChildren(children) {
   childrenList.innerHTML = "";
   childRows = [];
-
-  children.forEach((child, idx) => {
-    addChildRow(child.name, idx);
-  });
+  children.forEach((child, idx) => addChildRow(child.name, idx));
+  syncTrainingChildDropdown();
 }
 
 function addChildRow(name = "", encodingIdx = null) {
@@ -42,6 +102,7 @@ function addChildRow(name = "", encodingIdx = null) {
   nameInput.type = "text";
   nameInput.placeholder = "Child's name";
   nameInput.value = name;
+  nameInput.addEventListener("input", syncTrainingChildDropdown);
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";
@@ -55,6 +116,7 @@ function addChildRow(name = "", encodingIdx = null) {
     row.remove();
     const idx = childRows.indexOf(entry);
     if (idx !== -1) childRows.splice(idx, 1);
+    syncTrainingChildDropdown();
   });
 
   row.appendChild(nameInput);
@@ -64,34 +126,77 @@ function addChildRow(name = "", encodingIdx = null) {
 
   const entry = { nameInput, fileInput, encodingIdx };
   childRows.push(entry);
+  return entry;
 }
 
-btnAddChild.addEventListener("click", () => addChildRow());
+btnAddChild.addEventListener("click", () => {
+  addChildRow();
+  syncTrainingChildDropdown();
+});
 
 /* ------------------------------------------------------------------ */
-/*  Album management                                                   */
+/*  Threshold sliders                                                  */
 /* ------------------------------------------------------------------ */
+
+function updateThresholdDesc() {
+  const auto = parseInt(autoThresholdSlider.value, 10);
+  const min  = parseInt(minThresholdSlider.value, 10);
+
+  autoThresholdVal.textContent = `${auto}%`;
+  minThresholdVal.textContent  = `${min}%`;
+
+  if (auto === 100 && min === 0) {
+    autoThresholdDesc.textContent =
+      "All detected photos will be sent to the Review Queue (no auto-uploads).";
+    minThresholdDesc.textContent =
+      "Photos below 0% (i.e. no face match) are discarded.";
+    return;
+  }
+
+  autoThresholdDesc.textContent =
+    `Photos with ≥ ${auto}% match are uploaded automatically.`;
+
+  if (min >= auto) {
+    minThresholdDesc.textContent =
+      "⚠ Minimum is ≥ Auto-Approve – all matched photos go to the Review Queue.";
+  } else {
+    minThresholdDesc.textContent =
+      `Photos with ${min}–${auto - 1}% match go to the Review Queue. ` +
+      `Photos below ${min}% are discarded.`;
+  }
+}
+
+autoThresholdSlider.addEventListener("input", updateThresholdDesc);
+minThresholdSlider.addEventListener("input",  updateThresholdDesc);
+updateThresholdDesc();
+
+/* ------------------------------------------------------------------ */
+/*  Album management (upload target)                                   */
+/* ------------------------------------------------------------------ */
+
+function populateAlbumSelect(select, albums, savedId) {
+  select.innerHTML = '<option value="">None (main library)</option>';
+  for (const album of albums) {
+    const opt = document.createElement("option");
+    opt.value = album.id;
+    opt.textContent = album.title || album.id;
+    select.appendChild(opt);
+  }
+  if (savedId) select.value = savedId;
+}
 
 function loadAlbums() {
   albumSelect.disabled = true;
   chrome.runtime.sendMessage({ type: "LIST_ALBUMS" }, (res) => {
     albumSelect.disabled = false;
-    // Keep "None" option
-    albumSelect.innerHTML = '<option value="">None (main library)</option>';
-
     if (res?.ok && res.albums) {
-      for (const album of res.albums) {
-        const opt = document.createElement("option");
-        opt.value = album.id;
-        opt.textContent = album.title || album.id;
-        albumSelect.appendChild(opt);
-      }
+      chrome.storage.local.get("albumId", ({ albumId }) => {
+        populateAlbumSelect(albumSelect, res.albums, albumId);
+      });
+      // Also populate training album dropdown
+      populateAlbumSelect(trainingAlbumSelect, res.albums, "");
+      trainingAlbumSelect.dispatchEvent(new Event("change"));
     }
-
-    // Restore saved selection
-    chrome.storage.local.get("albumId", ({ albumId }) => {
-      if (albumId) albumSelect.value = albumId;
-    });
   });
 }
 
@@ -117,19 +222,35 @@ btnCreateAlbum.addEventListener("click", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Face encoding from reference photos                                */
+/*  Face Training – tab switching                                      */
 /* ------------------------------------------------------------------ */
 
-/**
- * Read a file input as an ArrayBuffer, then store the raw data.
- * Full face-api.js encoding is done lazily at sync time; here we
- * persist the raw image bytes so the encoding can be computed later
- * in an offscreen document or the options page with face-api loaded.
- *
- * For the foundational build, we store the image as a base64 data URL
- * and the encoding placeholder. When face-api.js models are available,
- * this converts to a real 128-D descriptor.
- */
+document.querySelectorAll(".training-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".training-tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".training-panel").forEach((p) => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(tab.dataset.panel).classList.add("active");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Face Training – manual upload with live match preview             */
+/* ------------------------------------------------------------------ */
+
+/** Pending training files: [{ file, dataUrl, descriptor: number[]|null, matchPct: number|null }] */
+let pendingTrainingFiles = [];
+
+async function fileToImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Image load failed")); };
+    img.src = url;
+  });
+}
+
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -139,15 +260,194 @@ function readFileAsDataURL(file) {
   });
 }
 
+function matchBadgeClass(pct) {
+  if (pct === null) return "none";
+  if (pct >= 80) return "good";
+  if (pct >= 50) return "ok";
+  return "bad";
+}
+
+function buildPreviewCard(entry, index) {
+  const card = document.createElement("div");
+  card.className = "match-preview";
+  card.dataset.index = index;
+
+  const img = document.createElement("img");
+  img.src = entry.dataUrl;
+  img.alt = "Training photo";
+
+  const info = document.createElement("div");
+  info.style.flex = "1";
+
+  const fileName = document.createElement("div");
+  fileName.style.fontSize = "12px";
+  fileName.style.fontWeight = "600";
+  fileName.textContent = entry.file.name;
+
+  const badge = document.createElement("span");
+  badge.className = "match-badge";
+  if (!faceApiAvailable) {
+    badge.textContent = "Models unavailable";
+    badge.className += " none";
+  } else if (entry.descriptor === null && entry.matchPct === null) {
+    badge.textContent = "No face detected";
+    badge.className += " bad";
+  } else if (entry.matchPct !== null) {
+    badge.textContent = `Match: ${entry.matchPct}%`;
+    badge.className += ` ${matchBadgeClass(entry.matchPct)}`;
+  } else {
+    // First photo – no comparison yet
+    badge.textContent = "Face detected ✓";
+    badge.className += " good";
+  }
+
+  info.appendChild(fileName);
+  info.appendChild(badge);
+  card.appendChild(img);
+  card.appendChild(info);
+  return card;
+}
+
+function renderTrainingPreviews() {
+  trainingPreviews.innerHTML = "";
+  for (let i = 0; i < pendingTrainingFiles.length; i++) {
+    trainingPreviews.appendChild(buildPreviewCard(pendingTrainingFiles[i], i));
+  }
+  btnSaveTraining.disabled = pendingTrainingFiles.length === 0;
+}
+
+trainingFileInput.addEventListener("change", async () => {
+  const files = Array.from(trainingFileInput.files).slice(0, 10);
+  pendingTrainingFiles = [];
+  renderTrainingPreviews(); // show immediately while loading
+
+  // Get existing descriptors for this child (for comparison)
+  const childName = trainingChildSelect.value;
+  let existingDescriptors = [];
+  if (childName) {
+    const { childEncodings = [] } = await chrome.storage.local.get("childEncodings");
+    const found = childEncodings.find((c) => c.name === childName);
+    if (found?.allDescriptors) existingDescriptors = found.allDescriptors;
+    else if (found?.descriptor) existingDescriptors = [found.descriptor];
+  }
+
+  for (const file of files) {
+    const dataUrl = await readFileAsDataURL(file);
+    const entry = { file, dataUrl, descriptor: null, matchPct: null };
+    pendingTrainingFiles.push(entry);
+
+    if (faceApiAvailable) {
+      try {
+        const img = await fileToImage(file);
+        const descriptor = await buildEncoding(img);
+        entry.descriptor = descriptor ? Array.from(descriptor) : null;
+
+        if (descriptor) {
+          const allDescriptors = [
+            ...existingDescriptors,
+            ...pendingTrainingFiles
+              .slice(0, pendingTrainingFiles.indexOf(entry))
+              .filter((e) => e.descriptor)
+              .map((e) => e.descriptor),
+          ];
+          const { matchPct } = await computeMatchPercent(img, allDescriptors);
+          entry.matchPct = matchPct;
+        }
+      } catch (err) {
+        console.warn("[options] face encoding error:", err.message);
+      }
+    }
+  }
+
+  renderTrainingPreviews();
+});
+
+btnSaveTraining.addEventListener("click", async () => {
+  const childName = trainingChildSelect.value;
+  if (!childName) {
+    alert("Please select a child first.");
+    return;
+  }
+  const valid = pendingTrainingFiles.filter((e) => e.descriptor !== null);
+  if (valid.length === 0) {
+    alert("No valid face photos detected. Please choose clearer photos.");
+    return;
+  }
+
+  btnSaveTraining.disabled = true;
+  btnSaveTraining.textContent = "Saving…";
+
+  const { childEncodings = [] } = await chrome.storage.local.get("childEncodings");
+  const filtered = childEncodings.filter((c) => c.name !== childName);
+  filtered.push({
+    name: childName,
+    descriptor: valid[0].descriptor, // primary descriptor
+    allDescriptors: valid.map((e) => e.descriptor),
+  });
+  await chrome.storage.local.set({ childEncodings: filtered });
+
+  btnSaveTraining.disabled = false;
+  btnSaveTraining.textContent = "💾 Save training photos";
+  pendingTrainingFiles = [];
+  renderTrainingPreviews();
+  showToast(`✓ Saved ${valid.length} training photo(s) for ${childName}`);
+});
+
 /* ------------------------------------------------------------------ */
-/*  Save                                                               */
+/*  Face Training – import from Google Photos album                   */
 /* ------------------------------------------------------------------ */
+
+trainingAlbumRefresh.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "LIST_ALBUMS" }, (res) => {
+    if (res?.ok && res.albums) {
+      populateAlbumSelect(trainingAlbumSelect, res.albums, "");
+    }
+  });
+});
+
+trainingAlbumSelect.addEventListener("change", () => {
+  btnImportAlbum.disabled = !trainingAlbumSelect.value;
+});
+
+btnImportAlbum.addEventListener("click", () => {
+  const albumId = trainingAlbumSelect.value;
+  const childName = trainingChildSelect.value;
+  if (!albumId) { alert("Please select an album."); return; }
+  if (!childName) { alert("Please select a child first."); return; }
+
+  btnImportAlbum.disabled = true;
+  importStatus.textContent = "Importing…";
+
+  chrome.runtime.sendMessage(
+    { type: "IMPORT_TRAINING_ALBUM", albumId, childName },
+    (res) => {
+      btnImportAlbum.disabled = false;
+      if (res?.ok) {
+        importStatus.textContent =
+          `✓ Imported ${res.count} face descriptor(s) for ${childName}.`;
+      } else {
+        importStatus.textContent =
+          "✗ Import failed: " + (res?.error || "Unknown error");
+      }
+    }
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/*  Save all settings                                                  */
+/* ------------------------------------------------------------------ */
+
+function showToast(msg = "✓ Settings saved!") {
+  toast.textContent = msg;
+  toast.style.display = "block";
+  setTimeout(() => { toast.style.display = "none"; }, 2500);
+}
 
 btnSave.addEventListener("click", async () => {
   btnSave.disabled = true;
   btnSave.textContent = "Saving…";
 
-  // Collect children data
+  // Collect children
   const children = [];
   const childEncodings = [];
 
@@ -157,19 +457,16 @@ btnSave.addEventListener("click", async () => {
 
     const childData = { name };
 
-    // If a new reference photo was selected, read it
     if (row.fileInput.files.length > 0) {
       const dataUrl = await readFileAsDataURL(row.fileInput.files[0]);
       childData.referencePhoto = dataUrl;
-      // Store a placeholder encoding entry; real encoding is computed
-      // when face-api.js models are loaded (see face.js).
       childEncodings.push({
         name,
         referencePhoto: dataUrl,
-        descriptor: null, // will be computed at sync/build time
+        descriptor: null, // computed lazily by offscreen doc or training section
       });
     } else {
-      // Preserve existing encoding if available
+      // Preserve existing encoding
       const { childEncodings: existing = [] } =
         await chrome.storage.local.get("childEncodings");
       const prev = existing.find((c) => c.name === name);
@@ -182,7 +479,7 @@ btnSave.addEventListener("click", async () => {
   // Validate GPS
   const lat = parseFloat(latInput.value);
   const lon = parseFloat(lonInput.value);
-  const validLat = !isNaN(lat) && lat >= -90 && lat <= 90;
+  const validLat = !isNaN(lat) && lat >= -90  && lat <= 90;
   const validLon = !isNaN(lon) && lon >= -180 && lon <= 180;
 
   if (latInput.value && !validLat) {
@@ -198,23 +495,24 @@ btnSave.addEventListener("click", async () => {
     return;
   }
 
-  // Save to chrome.storage.local
+  // Validate thresholds
+  const autoThreshold = parseInt(autoThresholdSlider.value, 10);
+  const minThreshold  = parseInt(minThresholdSlider.value, 10);
+
   await chrome.storage.local.set({
     children,
     childEncodings,
+    daycareName: daycareNameInput.value.trim(),
     daycareLat: validLat ? lat : null,
     daycareLon: validLon ? lon : null,
     albumId: albumSelect.value || "",
+    autoThreshold,
+    minThreshold,
   });
 
   btnSave.disabled = false;
   btnSave.textContent = "💾 Save Settings";
-
-  // Show toast
-  toast.style.display = "block";
-  setTimeout(() => {
-    toast.style.display = "none";
-  }, 2500);
+  showToast();
 });
 
 /* ------------------------------------------------------------------ */
@@ -224,9 +522,12 @@ btnSave.addEventListener("click", async () => {
 (async function init() {
   const data = await chrome.storage.local.get([
     "children",
+    "daycareName",
     "daycareLat",
     "daycareLon",
     "albumId",
+    "autoThreshold",
+    "minThreshold",
   ]);
 
   // Children
@@ -234,13 +535,26 @@ btnSave.addEventListener("click", async () => {
   if (children.length > 0) {
     renderChildren(children);
   } else {
-    addChildRow(); // start with one empty row
+    addChildRow();
+    syncTrainingChildDropdown();
   }
+
+  // Daycare name
+  if (data.daycareName) daycareNameInput.value = data.daycareName;
 
   // GPS
   if (data.daycareLat != null) latInput.value = data.daycareLat;
   if (data.daycareLon != null) lonInput.value = data.daycareLon;
 
-  // Albums (async)
+  // Thresholds
+  if (data.autoThreshold != null) {
+    autoThresholdSlider.value = data.autoThreshold;
+  }
+  if (data.minThreshold != null) {
+    minThresholdSlider.value = data.minThreshold;
+  }
+  updateThresholdDesc();
+
+  // Albums
   loadAlbums();
 })();

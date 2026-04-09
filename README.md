@@ -71,9 +71,11 @@ To enable facial recognition filtering:
 2. Click **⚙ Settings** (or right-click the icon → Options) to open the Settings page.
 3. Configure:
    - **Children**: Add names and upload a clear reference photo for each child.
-   - **Daycare Location**: Enter your daycare's GPS coordinates (latitude/longitude). [Find on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?" to get coordinates.
+   - **Daycare Location**: Enter your daycare's name and GPS coordinates (latitude/longitude). [Find on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?" to get coordinates.
+   - **Confidence Thresholds**: Set how strict the facial recognition is (see below).
    - **Album**: Choose an existing Google Photos album or create a new one.
 4. Click **💾 Save Settings**.
+5. *(Optional)* In the **Face Training Data** section, upload 5–10 clear face photos of each child to build the recognition model. A live match % is shown for each photo to help you choose high-quality training images. You can also import photos directly from a Google Photos album.
 
 ### Syncing Photos
 
@@ -82,10 +84,30 @@ To enable facial recognition filtering:
 3. The extension will:
    - Scroll your Storypark feed to discover photos
    - Download new images
-   - Apply facial recognition (if configured)
-   - Stamp EXIF date & GPS metadata
-   - Upload matching photos to Google Photos
+   - Apply facial recognition (if configured) and classify photos:
+     - **Auto-approved** (match ≥ Auto-Approve threshold) → uploaded immediately
+     - **Review Queue** (match between thresholds) → held for manual review
+     - **Discarded** (match below Minimum threshold) → skipped
+   - Stamp EXIF date, GPS, and daycare name into each photo
+   - Upload approved photos to Google Photos
 4. Progress is shown in the popup's log panel.
+
+### Confidence Thresholds
+
+The **Settings** page lets you configure two thresholds for facial recognition:
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| **Auto-Approve Threshold** | 85% | Photos with a match ≥ this % are uploaded automatically |
+| **Minimum Review Threshold** | 50% | Photos with a match between this and Auto-Approve go to the Review Queue |
+
+> **Tip:** Set Auto-Approve to 100% and Minimum Review to 0% to send every matched photo to the Review Queue and approve them all manually.
+
+### Review Queue
+
+When a sync runs, photos that fall between the two thresholds appear in the **Review Queue** at the bottom of the popup. For each photo you can:
+- **✅ Approve** — stamps EXIF data and uploads it to Google Photos immediately.
+- **❌ Reject** — discards the photo (it will not be processed again).
 
 ### Incremental Sync
 
@@ -100,12 +122,14 @@ extension/
 ├── manifest.json          # Chrome Extension manifest (V3)
 ├── background.js          # Service worker – orchestrates the sync pipeline
 ├── content.js             # Content script – injected into Storypark, scrapes the feed
-├── popup.html / popup.js  # Popup UI – Connect, Sync, progress log
-├── options.html / options.js  # Settings page – children, GPS, album
+├── offscreen.html         # Offscreen document host (face-api.js needs Canvas/DOM)
+├── offscreen.js           # Face recognition worker (runs in offscreen document)
+├── popup.html / popup.js  # Popup UI – Connect, Sync, progress log, Review Queue
+├── options.html / options.js  # Settings page – children, thresholds, GPS, album, training
 ├── lib/
 │   ├── utils.js           # Shared constants and helpers
 │   ├── exif.js            # EXIF metadata writer (date + GPS)
-│   └── face.js            # Face detection/recognition via face-api.js
+│   └── face.js            # Face detection/recognition helpers (used by options page)
 ├── models/                # face-api.js model weights (user-supplied)
 └── icons/                 # Extension icons
 ```
@@ -114,10 +138,11 @@ extension/
 
 | Module | Role |
 |---|---|
-| `background.js` | Service worker: Google OAuth, image download, EXIF stamping, Google Photos upload, state tracking |
+| `background.js` | Service worker: Google OAuth, image download, offscreen face filtering, EXIF stamping, Google Photos upload, review queue management |
 | `content.js` | Content script: scrolls Storypark feed, extracts image URLs and post dates from the DOM |
-| `popup.js` | Popup UI: 1-click sync, connection status, live progress log |
-| `options.js` | Settings page: children management, GPS input, album selection |
+| `offscreen.js` | Offscreen document worker: face-api.js face recognition (requires Canvas/DOM APIs unavailable in service worker) |
+| `popup.js` | Popup UI: 1-click sync, connection status, live progress log, Review Queue HITL |
+| `options.js` | Settings page: children, daycare name/GPS, confidence thresholds, album selection, face training |
 | `lib/exif.js` | Pure-JS EXIF writer — stamps DateTimeOriginal and GPS into JPEG blobs |
 | `lib/face.js` | Face detection/recognition via face-api.js (TensorFlow.js, runs 100% client-side) |
 | `lib/utils.js` | Shared selectors, timing constants, logging, date parsing |
@@ -173,9 +198,13 @@ Google Photos API has daily upload limits. If the quota is reached mid-sync, the
 | "Not connected to Google" | Click **Connect to Google** in the popup |
 | Google connection fails | Verify your OAuth Client ID is correct in `manifest.json` and the Photos Library API is enabled |
 | No photos uploaded | Check that your Storypark feed has images; try scrolling manually first to confirm they load |
+| All photos going to Review Queue | Lower the Auto-Approve Threshold in Settings, or set it below 100% |
+| Too many wrong photos uploaded | Raise the Auto-Approve Threshold and/or add more training photos |
+| face-api.js warning in Settings | Download `face-api.min.js` (v0.22.2) from the [face-api.js releases page](https://github.com/justadudewhohacks/face-api.js/releases) and place it in `extension/lib/` |
 | Face recognition not working | Ensure model weight files are in `extension/models/` (see [Setup](#4-set-up-face-recognition-models-optional)) |
 | "Daily quota reached" | Google Photos limits uploads per day; wait 24 hours and sync again |
 | Want to reprocess everything | Open Chrome DevTools → Application → Storage → Clear `processedUrls` from extension storage |
+| Review Queue not clearing | Use ✅ Approve or ❌ Reject buttons in the popup for each item |
 
 ---
 

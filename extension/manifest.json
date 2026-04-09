@@ -10,9 +10,11 @@
   },
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "identity",
     "activeTab",
-    "scripting"
+    "scripting",
+    "offscreen"
   ],
   "host_permissions": [
     "https://app.storypark.com/*",
