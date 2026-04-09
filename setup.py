@@ -183,6 +183,8 @@ def _write_config(cfg: dict) -> None:
         "daycare_longitude":        cfg["longitude"],
         "headless_browser":         cfg["headless"],
         "max_posts":                cfg["max_posts"],
+        "album_id":                 cfg.get("album_id", ""),
+        "album_title":              cfg.get("album_title", ""),
     })
 
 
@@ -207,7 +209,7 @@ def run_wizard() -> None:
     # ------------------------------------------------------------------
     # Step 1 – Storypark credentials
     # ------------------------------------------------------------------
-    _banner("Step 1 of 5 – Storypark Account")
+    _banner("Step 1 of 6 – Storypark Account")
     print()
     cfg["storypark_email"] = _ask("Storypark email")
     storypark_password = _ask_password("Storypark password")
@@ -229,7 +231,7 @@ def run_wizard() -> None:
     # ------------------------------------------------------------------
     # Step 2 – Google Photos OAuth
     # ------------------------------------------------------------------
-    _banner("Step 2 of 5 – Google Photos Account")
+    _banner("Step 2 of 6 – Google Photos Account")
     print()
     print("  A browser window will open so you can sign in to Google and")
     print("  grant this app access to your Google Photos library.")
@@ -249,9 +251,72 @@ def run_wizard() -> None:
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # Step 3 – Children and face encodings
+    # Step 3 – Album management
     # ------------------------------------------------------------------
-    _banner("Step 3 of 5 – Your Children")
+    _banner("Step 3 of 6 – Google Photos Album (optional)")
+    print()
+    print("  You can upload synced photos into a dedicated album, or")
+    print("  skip this step to upload directly to your main library.")
+    print()
+    use_album = _ask_yn("Upload to a dedicated album?", default=False)
+
+    cfg["album_id"] = ""
+    cfg["album_title"] = ""
+
+    if use_album:
+        print()
+        print("  Would you like to:")
+        print("    1. Create a new album")
+        print("    2. Pick an existing album")
+        print()
+        album_choice = _ask_int("Enter 1 or 2", default=1, min_val=1)
+        while album_choice not in (1, 2):
+            print("    Please enter 1 or 2.")
+            album_choice = _ask_int("Enter 1 or 2", default=1, min_val=1)
+
+        if album_choice == 1:
+            album_name = _ask("New album name", default="Storypark Photos")
+            try:
+                new_album = google_photos.create_album(session, album_name)
+                cfg["album_id"] = new_album["id"]
+                cfg["album_title"] = new_album.get("title", album_name)
+                print(f"  ✓ Album '{cfg['album_title']}' created.")
+            except Exception as exc:
+                print(f"\n  ✗ Could not create album: {exc}")
+                print("  Photos will be uploaded to the main library instead.")
+        else:
+            print()
+            print("  Fetching your Google Photos albums…")
+            try:
+                existing_albums = google_photos.list_albums(session)
+            except Exception as exc:
+                print(f"\n  ✗ Could not fetch albums: {exc}")
+                existing_albums = []
+
+            if existing_albums:
+                for idx, alb in enumerate(existing_albums, 1):
+                    count = alb.get("mediaItemsCount", "?")
+                    title = alb.get("title", "(untitled)")
+                    print(f"    {idx:3}.  {title}  ({count} items)")
+                print()
+                while True:
+                    pick = _ask_int("Select album (enter number)", default=1, min_val=1)
+                    if 1 <= pick <= len(existing_albums):
+                        break
+                    print(f"    Please enter a number between 1 and {len(existing_albums)}.")
+                chosen = existing_albums[pick - 1]
+                cfg["album_id"] = chosen["id"]
+                cfg["album_title"] = chosen.get("title", "")
+                print(f"  ✓ Album '{cfg['album_title']}' selected.")
+            else:
+                print("  No albums found – photos will go to the main library.")
+    else:
+        print("  ✓ Photos will be uploaded to the main Google Photos library.")
+
+    # ------------------------------------------------------------------
+    # Step 4 – Children and face encodings
+    # ------------------------------------------------------------------
+    _banner("Step 4 of 6 – Your Children")
     print()
     print("  For each child, you will pick a Google Photos album that")
     print("  contains plenty of clear photos of their face.  The wizard")
@@ -344,9 +409,9 @@ def run_wizard() -> None:
     print(f"\n  ✓ Face encodings saved to {REFERENCE_ENCODINGS_FILE}")
 
     # ------------------------------------------------------------------
-    # Step 4 – Daycare GPS
+    # Step 5 – Daycare GPS
     # ------------------------------------------------------------------
-    _banner("Step 4 of 5 – Daycare Location (GPS)")
+    _banner("Step 5 of 6 – Daycare Location (GPS)")
     print()
     print("  These coordinates are stamped into every matched photo so it")
     print("  appears at the daycare location in Google Photos timelines.")
@@ -365,9 +430,9 @@ def run_wizard() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Step 5 – Options
+    # Step 6 – Options
     # ------------------------------------------------------------------
-    _banner("Step 5 of 5 – Options")
+    _banner("Step 6 of 6 – Options")
     print()
     cfg["headless"] = _ask_yn(
         "Run browser in headless mode? (no visible window – recommended)",

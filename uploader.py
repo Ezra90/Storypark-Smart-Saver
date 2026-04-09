@@ -14,6 +14,7 @@ import logging
 import os
 
 import google_photos
+from config import ALBUM_ID
 from google_photos import QuotaExceededError
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,8 @@ def upload_photos(posts: list[dict], state_conn) -> list[dict]:
 
         try:
             success = google_photos.create_media_item(
-                session, upload_token, filename, description
+                session, upload_token, filename, description,
+                album_id=ALBUM_ID,
             )
         except QuotaExceededError as exc:
             logger.warning(

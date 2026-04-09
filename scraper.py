@@ -24,8 +24,10 @@ Each returned dict contains:
 """
 
 import os
+import random
 import re
 import logging
+import time
 import urllib.parse
 from pathlib import Path
 from datetime import datetime
@@ -288,7 +290,7 @@ def scrape(state_conn) -> list[dict]:
                 stalled_scrolls = 0
             previous_height = current_height
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1_500)
+            page.wait_for_timeout(int(random.uniform(1500, 3500)))
 
             # For incremental runs: check if the bottom posts are all known
             if incremental:
@@ -459,6 +461,7 @@ def scrape(state_conn) -> list[dict]:
                     logger.debug("Already processed, skipping: %s", image_url)
                     continue
 
+                time.sleep(random.uniform(0.5, 1.5))
                 local_path = _download_image(image_url, TEMP_DIR)
                 if local_path:
                     results.append(
