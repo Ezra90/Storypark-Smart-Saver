@@ -18,6 +18,19 @@ A Raspberry Pi is the ideal "set and forget" device for this pipeline.  Leave it
 
 ---
 
+## Quick start (recommended)
+
+1. [Flash Raspberry Pi OS](#1-flash-the-operating-system) (64-bit, not Lite).
+2. Boot the Pi and connect to the internet.
+3. Clone the project and **run `./install_rpi.sh`** – installs all dependencies automatically.  
+   *(The dlib compilation step takes 15–40 minutes – this is normal.)*
+4. Follow the [Google Cloud credentials](#8-set-up-google-cloud-credentials) steps and copy `client_secret.json` to the project folder.
+5. **Run `./run_rpi.sh`** – opens the graphical app.  
+   Click **⚙ Settings** to run the setup wizard (one time only), then **▶ Sync Photos Now**.
+6. Set up a daily cron job so the sync runs automatically every night.
+
+---
+
 ## Table of contents
 
 1. [Flash the operating system](#1-flash-the-operating-system)
@@ -201,10 +214,20 @@ The wizard steps are the same as described in the [main README](README.md#3--run
 
 ## 10. Run the pipeline
 
+**With the graphical app:**
+
 ```bash
-cd ~/Storypark-Scraper
-source venv/bin/activate
-python main.py
+./run_rpi.sh
+```
+
+This opens the GUI.  Click **▶ Sync Photos Now** to start.
+
+**Headless / CLI mode** (for cron jobs or SSH sessions without a display):
+
+```bash
+./run_rpi.sh --cli
+# or directly:
+source venv/bin/activate && python main.py
 ```
 
 The first run processes all historical Storypark posts and may take **1–3 hours** depending on how many posts exist and your Pi model.  Subsequent daily runs typically take **2–10 minutes**.
@@ -226,7 +249,7 @@ If prompted to choose an editor, pick **nano** (option 1).
 Add this line at the bottom of the file to run the pipeline every day at **2:00 AM**:
 
 ```cron
-0 2 * * * /home/pi/Storypark-Scraper/venv/bin/python /home/pi/Storypark-Scraper/main.py >> /home/pi/Storypark-Scraper/pipeline.log 2>&1
+0 2 * * * /home/pi/Storypark-Scraper/run_rpi.sh --cli >> /home/pi/Storypark-Scraper/pipeline.log 2>&1
 ```
 
 > ⚠️ Replace `pi` with your actual Pi username if you chose a different one during setup.

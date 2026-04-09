@@ -4,6 +4,19 @@ This guide walks Windows users through every step from a blank PC to a fully run
 
 ---
 
+## Quick start (recommended)
+
+1. [Download the project](#5-download-the-project) and open the folder.
+2. **Double-click `install_windows.bat`** – installs Python, CMake, build tools, and all dependencies automatically.
+3. Follow the [Google Cloud credentials](#9-set-up-google-cloud-credentials) steps and save `client_secret.json` in the project folder.
+4. **Double-click `run_windows.bat`** – opens the graphical app.
+5. Click **⚙ Settings** to run the setup wizard (one time only), then **▶ Sync Photos Now**.
+
+> The installer handles everything automatically using Windows Package Manager (winget).  
+> If it fails at any step, the detailed manual steps below explain what to do.
+
+---
+
 ## Table of contents
 
 1. [Prerequisites](#1-prerequisites)
@@ -190,13 +203,13 @@ You need an OAuth 2.0 client secret so the pipeline can access your Google Photo
 
 ---
 
-## 10. Run the setup wizard
-
-Make sure your virtual environment is active (you should see `(venv)` in the prompt), then:
+## Run the setup wizard
 
 ```cmd
 python setup.py
 ```
+
+Or simply double-click `run_windows.bat` to open the graphical app and click **⚙ Settings**.
 
 The wizard walks you through five steps:
 
@@ -218,6 +231,16 @@ You only need to run setup once.
 ---
 
 ## 11. Run the pipeline
+
+**With the graphical app:**
+
+```cmd
+run_windows.bat
+```
+
+Double-click this file to open the app, then click **▶ Sync Photos Now**.
+
+**From the command line:**
 
 With the virtual environment active:
 

@@ -119,7 +119,70 @@ def _summarise(uploaded: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Pipeline (callable from GUI or CLI)
+# ---------------------------------------------------------------------------
+
+def run_pipeline(progress_callback=None) -> dict:
+    """
+    Run the full pipeline, optionally reporting progress to a callback.
+
+    This is the entry point used by the GUI (``gui.py``).  The CLI entry
+    point ``main()`` calls this with no callback.
+
+    ``progress_callback(step: str, message: str, percent: int)`` is called
+    at the start of each major stage so the GUI can update its progress bar
+    without blocking the main thread.
+
+    Returns a summary dict::
+
+        {"scraped": N, "matched": N, "uploaded": N}
+    """
+    def _progress(step: str, message: str, percent: int) -> None:
+        logger.info(message)
+        if progress_callback:
+            progress_callback(step, message, percent)
+
+    _progress("setup", "Checking configuration…", 2)
+    _check_setup()
+
+    _progress("db", "Initialising state database…", 5)
+    conn = state_manager.init_db()
+
+    _progress("scrape", "Logging in to Storypark and scanning for new photos…", 10)
+    posts = scraper.scrape(conn)
+    scraped = len(posts)
+
+    if not posts:
+        _progress("done", "No new photos found – already up to date.", 100)
+        conn.close()
+        return {"scraped": 0, "matched": 0, "uploaded": 0}
+
+    _progress("filter", f"Running face recognition on {scraped} photo(s)…", 50)
+    posts = face_filter.filter_photos(posts)
+    matched = len(posts)
+
+    if not posts:
+        _progress("done", "No photos matched your children.", 100)
+        conn.close()
+        _cleanup_temp_dir()
+        return {"scraped": scraped, "matched": 0, "uploaded": 0}
+
+    _progress("exif", f"Stamping EXIF date and GPS on {matched} matched photo(s)…", 70)
+    posts = exif_modifier.apply_exif(posts)
+
+    _progress("upload", f"Uploading {len(posts)} photo(s) to Google Photos…", 85)
+    uploaded = uploader.upload_photos(posts, conn)
+
+    _progress("done", f"Done – {len(uploaded)} photo(s) uploaded to Google Photos.", 100)
+    _summarise(uploaded)
+    _cleanup_temp_dir()
+    conn.close()
+
+    return {"scraped": scraped, "matched": matched, "uploaded": len(uploaded)}
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
@@ -128,70 +191,15 @@ def main() -> None:
     logger.info("Children: %s", ", ".join(CHILDREN) if CHILDREN else "(none)")
     logger.info("=" * 60)
 
-    # ------------------------------------------------------------------
-    # Pre-flight check
-    # ------------------------------------------------------------------
-    _check_setup()
-
-    # ------------------------------------------------------------------
-    # Step 1 – State database
-    # ------------------------------------------------------------------
-    conn = state_manager.init_db()
-
-    # ------------------------------------------------------------------
-    # Step 2 – Scrape & download
-    # ------------------------------------------------------------------
-    logger.info("STEP 1/4 – Scraping Storypark…")
-    posts = scraper.scrape(conn)
-
-    if not posts:
-        logger.info("No new photos found. Nothing to do.")
-        conn.close()
-        return
-
-    logger.info("Downloaded %d new image(s).", len(posts))
-
-    # ------------------------------------------------------------------
-    # Step 3 – Facial recognition filter
-    # ------------------------------------------------------------------
-    logger.info("STEP 2/4 – Filtering photos by face recognition…")
-    posts = face_filter.filter_photos(posts)
-
-    if not posts:
-        logger.info("No photos matched any of the configured children.")
-        conn.close()
-        _cleanup_temp_dir()
-        return
-
-    logger.info("%d photo(s) matched.", len(posts))
-
-    # ------------------------------------------------------------------
-    # Step 4 – EXIF metadata
-    # Stamps each photo with the Storypark upload date and daycare GPS.
-    # ------------------------------------------------------------------
-    logger.info("STEP 3/4 – Writing EXIF metadata (date + GPS)…")
-    posts = exif_modifier.apply_exif(posts)
-
-    # ------------------------------------------------------------------
-    # Step 5 – Google Photos upload
-    # ------------------------------------------------------------------
-    logger.info("STEP 4/4 – Uploading to Google Photos…")
-    uploaded = uploader.upload_photos(posts, conn)
-
-    logger.info(
-        "Pipeline complete: %d photo(s) uploaded to Google Photos.",
-        len(uploaded),
-    )
-    _summarise(uploaded)
-
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
-    _cleanup_temp_dir()
-    conn.close()
+    summary = run_pipeline()
 
     logger.info("=" * 60)
-    logger.info("All done!")
+    logger.info(
+        "All done – %d scraped, %d matched, %d uploaded.",
+        summary["scraped"],
+        summary["matched"],
+        summary["uploaded"],
+    )
     logger.info("=" * 60)
 
 

@@ -18,8 +18,8 @@ Automatically scrapes photos of your children from [Storypark](https://app.story
 | **Android phone/tablet** | ❌ Not supported | Playwright (the browser automation library) does not run on Android, and the face recognition library cannot be compiled for Android |
 
 **Recommendation for most people:**
-- If you have a **Windows PC that stays on** → use Windows with Task Scheduler (see [WINDOWS.md](WINDOWS.md))
-- If you want it **fully automated without keeping a PC running** → use a Raspberry Pi 4 or 5 (see [RASPBERRY_PI.md](RASPBERRY_PI.md))
+- If you have a **Windows PC that stays on** → run `install_windows.bat` then `run_windows.bat` (see [WINDOWS.md](WINDOWS.md))
+- If you want it **fully automated without keeping a PC running** → use a Raspberry Pi 4 or 5 – run `install_rpi.sh` then `run_rpi.sh` (see [RASPBERRY_PI.md](RASPBERRY_PI.md))
 - If you have a **Mac** → follow the Quick Start below
 
 ---
@@ -77,6 +77,13 @@ You need an OAuth 2.0 client ID that lets the pipeline read your Google Photos a
 
 ### 3 – Run the setup wizard (once only)
 
+**With the GUI (easiest – Windows and Raspberry Pi):**
+
+Double-click `run_windows.bat` (Windows) or run `./run_rpi.sh` (Raspberry Pi).  
+The app opens and guides you through setup with a visual step-by-step wizard.
+
+**From the command line (macOS / Linux):**
+
 ```bash
 python setup.py
 ```
@@ -92,6 +99,11 @@ The wizard will:
 You only need to run setup once.  Re-run it if you add a new child or change the daycare.
 
 ### 4 – Run the pipeline
+
+**With the GUI:**  
+Double-click `run_windows.bat` (Windows) or `./run_rpi.sh` (Raspberry Pi) and click **▶ Sync Photos Now**.
+
+**From the command line:**
 
 ```bash
 python main.py

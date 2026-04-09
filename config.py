@@ -13,6 +13,9 @@ via the get_storypark_password() function below.
 # ---------------------------------------------------------------------------
 # Storypark credentials
 # ---------------------------------------------------------------------------
+# Filled in by the setup wizard (setup.py or the GUI Settings button).
+# Do not edit STORYPARK_EMAIL by hand unless you also update the keychain
+# entry – run the setup wizard instead.
 STORYPARK_EMAIL = ""
 # Password is stored in the OS keychain – call get_storypark_password()
 STORYPARK_KEYRING_SERVICE = "storypark-scraper"

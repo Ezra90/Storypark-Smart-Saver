@@ -48,6 +48,11 @@ STORYPARK_URL = "https://app.storypark.com"
 LOGIN_URL = f"{STORYPARK_URL}/users/sign_in"
 FEED_URL = f"{STORYPARK_URL}/stories"
 
+# Safety valve: stop scrolling after this many consecutive unchanged page
+# heights even if the end-of-feed heuristic has not triggered.  500 rounds
+# at ~1.5 s each ≈ 12 minutes maximum scroll time per run.
+MAX_STALLED_SCROLLS = 500
+
 # CSS selectors – adjust here if Storypark changes its HTML structure
 SELECTORS = {
     "email_input": (
@@ -231,9 +236,8 @@ def scrape(state_conn) -> list[dict]:
         previous_height = -1
         stalled_scrolls = 0           # unchanged page height counter
         consecutive_known_batches = 0  # incremental early-stop counter
-        max_stalled = 500              # absolute safety valve
 
-        while stalled_scrolls < max_stalled:
+        while stalled_scrolls < MAX_STALLED_SCROLLS:
             # Try clicking a "Load more" button first
             try:
                 load_more = page.locator(SELECTORS["load_more"]).first

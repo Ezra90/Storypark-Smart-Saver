@@ -322,9 +322,10 @@ def run_wizard() -> None:
     children: list[str] = []
     encodings_by_child: dict = {}
 
-    for i in range(num_children):
+    child_num = 0
+    while child_num < num_children:
         print()
-        print(f"  ── Child {i + 1} of {num_children} ──────────────────────────────")
+        print(f"  ── Child {child_num + 1} of {num_children} ──────────────────────────────")
         child_name = _ask("Name")
 
         print()
@@ -355,8 +356,7 @@ def run_wizard() -> None:
             )
             retry = _ask_yn("  Try a different album?", default=True)
             if retry:
-                i -= 1  # repeat this child
-                continue
+                continue  # retry this child (child_num not incremented)
             print(f"  Skipping {child_name}.")
         else:
             print(
@@ -364,6 +364,8 @@ def run_wizard() -> None:
             )
             children.append(child_name)
             encodings_by_child[child_name] = child_encodings
+
+        child_num += 1  # advance to the next child only after this one is done
 
     if not children:
         print("\n  ✗ No face encodings were built.  Setup cannot continue.")
