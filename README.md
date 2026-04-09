@@ -57,7 +57,7 @@ To enable facial recognition filtering:
    - `face_landmark_68_model-weights_manifest.json` + shard files
    - `face_recognition_model-weights_manifest.json` + shard files
 3. Place all downloaded files into the `extension/models/` directory.
-4. Also download [`face-api.min.js`](https://github.com/justadudewhohacks/face-api.js/blob/master/dist/face-api.min.js) and place it in `extension/lib/`.
+4. Download [`face-api.min.js` (v0.22.2)](https://raw.githubusercontent.com/justadudewhohacks/face-api.js/v0.22.2/dist/face-api.min.js) and place it in `extension/lib/`.
 
 > Without these models, the extension will still scrape and upload **all** photos from your feed (no filtering).
 

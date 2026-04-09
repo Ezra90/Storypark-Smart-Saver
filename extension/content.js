@@ -25,7 +25,7 @@
   const SCROLL_DELAY_MIN = 1500;
   const SCROLL_DELAY_MAX = 3500;
   const MAX_STALLED_SCROLLS = 500;
-  const INCREMENTAL_STOP = 5;
+  const INCREMENTAL_STOP_THRESHOLD = 5;
 
   /* ---------- Helpers ---------- */
 
@@ -173,9 +173,9 @@
 
           if (knownUrls.has(imageUrl)) {
             consecutiveKnown++;
-            if (consecutiveKnown >= INCREMENTAL_STOP) {
+            if (consecutiveKnown >= INCREMENTAL_STOP_THRESHOLD) {
               sendProgress(
-                `Found ${INCREMENTAL_STOP} consecutive known images – stopping incremental scan.`
+                `Found ${INCREMENTAL_STOP_THRESHOLD} consecutive known images – stopping incremental scan.`
               );
               return results;
             }

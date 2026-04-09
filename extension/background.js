@@ -251,11 +251,10 @@ async function runSync() {
     settings.childEncodings && settings.childEncodings.length > 0;
 
   if (hasEncodings) {
-    await log("Face filtering is configured – images will be uploaded (face filtering requires offscreen document; see README for advanced setup).");
+    await log("Face filtering is configured but requires an offscreen document for Canvas/DOM access (not yet implemented). All images will be uploaded without filtering.");
     // NOTE: Full face-api.js filtering in a service worker requires an
-    // offscreen document with DOM/Canvas access. For the foundational build
-    // we pass images through; the offscreen document integration is a
-    // follow-up enhancement.
+    // offscreen document with DOM/Canvas access. This is planned as a
+    // follow-up enhancement. For now, all images pass through.
   }
   await log(`${filtered.length} images passed filtering.`);
 
