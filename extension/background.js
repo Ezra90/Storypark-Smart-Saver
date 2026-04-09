@@ -9,7 +9,7 @@
  *   5. Applies EXIF metadata (date + GPS) to approved images
  *   6. Uploads to Google Photos Library API
  *   7. Persists review queue items in chrome.storage.local for HITL review
- *   8. Tracks processed URLs to avoid re-uploading
+ *   8. Tracks processed URLs in IndexedDB (lib/db.js) to avoid re-uploading
  *
  * Message handlers exposed to popup / options:
  *   GOOGLE_CONNECT   GOOGLE_DISCONNECT   GOOGLE_STATUS
@@ -25,6 +25,7 @@ import {
   safeFilename,
   log,
 } from "./lib/utils.js";
+import { getAllProcessedUrls, markProcessedInDB } from "./lib/db.js";
 
 /* ================================================================== */
 /*  Google OAuth                                                       */
@@ -160,18 +161,28 @@ async function createAlbum(token, title) {
 }
 
 /* ================================================================== */
-/*  Processed-URL state                                                */
+/*  Processed-URL ledger (IndexedDB)                                  */
 /* ================================================================== */
 
+/**
+ * Return the set of all previously-processed image URLs.
+ * Delegates to IndexedDB (via lib/db.js) to avoid the 5 MB
+ * chrome.storage.local limit for users with years of history.
+ *
+ * @returns {Promise<Set<string>>}
+ */
 async function getProcessedUrls() {
-  const { processedUrls = [] } = await chrome.storage.local.get("processedUrls");
-  return new Set(processedUrls);
+  return getAllProcessedUrls();
 }
 
+/**
+ * Persist newly-processed image URLs into IndexedDB.
+ *
+ * @param {string[]} urls
+ * @returns {Promise<void>}
+ */
 async function markProcessed(urls) {
-  const { processedUrls = [] } = await chrome.storage.local.get("processedUrls");
-  const merged = [...new Set([...processedUrls, ...urls])];
-  await chrome.storage.local.set({ processedUrls: merged });
+  await markProcessedInDB(urls);
 }
 
 /* ================================================================== */
