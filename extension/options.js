@@ -297,6 +297,8 @@ function loadChildren() {
       renderChildrenList(res.children);
       populateTrainingChildSelect(res.children);
     }
+    // The profile refresh may have discovered new centre names – reload them.
+    loadCentreLocations();
   });
 }
 
@@ -445,9 +447,15 @@ trainingChildSelect.addEventListener("change", () => {
 });
 
 trainingFileInput.addEventListener("change", async () => {
-  const files = Array.from(trainingFileInput.files).slice(0, 25);
-  pendingTrainingFiles = [];
-  renderTrainingPreviews(); // show empty state immediately while loading
+  // Snapshot the newly-chosen files and immediately clear the input so the
+  // same file(s) can be re-selected later without triggering a no-op event.
+  const newFiles = Array.from(trainingFileInput.files);
+  trainingFileInput.value = "";
+
+  // Cap the total number of pending training photos at 25.
+  const slots = 25 - pendingTrainingFiles.length;
+  if (slots <= 0) return;
+  const filesToAdd = newFiles.slice(0, slots);
 
   const childId = trainingChildSelect.value;
   let existingDescriptors = [];
@@ -456,7 +464,7 @@ trainingFileInput.addEventListener("change", async () => {
     existingDescriptors = found?.descriptors ?? [];
   }
 
-  for (const file of files) {
+  for (const file of filesToAdd) {
     const dataUrl = await readFileAsDataURL(file);
     const entry   = {
       file,
@@ -466,7 +474,11 @@ trainingFileInput.addEventListener("change", async () => {
       descriptor:        null,
       matchPct:          null,
     };
+
+    // Append to the custom array and render immediately so the user can
+    // delete this entry before face detection completes for subsequent files.
     pendingTrainingFiles.push(entry);
+    renderTrainingPreviews();
 
     if (faceApiAvailable) {
       try {
@@ -491,17 +503,21 @@ trainingFileInput.addEventListener("change", async () => {
           }))
         );
 
-        entry.faces             = facesWithMatch;
-        entry.selectedFaceIndex = 0;
-        entry.descriptor        = facesWithMatch[0]?.embedding ?? null;
-        entry.matchPct          = facesWithMatch[0]?.matchPct  ?? null;
+        // Only update and re-render if the entry is still in the array
+        // (the user may have deleted it while face detection was running).
+        const entryIndex = pendingTrainingFiles.indexOf(entry);
+        if (entryIndex !== -1) {
+          entry.faces             = facesWithMatch;
+          entry.selectedFaceIndex = 0;
+          entry.descriptor        = facesWithMatch[0]?.embedding ?? null;
+          entry.matchPct          = facesWithMatch[0]?.matchPct  ?? null;
+          renderTrainingPreviews();
+        }
       } catch (err) {
         console.warn("[options] face encoding error:", err.message);
       }
     }
   }
-
-  renderTrainingPreviews();
 });
 
 btnSaveTraining.addEventListener("click", async () => {

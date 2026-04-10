@@ -240,11 +240,25 @@ async function loadAndCacheProfile() {
 
     // Auto-discover centres/communities from the profile response.
     // The API may include them under various keys; we merge whatever we find.
-    const rawCommunities = data.user?.communities || data.communities || [];
-    if (rawCommunities.length > 0) {
-      const names = rawCommunities
-        .map((c) => c.name || c.display_name || "")
-        .filter(Boolean);
+    const rawCommunities =
+      data.user?.communities  ||
+      data.communities        ||
+      data.user?.services     ||
+      data.services           ||
+      [];
+    const namesFromArray = rawCommunities
+      .map((c) => c.name || c.display_name || c.community_name || c.service_name || "")
+      .filter(Boolean);
+
+    // Also capture any scalar centre/service name exposed directly on the user object.
+    const scalarNames = [
+      data.user?.community_name,
+      data.user?.service_name,
+      data.user?.centre_name,
+    ].filter(Boolean);
+
+    const names = [...new Set([...namesFromArray, ...scalarNames])];
+    if (names.length > 0) {
       await discoverCentres(names);
     }
 
