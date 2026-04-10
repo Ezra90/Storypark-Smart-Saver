@@ -32,11 +32,11 @@ import {
  * Sleep for a random duration between min and max milliseconds.
  * All sequential API calls must be wrapped with this to avoid Cloudflare bans.
  *
- * @param {number} min  Default 1500 ms
- * @param {number} max  Default 3500 ms
+ * @param {number} minMs  Default 1500 ms
+ * @param {number} maxMs  Default 3500 ms
  */
-function sleep(min = 1500, max = 3500) {
-  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+function sleep(minMs = 1500, maxMs = 3500) {
+  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -236,8 +236,11 @@ function buildRoutineSummary(data) {
 /*  Main extraction pipeline                                           */
 /* ================================================================== */
 
+/** Characters forbidden in filesystem filenames across Windows/macOS/Linux. */
+const INVALID_FILENAME_CHARS = /[/\\:*?"<>|]/g;
+
 function sanitizeName(name) {
-  return (name || "Unknown").replace(/[/\\:*?"<>|]/g, "_").trim() || "Unknown";
+  return (name || "Unknown").replace(INVALID_FILENAME_CHARS, "_").trim() || "Unknown";
 }
 
 /**

@@ -60,6 +60,9 @@ const TAG_DATE_TIME_DIGITIZED = 0x9004;
 // TIFF field types
 const TYPE_ASCII = 2;
 
+/** Maximum byte length for the EXIF ImageDescription field (before NUL terminator). */
+const MAX_EXIF_DESCRIPTION_LENGTH = 1000;
+
 /**
  * Build a complete APP1 (Exif) segment as a Uint8Array.
  *
@@ -91,7 +94,7 @@ function buildExifSegment(date, description) {
   const dateStr = date ? formatExifDate(date) : null;
   // Filter description to ASCII-compatible characters (tab / LF / CR / printable ASCII)
   const descStr = description
-    ? description.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, "?").slice(0, 1000)
+    ? description.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, "?").slice(0, MAX_EXIF_DESCRIPTION_LENGTH)
     : null;
 
   // ifd0Count: ImageDescription (optional) + DateTime (optional) + ExifIFDPointer (always)

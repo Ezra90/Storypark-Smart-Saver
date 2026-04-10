@@ -111,14 +111,14 @@ function dataUrlToImage(dataUrl) {
  * Compute cosine similarity between two numeric vectors.
  */
 function cosineSimilarity(a, b) {
-  let dot = 0, normA = 0, normB = 0;
+  let dotProduct = 0, normVectorA = 0, normVectorB = 0;
   for (let i = 0; i < a.length; i++) {
-    dot   += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+    dotProduct  += a[i] * b[i];
+    normVectorA += a[i] * a[i];
+    normVectorB += b[i] * b[i];
   }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom > 0 ? dot / denom : 0;
+  const denom = Math.sqrt(normVectorA) * Math.sqrt(normVectorB);
+  return denom > 0 ? dotProduct / denom : 0;
 }
 
 /**

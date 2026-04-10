@@ -80,7 +80,8 @@ function populateChildren(children) {
     opt.value = "";
     opt.textContent = "No children found — open Storypark first";
     childSelect.appendChild(opt);
-    setRunning(true); // keep buttons disabled
+    // Disable extract buttons: no valid child to scan
+    setRunning(true);
     return;
   }
   for (const child of children) {
