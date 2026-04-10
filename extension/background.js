@@ -226,10 +226,44 @@ async function loadAndCacheProfile() {
       name: c.name || c.display_name || `Child ${c.id}`,
     }));
     await chrome.storage.local.set({ children });
+
+    // Auto-discover centres/communities from the profile response.
+    // The API may include them under various keys; we merge whatever we find.
+    const rawCommunities = data.user?.communities || data.communities || [];
+    if (rawCommunities.length > 0) {
+      const names = rawCommunities
+        .map((c) => c.name || c.display_name || "")
+        .filter(Boolean);
+      await discoverCentres(names);
+    }
+
     return children;
   } catch (err) {
     await logger("ERROR", `Profile fetch failed: ${err.message}`);
     return [];
+  }
+}
+
+/**
+ * Merge newly-discovered centre names into the persisted centreLocations
+ * map without overwriting existing GPS data.  Each key is a centre name;
+ * values are { lat: number|null, lng: number|null }.
+ *
+ * @param {string[]} names  One or more centre/community names
+ */
+async function discoverCentres(names) {
+  if (!names || names.length === 0) return;
+  const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+  let changed = false;
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (trimmed && !(trimmed in centreLocations)) {
+      centreLocations[trimmed] = { lat: null, lng: null };
+      changed = true;
+    }
+  }
+  if (changed) {
+    await chrome.storage.local.set({ centreLocations });
   }
 }
 
@@ -312,25 +346,29 @@ async function fetchRoutineSummary(childId, dateStr) {
 }
 
 function buildRoutineSummary(data) {
-  const parts = [];
+  const events = [];
 
   if (Array.isArray(data.meals) && data.meals.length > 0) {
-    parts.push(
-      "Meals: " +
-        data.meals
-          .map((m) => m.description || m.type || "meal")
-          .join(", ")
-    );
+    for (const m of data.meals) {
+      events.push(m.description || m.type || "meal");
+    }
   }
   if (Array.isArray(data.sleeps) && data.sleeps.length > 0) {
-    const s = data.sleeps[0];
-    parts.push(`Sleep: ${s.start_time || ""}–${s.end_time || ""}`);
+    for (const s of data.sleeps) {
+      const start = s.start_time || "";
+      const end   = s.end_time   || "";
+      if (start || end) {
+        events.push(`Sleep ${start}${start && end ? "–" : ""}${end}`.trim());
+      } else {
+        events.push("Sleep");
+      }
+    }
   }
   if (Array.isArray(data.toileting) && data.toileting.length > 0) {
-    parts.push(`Toileting: ${data.toileting.length} time(s)`);
+    events.push(`Toileting x${data.toileting.length}`);
   }
 
-  return parts.join(" | ");
+  return events.join(", ");
 }
 
 /* ================================================================== */
@@ -342,6 +380,53 @@ const INVALID_FILENAME_CHARS = /[/\\:*?"<>|]/g;
 
 function sanitizeName(name) {
   return (name || "Unknown").replace(INVALID_FILENAME_CHARS, "_").trim() || "Unknown";
+}
+
+/**
+ * Strip HTML tags from a string, collapse whitespace, and trim.
+ * @param {string} html
+ * @returns {string}
+ */
+function stripHtml(html) {
+  return (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Build the EXIF ImageDescription string from story metadata,
+ * following the structured template format.
+ *
+ * @param {string} body           Raw story body (may contain HTML)
+ * @param {string} childFirstName Child's first name
+ * @param {string} routineText    Comma-separated routine events (may be empty)
+ * @param {string} roomName       Room / group name (may be empty)
+ * @param {string} centreName     Centre / service name (may be empty)
+ * @returns {string}
+ */
+function buildDescription(body, childFirstName, routineText, roomName, centreName) {
+  const DIVIDER = "------------------------------";
+  const parts   = [];
+
+  // 1. Full story text, stripped of HTML
+  const plainBody = stripHtml(body);
+  if (plainBody) parts.push(plainBody);
+
+  // 2. Routine section (only if routine data exists)
+  if (routineText) {
+    parts.push(DIVIDER);
+    parts.push(`${childFirstName || "Child"}'s Routine Was:`);
+    parts.push(routineText);
+  }
+
+  // 3. Location / attribution section
+  const locationLines = [];
+  if (roomName)   locationLines.push(roomName);
+  if (centreName) locationLines.push(centreName);
+  locationLines.push("Storypark");
+
+  parts.push(DIVIDER);
+  parts.push(locationLines.join("\n"));
+
+  return parts.join("\n");
 }
 
 /**
@@ -418,10 +503,27 @@ async function runExtraction(childId, childName, mode) {
       continue;
     }
 
-    const createdAt  = story.created_at || summary.created_at || "";
-    const body       = story.body       || "";
-    const groupName  = story.group_name || story.community_name || "";
+    const createdAt    = story.created_at || summary.created_at || "";
+    const body         = story.body       || "";
+    const roomName     = story.group_name     || "";
+    const centreName   = story.community_name || story.centre_name || story.service_name || "";
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
+    const childFirstName = (childName || "").split(/\s+/)[0];
+
+    // Auto-discover this centre name for the Settings UI
+    if (centreName) {
+      discoverCentres([centreName]).catch(() => {});
+    }
+
+    // Look up GPS coordinates for this centre (user-configured)
+    let gpsCoords = null;
+    if (centreName) {
+      const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+      const loc = centreLocations[centreName];
+      if (loc && loc.lat != null && loc.lng != null) {
+        gpsCoords = { lat: loc.lat, lng: loc.lng };
+      }
+    }
 
     // Collect images with original_url
     const mediaItems = story.media_items || story.assets || story.media || [];
@@ -453,13 +555,9 @@ async function runExtraction(childId, childName, mode) {
       await smartDelay("DOWNLOAD_IMAGE");
 
       // Compile metadata string to embed in EXIF ImageDescription
-      const description = [
-        body,
-        groupName  ? `Room: ${groupName}`              : "",
-        routineText ? `Daily Routine: ${routineText}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const description = buildDescription(
+        body, childFirstName, routineText, roomName, centreName
+      );
 
       const savePath = `Storypark_Smart_Saver/${sanitizeName(childName)}/${img.filename}`;
 
@@ -472,7 +570,8 @@ async function runExtraction(childId, childName, mode) {
             storyId:     summary.id,
             createdAt,
             body,
-            groupName,
+            roomName,
+            centreName,
             originalUrl: img.originalUrl,
             filename:    img.filename,
           },
@@ -483,6 +582,7 @@ async function runExtraction(childId, childName, mode) {
           childEncodings,
           autoThreshold,
           minThreshold,
+          gpsCoords,
         });
       } catch (err) {
         if (err.name === "AuthError" || err.message.includes("401")) {
@@ -553,6 +653,17 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
     sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
   }
 
+  // Look up GPS coordinates for this centre at review-approve time
+  let gpsCoords = null;
+  const centreName = item.storyData?.centreName;
+  if (centreName) {
+    const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+    const loc = centreLocations[centreName];
+    if (loc && loc.lat != null && loc.lng != null) {
+      gpsCoords = { lat: loc.lat, lng: loc.lng };
+    }
+  }
+
   // Delegate image fetch + EXIF stamp + download to the offscreen document
   await sendToOffscreen({
     type:      "DOWNLOAD_APPROVED",
@@ -560,6 +671,7 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
     description: item.description || "",
     childName:  item.childName,
     savePath:   item.savePath,
+    gpsCoords,
   });
 
   await removeFromReviewQueue(id);
