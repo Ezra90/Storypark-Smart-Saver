@@ -181,6 +181,8 @@ async function sendToOffscreen(message) {
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
+      } else if (!response || response.error || response.ok === false) {
+        reject(new Error(response?.error || "Unknown offscreen error"));
       } else {
         resolve(response);
       }
@@ -355,6 +357,7 @@ async function runExtraction(childId, childName, mode) {
   let queued   = 0;
   let rejected = 0;
 
+  try {
   for (const summary of summaries) {
     await smartDelay("READ_STORY");
     await logger("INFO", `Processing story ${summary.id}…`);
@@ -367,7 +370,11 @@ async function runExtraction(childId, childName, mode) {
       );
       story = detail.story || detail;
     } catch (err) {
-      if (err instanceof AuthError || err instanceof RateLimitError) {
+      if (err.name === "AuthError" || err.message.includes("401")) {
+        await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
+        break;
+      }
+      if (err.name === "RateLimitError" || err.message.includes("429") || err.message.includes("403")) {
         await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
         break;
       }
@@ -440,7 +447,12 @@ async function runExtraction(childId, childName, mode) {
           minThreshold,
         });
       } catch (err) {
-        if (err instanceof AuthError || err instanceof RateLimitError) {
+        if (err.name === "AuthError" || err.message.includes("401")) {
+          await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
+          aborted = true;
+          break;
+        }
+        if (err.name === "RateLimitError" || err.message.includes("429") || err.message.includes("403")) {
           await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
           aborted = true;
           break;
@@ -468,8 +480,10 @@ async function runExtraction(childId, childName, mode) {
 
     await markStoryProcessed(summary.id, createdAt, childId);
   }
+  } finally {
+    routineCache.clear();
+  }
 
-  routineCache.clear();
   const msg = `Scan complete — Downloaded: ${approved}, Review: ${queued}, Rejected: ${rejected}`;
   await logger("SUCCESS", msg);
   return { approved, queued, rejected };
@@ -489,14 +503,13 @@ async function handleReviewApprove(id) {
   }
 
   // Delegate image fetch + EXIF stamp + download to the offscreen document
-  const res = await sendToOffscreen({
+  await sendToOffscreen({
     type:      "DOWNLOAD_APPROVED",
     storyData: item.storyData,
     description: item.description || "",
     childName:  item.childName,
     savePath:   item.savePath,
   });
-  if (!res?.ok) throw new Error(res?.error || "Download failed.");
 
   await removeFromReviewQueue(id);
   chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
