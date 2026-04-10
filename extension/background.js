@@ -24,6 +24,7 @@ import {
   removeFromReviewQueue,
   getAllDescriptors,
   saveDescriptor,
+  appendDescriptor,
 } from "./lib/db.js";
 
 /* ================================================================== */
@@ -499,9 +500,12 @@ async function handleReviewApprove(id) {
   const item = await getReviewQueueItem(id);
   if (!item) throw new Error("Review item not found.");
 
-  // Persist the confirmed face descriptor so future scans auto-approve
+  // Persist the confirmed face descriptor for continuous learning
   if (item.descriptor && item.childId) {
-    await saveDescriptor(item.childId, item.childName, item.descriptor);
+    await appendDescriptor(item.childId, item.childName, item.descriptor);
+    // Refresh the offscreen document's in-memory profile cache so the next
+    // batch of processed photos uses the expanded descriptor set.
+    sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
   }
 
   // Delegate image fetch + EXIF stamp + download to the offscreen document
@@ -606,6 +610,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             return;
           }
           await saveDescriptor(childId, childName ?? childId, encRes.descriptor);
+          // Refresh the offscreen profile cache so new training data is used
+          // immediately in any subsequent extraction.
+          sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
           sendResponse({ ok: true });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });

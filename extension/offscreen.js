@@ -19,10 +19,15 @@
  *   IN  { type: "BUILD_ENCODING", imageDataUrl }
  *   OUT { ok: true, descriptor: number[] }
  *   OUT { ok: false, error: string }
+ *
+ *   IN  { type: "REFRESH_PROFILES" }
+ *   OUT { ok: true }
+ *   OUT { ok: false, error: string }
  */
 
-import { applyExif }       from "./lib/exif.js";
-import { addToReviewQueue } from "./lib/db.js";
+import { applyExif }                          from "./lib/exif.js";
+import { addToReviewQueue, appendDescriptor,
+         getAllDescriptors }                   from "./lib/db.js";
 
 /* global Human */
 
@@ -63,6 +68,45 @@ async function ensureModels() {
   await human.load();
   modelsLoaded = true;
   console.log("[offscreen] Human models loaded.");
+}
+
+/* ================================================================== */
+/*  In-session profile cache                                           */
+/* ================================================================== */
+
+/** Maximum descriptors per child – must match db.js. */
+const MAX_DESCRIPTORS_PER_CHILD = 30;
+
+/**
+ * In-memory map of childId → {childId, childName, descriptors: number[][]}.
+ * Populated on REFRESH_PROFILES and updated whenever a new descriptor is
+ * appended during the current session so subsequent images in the same batch
+ * benefit immediately without a round-trip to IndexedDB.
+ */
+const _localProfiles = new Map();
+
+/**
+ * Merge the descriptor list passed from background.js with any in-session
+ * updates accumulated in _localProfiles.  For any childId present in
+ * _localProfiles, its entry overrides the one from childEncodings (as it
+ * contains the most up-to-date descriptors).  Children only present in
+ * _localProfiles are appended at the end.
+ *
+ * @param {Array<{childId, childName, descriptors}>} childEncodings
+ * @returns {Array<{childId, childName, descriptors}>}
+ */
+function mergeWithLocalProfiles(childEncodings) {
+  if (_localProfiles.size === 0) return childEncodings;
+  const merged = childEncodings.map((enc) => {
+    const local = _localProfiles.get(enc.childId);
+    return local ? { ...enc, descriptors: local.descriptors } : enc;
+  });
+  for (const [childId, profile] of _localProfiles) {
+    if (!merged.some((e) => e.childId === childId)) {
+      merged.push(profile);
+    }
+  }
+  return merged;
 }
 
 /* ================================================================== */
@@ -257,13 +301,16 @@ async function processImage(msg) {
   let bestFace       = null;
   let bestDescriptor = null;
   let bestChildId    = null;
+  let bestChildName  = null;
   const matchedNames = new Set();
+
+  const effectiveEncodings = mergeWithLocalProfiles(childEncodings);
 
   for (const face of faces) {
     const embedding = face.embedding;
     if (!embedding) continue;
 
-    for (const enc of childEncodings) {
+    for (const enc of effectiveEncodings) {
       const pct = bestMatchPercent(embedding, enc.descriptors);
       if (pct >= minThreshold) matchedNames.add(enc.childName);
       if (pct > bestPct) {
@@ -271,6 +318,7 @@ async function processImage(msg) {
         bestFace       = face;
         bestDescriptor = Array.from(embedding);
         bestChildId    = enc.childId;
+        bestChildName  = enc.childName;
       }
     }
   }
@@ -286,6 +334,25 @@ async function processImage(msg) {
     const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
     const stampedBlob = await applyExif(srcBlob, date, description);
     await downloadBlob(stampedBlob, savePath);
+
+    // Continuous learning: persist the confirmed descriptor so future scans
+    // are more accurate.  Also update the in-memory cache so subsequent
+    // images in this batch benefit immediately.
+    // bestChildName is always set when bestChildId is set (both are updated
+    // together in the matching loop), but fall back to the message childName
+    // for safety.
+    if (bestDescriptor && bestChildId) {
+      const learnName = bestChildName ?? childName;
+      await appendDescriptor(bestChildId, learnName, bestDescriptor)
+        .catch((err) => console.warn("[offscreen] appendDescriptor failed:", err));
+      const cached = _localProfiles.get(bestChildId);
+      const descs  = cached ? [...cached.descriptors, bestDescriptor] : [bestDescriptor];
+      if (descs.length > MAX_DESCRIPTORS_PER_CHILD) {
+        descs.splice(0, descs.length - MAX_DESCRIPTORS_PER_CHILD);
+      }
+      _localProfiles.set(bestChildId, { childId: bestChildId, childName: learnName, descriptors: descs });
+    }
+
     return { ok: true, result: "approve" };
   }
 
@@ -353,6 +420,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     buildDescriptorFromDataUrl(msg.imageDataUrl, msg.faceIndex ?? 0)
       .then((descriptor) => sendResponse({ ok: true, descriptor }))
       .catch((err)       => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === "REFRESH_PROFILES") {
+    getAllDescriptors()
+      .then((records) => {
+        _localProfiles.clear();
+        for (const r of records) {
+          _localProfiles.set(r.childId, r);
+        }
+        sendResponse({ ok: true });
+      })
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 
