@@ -178,6 +178,28 @@
       margin-top: -8px;
       margin-bottom: 12px;
     }
+
+    /* Face selector (multi-face photos) */
+    .face-selector {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .face-btn {
+      padding: 2px 8px;
+      font-size: 11px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      background: #fff;
+      color: var(--text);
+    }
+    .face-btn.selected {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
   </style>
 </head>
 <body>
@@ -222,8 +244,9 @@
   <div class="card" id="trainingCard">
     <h2>🧠 Face Training Data</h2>
     <p class="help" style="margin-bottom:14px;">
-      Provide 5–10 clear face photos of each child to train the recognition model.
-      Use photos where the child's face is well-lit, unobstructed, and roughly centred.
+      Provide 10 or more clear face photos of each child to train the recognition model.
+      More photos, including indirect or partially-obscured ones, help build a better AI profile.
+      Use photos where the child's face is well-lit and unobstructed where possible.
     </p>
 
     <div class="training-child-select">
@@ -234,8 +257,9 @@
     </div>
 
     <p class="help" style="margin-bottom:10px;">
-      Select up to 10 face photos. A live match % is shown to help you pick
-      high-quality training images.
+      Select up to 25 photos. A live match percentage is shown to help you pick
+      high-quality training images. Photos where no face is detected are still
+      accepted and will be processed when you save.
     </p>
     <input type="file" id="trainingFileInput" accept="image/*" multiple>
     <div id="trainingPreviews" style="margin-top:10px;"></div>
