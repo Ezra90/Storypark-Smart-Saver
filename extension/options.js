@@ -8,7 +8,7 @@
  *    Descriptors are saved to IndexedDB via lib/db.js
  */
 
-import { loadModels, buildEncoding, computeMatchPercent } from "./lib/face.js";
+import { loadModels, detectFaces, matchEmbedding } from "./lib/face.js";
 import { getDescriptors } from "./lib/db.js";
 
 /* ================================================================== */
@@ -187,9 +187,9 @@ function buildPreviewCard(entry, index) {
   if (!faceApiAvailable) {
     badge.textContent  = "Models unavailable";
     badge.className   += " none";
-  } else if (entry.descriptor === null && entry.matchPct === null) {
+  } else if (!entry.descriptor) {
     badge.textContent  = "No face detected";
-    badge.className   += " bad";
+    badge.className   += " none";
   } else if (entry.matchPct !== null) {
     badge.textContent  = `Match: ${entry.matchPct}%`;
     badge.className   += ` ${matchBadgeClass(entry.matchPct)}`;
@@ -200,6 +200,29 @@ function buildPreviewCard(entry, index) {
 
   info.appendChild(fileName);
   info.appendChild(badge);
+
+  // When more than one face was found, show buttons so the user can pick the
+  // correct face for this child.
+  if (entry.faces && entry.faces.length > 1) {
+    const selector = document.createElement("div");
+    selector.className = "face-selector";
+
+    entry.faces.forEach((face, fi) => {
+      const btn = document.createElement("button");
+      btn.className  = "face-btn" + (fi === entry.selectedFaceIndex ? " selected" : "");
+      btn.textContent = `Face ${fi + 1}`;
+      btn.addEventListener("click", () => {
+        entry.selectedFaceIndex = fi;
+        entry.descriptor        = face.embedding;
+        entry.matchPct          = face.matchPct;
+        renderTrainingPreviews();
+      });
+      selector.appendChild(btn);
+    });
+
+    info.appendChild(selector);
+  }
+
   card.appendChild(img);
   card.appendChild(info);
   return card;
@@ -213,8 +236,14 @@ function renderTrainingPreviews() {
   btnSaveTraining.disabled = pendingTrainingFiles.length === 0;
 }
 
+trainingChildSelect.addEventListener("change", () => {
+  pendingTrainingFiles = [];
+  trainingFileInput.value = "";
+  renderTrainingPreviews();
+});
+
 trainingFileInput.addEventListener("change", async () => {
-  const files = Array.from(trainingFileInput.files).slice(0, 10);
+  const files = Array.from(trainingFileInput.files).slice(0, 25);
   pendingTrainingFiles = [];
   renderTrainingPreviews(); // show empty state immediately while loading
 
@@ -227,26 +256,43 @@ trainingFileInput.addEventListener("change", async () => {
 
   for (const file of files) {
     const dataUrl = await readFileAsDataURL(file);
-    const entry   = { file, dataUrl, descriptor: null, matchPct: null };
+    const entry   = {
+      file,
+      dataUrl,
+      faces:             [],
+      selectedFaceIndex: 0,
+      descriptor:        null,
+      matchPct:          null,
+    };
     pendingTrainingFiles.push(entry);
 
     if (faceApiAvailable) {
       try {
-        const img        = await fileToImage(file);
-        const descriptor = await buildEncoding(img);
-        entry.descriptor = descriptor ? Array.from(descriptor) : null;
+        const img      = await fileToImage(file);
+        const detected = await detectFaces(img);
 
-        if (descriptor) {
-          const allDescriptors = [
-            ...existingDescriptors,
-            ...pendingTrainingFiles
-              .slice(0, pendingTrainingFiles.indexOf(entry))
-              .filter((e) => e.descriptor)
-              .map((e) => e.descriptor),
-          ];
-          const { matchPct } = await computeMatchPercent(img, allDescriptors);
-          entry.matchPct = matchPct;
-        }
+        // Build a reference set of already-processed embeddings for match scoring
+        const referenceDescriptors = [
+          ...existingDescriptors,
+          ...pendingTrainingFiles
+            .slice(0, pendingTrainingFiles.indexOf(entry))
+            .filter((e) => e.descriptor)
+            .map((e) => e.descriptor),
+        ];
+
+        // Compute per-face match pct so the user can compare faces
+        const facesWithMatch = await Promise.all(
+          detected.map(async (face) => ({
+            embedding: face.embedding,
+            score:     face.score,
+            matchPct:  await matchEmbedding(face.embedding, referenceDescriptors),
+          }))
+        );
+
+        entry.faces             = facesWithMatch;
+        entry.selectedFaceIndex = 0;
+        entry.descriptor        = facesWithMatch[0]?.embedding ?? null;
+        entry.matchPct          = facesWithMatch[0]?.matchPct  ?? null;
       } catch (err) {
         console.warn("[options] face encoding error:", err.message);
       }
@@ -289,6 +335,7 @@ btnSaveTraining.addEventListener("click", async () => {
             childId,
             childName,
             imageDataUri: entry.dataUrl,
+            faceIndex:    entry.selectedFaceIndex ?? 0,
           },
           (res) => {
             if (chrome.runtime.lastError) {

@@ -350,7 +350,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "BUILD_ENCODING") {
-    buildDescriptorFromDataUrl(msg.imageDataUrl)
+    buildDescriptorFromDataUrl(msg.imageDataUrl, msg.faceIndex ?? 0)
       .then((descriptor) => sendResponse({ ok: true, descriptor }))
       .catch((err)       => sendResponse({ ok: false, error: err.message }));
     return true;
@@ -363,10 +363,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 /*  BUILD_ENCODING – used by options.html training preview            */
 /* ================================================================== */
 
-async function buildDescriptorFromDataUrl(imageDataUrl) {
+async function buildDescriptorFromDataUrl(imageDataUrl, faceIndex = 0) {
   await ensureModels();
   const img    = await dataUrlToImage(imageDataUrl);
   const result = await human.detect(img);
-  const embed  = result.face?.[0]?.embedding;
+  const embed  = result.face?.[faceIndex]?.embedding;
   return embed ? Array.from(embed) : null;
 }

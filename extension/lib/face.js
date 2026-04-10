@@ -91,6 +91,43 @@ export async function buildEncoding(img) {
   return result.face[0].embedding;
 }
 
+/**
+ * Detect all faces in an image and return their embeddings and scores.
+ *
+ * @param {HTMLImageElement} img
+ * @returns {Promise<Array<{embedding: number[]|null, score: number|null}>>}
+ */
+export async function detectFaces(img) {
+  await loadModels();
+  const result = await human.detect(img);
+  return (result.face || []).map((f) => ({
+    embedding: f.embedding ? Array.from(f.embedding) : null,
+    score: f.score ?? null,
+  }));
+}
+
+/**
+ * Return the best match percentage between an embedding and a list of stored
+ * descriptors, or null when there is nothing to compare against.
+ *
+ * @param {number[]}        embedding         – The embedding to test.
+ * @param {Array<number[]>} storedDescriptors – Previously saved embeddings.
+ * @returns {Promise<number|null>}
+ */
+export async function matchEmbedding(embedding, storedDescriptors) {
+  await loadModels();
+  if (!embedding || !storedDescriptors || storedDescriptors.length === 0) {
+    return null;
+  }
+  let bestPct = 0;
+  for (const stored of storedDescriptors) {
+    const sim = human.match.similarity(embedding, stored);
+    const pct = Math.round(sim * 100);
+    if (pct > bestPct) bestPct = pct;
+  }
+  return bestPct;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Live match preview (used in Options page training section)         */
 /* ------------------------------------------------------------------ */
