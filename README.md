@@ -86,10 +86,11 @@ Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct co
 ### Install (Developer Mode)
 
 1. Download or clone this repository.
-2. Open `chrome://extensions` in Chrome.
-3. Enable **Developer mode** (top-right toggle).
-4. Click **Load unpacked** and select the `extension/` folder.
-5. The 📸 Storypark Extracts icon will appear in your toolbar.
+2. Run `npm run setup` to download the required AI models and libraries into `extension/lib/` and `extension/models/`.
+3. Open `chrome://extensions` in Chrome.
+4. Enable **Developer mode** (top-right toggle).
+5. Click **Load unpacked** and select the `extension/` folder.
+6. The 📸 Storypark Extracts icon will appear in your toolbar.
 
 ### Face Recognition Setup (Optional)
 
@@ -164,6 +165,18 @@ extension/
 | All photos going to Review Queue | Lower thresholds in Settings or add more face training photos |
 | Face recognition not working | Ensure `lib/human.js` is present and the `blazeface` + `faceres` model files (`.bin` + `.json`) are in `extension/models/` |
 | Want to reprocess everything | Use **🔁 Deep Rescan** — or clear `processedStories` in Chrome DevTools → IndexedDB → `storyparkSyncDB` |
+
+---
+
+## Acknowledgements & Open Source Credits
+
+This extension would not be possible without the incredible work of the open-source community. A massive thank you to the creators of the following libraries:
+
+- **[Human (@vladmandic/human)](https://github.com/vladmandic/human)** — Created by Vlad Mandic. This powers the entirely local, privacy-first facial recognition engine. It allows this extension to learn and identify faces completely offline without ever sending photos to a 3rd party server.
+
+- **[Piexifjs (hMatoba/piexifjs)](https://github.com/hMatoba/piexifjs)** — Created by hMatoba. This robust EXIF library allows the extension to perfectly inject the Storypark dates, routines, and text blurbs directly into the downloaded JPEG metadata so that Google Photos can automatically index them.
+
+A huge thank you to **[AustralianSimon](https://github.com/AustralianSimon/storyparkScraper)** for the original inspiration and foundational concept for scraping Storypark data.
 
 ---
 
