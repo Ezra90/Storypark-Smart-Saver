@@ -587,6 +587,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
     }
 
+    case "PROCESS_TRAINING_IMAGE": {
+      const { childId, childName, imageDataUri } = msg;
+      if (!childId || !imageDataUri) {
+        sendResponse({ ok: false, error: "Missing childId or imageDataUri." });
+        return false;
+      }
+      (async () => {
+        try {
+          const encRes = await sendToOffscreen({
+            type:         "BUILD_ENCODING",
+            imageDataUrl: imageDataUri,
+          });
+          if (!encRes?.ok || !encRes.descriptor) {
+            sendResponse({ ok: false, error: "No face detected in image." });
+            return;
+          }
+          await saveDescriptor(childId, childName ?? childId, encRes.descriptor);
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
     default:
       return false;
   }
