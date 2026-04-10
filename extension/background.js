@@ -116,9 +116,10 @@ async function smartDelay(actionType) {
     _requestCount = 0;
     _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
     await new Promise((r) => {
-      const handle = setTimeout(r, breakMs);
-      const poll   = setInterval(() => { if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); } }, 100);
-      setTimeout(() => clearInterval(poll), breakMs + 50);
+      const handle = setTimeout(() => { clearInterval(poll); r(); }, breakMs);
+      const poll   = setInterval(() => {
+        if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); }
+      }, 100);
     });
     return;
   }
@@ -126,9 +127,10 @@ async function smartDelay(actionType) {
   const [minMs, maxMs] = DELAY_PROFILES[actionType] || [1000, 2000];
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   await new Promise((r) => {
-    const handle = setTimeout(r, ms);
-    const poll   = setInterval(() => { if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); } }, 100);
-    setTimeout(() => clearInterval(poll), ms + 50);
+    const handle = setTimeout(() => { clearInterval(poll); r(); }, ms);
+    const poll   = setInterval(() => {
+      if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); }
+    }, 100);
   });
 }
 
