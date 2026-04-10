@@ -1,9 +1,11 @@
-# Place face-api.js model weight files here.
+# Model weight files for @vladmandic/human
 #
-# Required models:
-#   - ssd_mobilenetv1_model-weights_manifest.json  (+ shard files)
-#   - face_landmark_68_model-weights_manifest.json  (+ shard files)
-#   - face_recognition_model-weights_manifest.json  (+ shard files)
+# These files are copied here automatically by running:
 #
-# Download from:
-#   https://github.com/justadudewhohacks/face-api.js/tree/master/weights
+#   npm run build
+#
+# from the repository root.  Do NOT edit or delete them manually.
+#
+# Models used:
+#   blazeface.json / blazeface.bin   – lightweight face detector
+#   faceres.json   / faceres.bin     – face embedding (descriptor)
