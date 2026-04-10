@@ -25,6 +25,7 @@ const logBox           = document.getElementById("logBox");
 const progressBar      = document.getElementById("progressBar");
 const progressText     = document.getElementById("progressText");
 const btnOpenStorypark = document.getElementById("btnOpenStorypark");
+const scanProgress     = document.getElementById("scanProgress");
 
 const reviewBadge      = document.getElementById("reviewBadge");
 const reviewItems      = document.getElementById("reviewItems");
@@ -40,12 +41,8 @@ const onboardingOverlay     = document.getElementById("onboardingOverlay");
 const btnDismissOnboarding  = document.getElementById("btnDismissOnboarding");
 
 /* ================================================================== */
-/*  Open Storypark                                                     */
+/*  Open Storypark – handled natively via <a href> in the HTML       */
 /* ================================================================== */
-
-btnOpenStorypark.addEventListener("click", () => {
-  chrome.tabs.create({ url: "https://app.storypark.com" });
-});
 
 /* ================================================================== */
 /*  First-run onboarding                                               */
@@ -212,10 +209,16 @@ function setRunning(running) {
   btnDeepRescan.disabled    = running;
   childSelect.disabled      = running;
   btnRefresh.disabled       = running;
-  btnStopScan.style.display = running ? "block" : "none";
+
+  // When scanning, hide action buttons and show stop; otherwise reverse
+  btnExtractLatest.style.display = running ? "none" : "";
+  btnDeepRescan.style.display    = running ? "none" : "";
+  btnStopScan.style.display      = running ? "block" : "none";
+
   if (!running) {
-    progressBar.style.display  = "none";
-    progressText.style.display = "none";
+    progressBar.style.display    = "none";
+    scanProgress.style.display   = "none";
+    progressText.style.display   = "none";
   }
 }
 
@@ -232,11 +235,14 @@ function triggerExtraction(type) {
 
   setRunning(true);
   clearLog();
-  progressBar.value         = 0;
-  progressBar.max           = 100;
-  progressBar.style.display = "block";
-  progressText.style.display = "block";
-  progressText.textContent  = "Starting…";
+  progressBar.value           = 0;
+  progressBar.max             = 100;
+  progressBar.style.display   = "block";
+  scanProgress.value          = 0;
+  scanProgress.max            = 100;
+  scanProgress.style.display  = "block";
+  progressText.style.display  = "block";
+  progressText.textContent    = "Starting…";
   setStatus(
     "yellow",
     type === "EXTRACT_LATEST" ? "Downloading latest…" : "Full history scan…"
@@ -286,10 +292,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
 
   if (msg.type === "PROGRESS") {
-    progressBar.style.display  = "block";
-    progressText.style.display = "block";
-    progressBar.value = msg.current;
-    progressBar.max   = msg.total;
+    progressBar.style.display    = "block";
+    scanProgress.style.display   = "block";
+    progressText.style.display   = "block";
+    progressBar.value  = msg.current;
+    progressBar.max    = msg.total;
+    scanProgress.value = msg.current;
+    scanProgress.max   = msg.total;
     progressText.textContent =
       `Processing story ${msg.current} of ${msg.total}` +
       (msg.date ? ` (${msg.date})` : "");

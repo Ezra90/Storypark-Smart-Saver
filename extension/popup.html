@@ -115,23 +115,32 @@
 
     .action-btns {
       display: flex;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
       margin-bottom: 4px;
     }
     .btn-action {
-      flex: 1;
-      padding: 9px 10px;
+      width: 100%;
       border: none;
       border-radius: 8px;
-      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
       transition: opacity 0.15s;
     }
     .btn-action:disabled { opacity: 0.45; cursor: not-allowed; }
     .btn-action:hover:not(:disabled) { opacity: 0.85; }
-    #btnExtractLatest { background: var(--primary); color: var(--text); }
-    #btnDeepRescan    { background: var(--accent);  color: #fff; }
+    #btnExtractLatest {
+      background: var(--primary);
+      color: var(--text);
+      padding: 12px 10px;
+      font-size: 15px;
+    }
+    #btnDeepRescan {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 10px;
+      font-size: 12px;
+    }
 
     .helper-text {
       font-size: 10px;
@@ -144,13 +153,13 @@
     #btnStopScan {
       display: none;
       width: 100%;
-      padding: 7px 10px;
+      padding: 12px 10px;
       border: none;
       border-radius: 8px;
-      font-size: 12px;
+      font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      background: var(--accent);
+      background: #dc2626;
       color: #fff;
       margin-bottom: 8px;
     }
@@ -387,7 +396,7 @@
   <h1>📸 Storypark Smart Saver</h1>
 
   <!-- Open Storypark link -->
-  <button class="open-storypark" id="btnOpenStorypark">🔗 Open Storypark</button>
+  <a href="https://app.storypark.com" target="_blank" class="open-storypark" id="btnOpenStorypark">🔗 Open Storypark</a>
 
   <!-- Tab bar -->
   <div class="tabs">
@@ -431,6 +440,7 @@
 
     <!-- Progress bar -->
     <progress id="progressBar" value="0" max="100"></progress>
+    <progress id="scanProgress" value="0" max="100" style="width:100%; display:none;"></progress>
     <div id="progressText"></div>
 
     <!-- Progress log -->
