@@ -3,11 +3,11 @@
 <head><meta charset="UTF-8"><title>Storypark Offscreen</title></head>
 <body>
   <!--
-    This document exists solely to give face-api.js access to the Canvas and
-    HTMLImageElement APIs that are unavailable in a Manifest V3 service worker.
-    face-api.min.js must be placed in extension/lib/ by the user (see README).
+    This document exists solely to give @vladmandic/human access to the Canvas
+    and HTMLImageElement APIs that are unavailable in a Manifest V3 service worker.
+    human.js is copied into extension/lib/ by running `npm run build`.
   -->
-  <script src="lib/face-api.min.js"></script>
+  <script src="lib/human.js"></script>
   <script src="offscreen.js"></script>
 </body>
 </html>

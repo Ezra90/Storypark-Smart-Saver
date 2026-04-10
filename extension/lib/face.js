@@ -1,49 +1,53 @@
 /**
- * face.js – Client-side face detection and recognition using face-api.js.
+ * face.js – Client-side face detection and recognition using @vladmandic/human.
  *
- * face-api.js runs entirely in the browser via TensorFlow.js, so no server
- * round-trips are needed. Model weights must be placed in extension/models/.
+ * Human runs entirely in the browser via TensorFlow.js, so no server
+ * round-trips are needed. Model weights must be placed in extension/models/
+ * (populated automatically by running `npm run build`).
  *
  * Workflow:
  *   1. loadModels()              – one-time model init.
- *   2. buildEncoding(img)        – compute a 128-D descriptor from an HTMLImageElement.
+ *   2. buildEncoding(img)        – compute a face embedding from an HTMLImageElement.
  *   3. computeMatchPercent(img)  – compare image against stored encodings for a child.
  *
  * NOTE: The full sync-time face filtering is performed in offscreen.js (which
  * also has DOM/Canvas access). This module is used by the Options page for
  * live training-photo quality feedback.
  *
- * Required face-api.js models (place weight files in extension/models/):
- *   - ssd_mobilenetv1     (face detector)
- *   - face_landmark_68    (alignment)
- *   - face_recognition    (128-D descriptor)
- *
- * Download from:
- *   https://github.com/justadudewhohacks/face-api.js/tree/master/weights
+ * Required models (copied to extension/models/ by `npm run build`):
+ *   - blazeface  (face detector)
+ *   - faceres    (face embedding / descriptor)
  */
 
-/* global faceapi */
-/* face-api.js is loaded via <script> in options.html / offscreen.html.
+/* global Human */
+/* human.js is loaded via <script> in options.html / offscreen.html.
    The service worker (background.js) delegates face operations to
    offscreen.js via the offscreen document API. */
 
 /* ------------------------------------------------------------------ */
-/*  Distance ↔ percentage conversion                                  */
+/*  Human instance configuration                                       */
 /* ------------------------------------------------------------------ */
 
-/**
- * Convert a face-api.js Euclidean distance to a 0–100 match percentage.
- * dist = 0   → 100 % (identical descriptor)
- * dist = 0.5 → 50 %
- * dist ≥ 1   → 0 %
- *
- * @param {number} dist – L2 distance from faceapi.euclideanDistance().
- * @returns {number} – Integer percentage in [0, 100].
- */
-export function distanceToPercent(dist) {
-  return Math.max(0, Math.round((1 - dist) * 100));
-}
+const HUMAN_CONFIG = {
+  modelBasePath: chrome.runtime.getURL("models/"),
+  face: {
+    enabled: true,
+    detector: { enabled: true, modelPath: "blazeface.json", rotation: false },
+    mesh: { enabled: false },
+    iris: { enabled: false },
+    description: { enabled: true, modelPath: "faceres.json" },
+    emotion: { enabled: false },
+    antispoof: { enabled: false },
+    liveness: { enabled: false },
+  },
+  body: { enabled: false },
+  hand: { enabled: false },
+  object: { enabled: false },
+  gesture: { enabled: false },
+  segmentation: { enabled: false },
+};
 
+let human = null;
 let modelsLoaded = false;
 
 /* ------------------------------------------------------------------ */
@@ -51,24 +55,20 @@ let modelsLoaded = false;
 /* ------------------------------------------------------------------ */
 
 /**
- * Load face-api.js neural-network models from the extension's models/ dir.
+ * Load Human neural-network models from the extension's models/ dir.
  * Safe to call multiple times; subsequent calls are no-ops.
  */
 export async function loadModels() {
   if (modelsLoaded) return;
-  if (typeof faceapi === "undefined") {
+  if (typeof Human === "undefined") {
     throw new Error(
-      "face-api.js not found. Place face-api.min.js in extension/lib/."
+      "human.js not found. Run `npm run build` to copy it into extension/lib/."
     );
   }
-  const modelPath = chrome.runtime.getURL("models");
-  await Promise.all([
-    faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
-    faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
-    faceapi.nets.faceRecognitionNet.loadFromUri(modelPath),
-  ]);
+  human = new Human.Human(HUMAN_CONFIG);
+  await human.load();
   modelsLoaded = true;
-  console.log("[face] Models loaded.");
+  console.log("[face] Human models loaded.");
 }
 
 /* ------------------------------------------------------------------ */
@@ -76,22 +76,19 @@ export async function loadModels() {
 /* ------------------------------------------------------------------ */
 
 /**
- * Compute a 128-D face descriptor from an HTMLImageElement.
+ * Compute a face embedding from an HTMLImageElement.
  *
  * @param {HTMLImageElement} img – Reference face image.
- * @returns {Promise<Float32Array|null>} – Descriptor, or null if no face found.
+ * @returns {Promise<number[]|null>} – Embedding array, or null if no face found.
  */
 export async function buildEncoding(img) {
   await loadModels();
-  const detection = await faceapi
-    .detectSingleFace(img)
-    .withFaceLandmarks()
-    .withFaceDescriptor();
-  if (!detection) {
+  const result = await human.detect(img);
+  if (!result.face || result.face.length === 0 || !result.face[0].embedding) {
     console.warn("[face] No face detected in reference photo.");
     return null;
   }
-  return detection.descriptor; // Float32Array(128)
+  return result.face[0].embedding;
 }
 
 /* ------------------------------------------------------------------ */
@@ -103,19 +100,17 @@ export async function buildEncoding(img) {
  * best match percentage. Used for live quality feedback during training.
  *
  * @param {HTMLImageElement} img              – Image to test.
- * @param {Array<number[]>}  storedDescriptors – Previously stored descriptors
+ * @param {Array<number[]>}  storedDescriptors – Previously stored embeddings
  *                                              for the same child.
  * @returns {Promise<{ faceFound: boolean, matchPct: number|null }>}
  */
 export async function computeMatchPercent(img, storedDescriptors) {
   await loadModels();
 
-  const result = await faceapi
-    .detectSingleFace(img)
-    .withFaceLandmarks()
-    .withFaceDescriptor();
+  const result = await human.detect(img);
+  const embedding = result.face?.[0]?.embedding;
 
-  if (!result) return { faceFound: false, matchPct: null };
+  if (!embedding) return { faceFound: false, matchPct: null };
 
   if (!storedDescriptors || storedDescriptors.length === 0) {
     // No existing encodings to compare against → just confirm face found
@@ -125,9 +120,8 @@ export async function computeMatchPercent(img, storedDescriptors) {
   // Compare against all stored descriptors; return best match
   let bestPct = 0;
   for (const stored of storedDescriptors) {
-    const ref = new Float32Array(stored);
-    const dist = faceapi.euclideanDistance(result.descriptor, ref);
-    const pct = distanceToPercent(dist);
+    const sim = human.match.similarity(embedding, stored);
+    const pct = Math.round(sim * 100);
     if (pct > bestPct) bestPct = pct;
   }
 

@@ -27,7 +27,7 @@ const newAlbumName      = document.getElementById("newAlbumName");
 const btnCreateAlbum    = document.getElementById("btnCreateAlbum");
 const btnSave           = document.getElementById("btnSave");
 const toast             = document.getElementById("toast");
-const faceApiWarning    = document.getElementById("faceApiWarning");
+const humanWarning      = document.getElementById("humanWarning");
 const autoSyncEnabled   = document.getElementById("autoSyncEnabled");
 const autoSyncFrequency = document.getElementById("autoSyncFrequency");
 
@@ -61,23 +61,23 @@ const btnImportAlbum        = document.getElementById("btnImportAlbum");
 const importStatus          = document.getElementById("importStatus");
 
 /* ------------------------------------------------------------------ */
-/*  face-api.js availability check                                     */
+/*  Human library availability check                                   */
 /* ------------------------------------------------------------------ */
 
 let faceApiAvailable = false;
 
 (async () => {
-  if (window._faceApiMissing || typeof faceapi === "undefined") {
-    faceApiWarning.style.display = "block";
+  if (window._humanMissing || typeof Human === "undefined") {
+    humanWarning.style.display = "block";
     return;
   }
   try {
     await loadModels();
     faceApiAvailable = true;
   } catch (err) {
-    console.warn("[options] face-api.js models failed to load:", err.message);
-    faceApiWarning.style.display = "block";
-    faceApiWarning.textContent =
+    console.warn("[options] Human models failed to load:", err.message);
+    humanWarning.style.display = "block";
+    humanWarning.textContent =
       `⚠ Face recognition unavailable: ${err.message}`;
   }
 })();

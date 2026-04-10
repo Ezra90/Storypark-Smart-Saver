@@ -253,7 +253,7 @@ async function ensureOffscreenDocument() {
     url: OFFSCREEN_URL,
     reasons: ["DOM_SCRAPING"],
     justification:
-      "Run face-api.js facial recognition – requires Canvas and HTMLImageElement APIs.",
+      "Run @vladmandic/human facial recognition – requires Canvas and HTMLImageElement APIs.",
   });
 }
 

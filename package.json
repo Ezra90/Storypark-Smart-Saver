@@ -1,0 +1,11 @@
+{
+  "name": "storypark-scraper",
+  "version": "1.0.0",
+  "description": "Build tooling for Storypark Photo Sync Chrome Extension",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "dependencies": {
+    "@vladmandic/human": "^3.3.6"
+  }
+}

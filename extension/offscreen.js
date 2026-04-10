@@ -2,7 +2,7 @@
  * offscreen.js – Face recognition worker running inside the extension's
  * offscreen document (offscreen.html).
  *
- * The offscreen document exists because face-api.js requires Canvas and
+ * The offscreen document exists because @vladmandic/human requires Canvas and
  * HTMLImageElement APIs that are unavailable in a Manifest V3 service worker.
  *
  * Message protocol (chrome.runtime.onMessage):
@@ -12,15 +12,35 @@
  *   OUT { ok: false, error: "..." }
  *
  *   IN  { type: "BUILD_ENCODING", imageDataUrl }
- *   OUT { ok: true,  descriptor: number[] }   // 128-D Float32Array serialised
+ *   OUT { ok: true,  descriptor: number[] }   // face embedding serialised
  *   OUT { ok: false, error: "..." }
  *
  * Each post object in `posts` must include an `imageDataUrl` field (data: URL).
  * Results keep all original fields and add `matchPct` and `matchedChildren`.
  */
 
-/* global faceapi */
+/* global Human */
 
+const HUMAN_CONFIG = {
+  modelBasePath: chrome.runtime.getURL("models/"),
+  face: {
+    enabled: true,
+    detector: { enabled: true, modelPath: "blazeface.json", rotation: false },
+    mesh: { enabled: false },
+    iris: { enabled: false },
+    description: { enabled: true, modelPath: "faceres.json" },
+    emotion: { enabled: false },
+    antispoof: { enabled: false },
+    liveness: { enabled: false },
+  },
+  body: { enabled: false },
+  hand: { enabled: false },
+  object: { enabled: false },
+  gesture: { enabled: false },
+  segmentation: { enabled: false },
+};
+
+let human = null;
 let modelsLoaded = false;
 
 /* ------------------------------------------------------------------ */
@@ -29,32 +49,20 @@ let modelsLoaded = false;
 
 async function ensureModels() {
   if (modelsLoaded) return;
-  if (typeof faceapi === "undefined") {
+  if (typeof Human === "undefined") {
     throw new Error(
-      "face-api.js not found. Download face-api.min.js and place it in extension/lib/ (see README)."
+      "human.js not found. Run `npm run build` to copy it into extension/lib/."
     );
   }
-  const modelPath = chrome.runtime.getURL("models");
-  await Promise.all([
-    faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
-    faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
-    faceapi.nets.faceRecognitionNet.loadFromUri(modelPath),
-  ]);
+  human = new Human.Human(HUMAN_CONFIG);
+  await human.load();
   modelsLoaded = true;
-  console.log("[offscreen] face-api.js models loaded.");
+  console.log("[offscreen] Human models loaded.");
 }
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-/**
- * Convert a face-api.js Euclidean distance to a 0-100 match percentage.
- * dist=0 → 100%, dist=1 → 0%.  Values above 1 clamp to 0.
- */
-function distanceToPercent(dist) {
-  return Math.max(0, Math.round((1 - dist) * 100));
-}
 
 /**
  * Load a data: URL into an HTMLImageElement (resolves when fully loaded).
@@ -73,17 +81,15 @@ function dataUrlToImage(dataUrl) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Build a 128-D face descriptor for a single image (data URL).
+ * Build a face embedding for a single image (data URL).
  * Returns null if no face is detected.
  */
 async function buildDescriptorFromDataUrl(imageDataUrl) {
   await ensureModels();
   const img = await dataUrlToImage(imageDataUrl);
-  const result = await faceapi
-    .detectSingleFace(img)
-    .withFaceLandmarks()
-    .withFaceDescriptor();
-  return result ? Array.from(result.descriptor) : null;
+  const result = await human.detect(img);
+  const embedding = result.face?.[0]?.embedding;
+  return embedding ? Array.from(embedding) : null;
 }
 
 /**
@@ -101,10 +107,10 @@ async function filterPosts(posts, childEncodings, autoThreshold, minThreshold) {
 
   // Build ref descriptors (filter out entries that were never encoded)
   const refs = childEncodings
-    .filter((c) => Array.isArray(c.descriptor) && c.descriptor.length === 128)
+    .filter((c) => Array.isArray(c.descriptor) && c.descriptor.length > 0)
     .map((c) => ({
       name: c.name,
-      descriptor: new Float32Array(c.descriptor),
+      descriptor: c.descriptor,
     }));
 
   // No references configured → pass everything through as auto-approve
@@ -134,27 +140,27 @@ async function filterPosts(posts, childEncodings, autoThreshold, minThreshold) {
       continue;
     }
 
-    let detections;
+    let detectionResult;
     try {
-      detections = await faceapi
-        .detectAllFaces(img)
-        .withFaceLandmarks()
-        .withFaceDescriptors();
+      detectionResult = await human.detect(img);
     } catch (err) {
       console.warn("[offscreen] Detection error:", err.message);
       continue;
     }
 
-    if (detections.length === 0) continue; // no faces → discard
+    const detectedFaces = detectionResult.face ?? [];
+    if (detectedFaces.length === 0) continue; // no faces → discard
 
     // Find best match across all detected faces and all reference children
     let bestPct = 0;
     const matchedSet = new Set();
 
-    for (const det of detections) {
+    for (const face of detectedFaces) {
+      const embedding = face.embedding;
+      if (!embedding) continue;
       for (const ref of refs) {
-        const dist = faceapi.euclideanDistance(det.descriptor, ref.descriptor);
-        const pct = distanceToPercent(dist);
+        const sim = human.match.similarity(embedding, ref.descriptor);
+        const pct = Math.round(sim * 100);
         if (pct >= minThreshold) {
           matchedSet.add(ref.name);
         }

@@ -234,7 +234,7 @@
     .match-badge.bad   { background: #fee2e2; color: #991b1b; }
     .match-badge.none  { background: #f3f4f6; color: #6b7280; }
 
-    #faceApiWarning {
+    #humanWarning {
       background: #fff7ed;
       border: 1px solid #fdba74;
       border-radius: 6px;
@@ -250,12 +250,11 @@
   <h1>⚙ Settings</h1>
   <p class="subtitle">Configure your children, daycare location, face recognition, and upload preferences.</p>
 
-  <!-- face-api.js warning (shown when library is absent) -->
-  <div id="faceApiWarning">
-    ⚠ <strong>face-api.js not found.</strong>
-    Face recognition features are disabled. Download
-    <a href="https://github.com/justadudewhohacks/face-api.js/releases" target="_blank">face-api.min.js</a>
-    and place it in <code>extension/lib/</code>, then reload the extension.
+  <!-- human.js warning (shown when library is absent) -->
+  <div id="humanWarning">
+    ⚠ <strong>human.js not found.</strong>
+    Face recognition features are disabled. Run <code>npm run build</code> from the
+    repository root to copy the library into <code>extension/lib/</code>, then reload the extension.
   </div>
 
   <!-- Children -->
@@ -409,12 +408,10 @@
   <div id="toast">✓ Settings saved!</div>
 
   <!--
-    face-api.js is optional – if absent the training preview is disabled but
-    all other settings still work.  Download face-api.min.js (v0.22.2) from
-    https://github.com/justadudewhohacks/face-api.js/releases and place it in
-    extension/lib/.
+    human.js is required for face recognition in the training preview.
+    It is copied into extension/lib/ by running `npm run build`.
   -->
-  <script src="lib/face-api.min.js" onerror="window._faceApiMissing=true"></script>
+  <script src="lib/human.js" onerror="window._humanMissing=true"></script>
   <script type="module" src="options.js"></script>
 </body>
 </html>
