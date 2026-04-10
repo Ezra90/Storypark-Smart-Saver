@@ -204,9 +204,10 @@ async function ensureOffscreen() {
         justification: "Face recognition and EXIF processing for Storypark images",
       });
     }
-    offscreenReady    = true;
+    offscreenReady = true;
+  })().finally(() => {
     offscreenCreating = null;
-  })();
+  });
   await offscreenCreating;
 }
 
