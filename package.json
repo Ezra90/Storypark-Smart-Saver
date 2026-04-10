@@ -1,7 +1,7 @@
 {
-  "name": "storypark-scraper",
+  "name": "storypark-smart-saver",
   "version": "1.0.0",
-  "description": "Build tooling for Storypark Photo Sync Chrome Extension",
+  "description": "A private, automated tool to save your child's photos and stories from Storypark.",
   "scripts": {
     "build": "node build.js",
     "setup": "node scripts/setup-libs.js"

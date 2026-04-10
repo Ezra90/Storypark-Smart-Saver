@@ -424,7 +424,7 @@ async function runExtraction(childId, childName, mode) {
         .filter(Boolean)
         .join("\n\n");
 
-      const savePath = `Storypark_Extracts/${sanitizeName(childName)}/${img.filename}`;
+      const savePath = `Storypark_Smart_Saver/${sanitizeName(childName)}/${img.filename}`;
 
       let result;
       try {

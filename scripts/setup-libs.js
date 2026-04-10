@@ -70,7 +70,7 @@ function downloadFile(url, dest) {
 }
 
 (async () => {
-  console.log('=== Storypark Extracts – Setup ===\n');
+  console.log('=== Storypark Smart Saver – Setup ===\n');
   for (const { url, dest } of downloads) {
     await downloadFile(url, dest);
   }
