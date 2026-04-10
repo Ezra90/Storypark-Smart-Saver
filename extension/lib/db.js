@@ -15,6 +15,9 @@
 const DB_NAME    = "storyparkSyncDB";
 const DB_VERSION = 2;
 
+/** Maximum number of face descriptors kept per child (oldest are dropped first). */
+const MAX_DESCRIPTORS_PER_CHILD = 30;
+
 const STORE_PROCESSED_URLS    = "processedUrls";
 const STORE_PROCESSED_STORIES = "processedStories";
 const STORE_REVIEW_QUEUE      = "reviewQueue";
@@ -236,6 +239,33 @@ export async function saveDescriptor(childId, childName, descriptor) {
   const existing    = await getDescriptors(childId);
   const descriptors = existing?.descriptors ?? [];
   descriptors.push(Array.from(descriptor));
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_KNOWN_DESCRIPTORS, "readwrite");
+    tx.objectStore(STORE_KNOWN_DESCRIPTORS).put({ childId, childName, descriptors });
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror    = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/**
+ * Append a single face descriptor to a child's stored set, capping at
+ * MAX_DESCRIPTORS_PER_CHILD by dropping the oldest entries first.
+ * Use this for continuous learning (auto-approved and manually approved photos).
+ *
+ * @param {string}                childId
+ * @param {string}                childName
+ * @param {number[]|Float32Array} descriptor  Plain array or typed array –
+ *                                            both are normalised to number[].
+ */
+export async function appendDescriptor(childId, childName, descriptor) {
+  const existing    = await getDescriptors(childId);
+  const descriptors = existing?.descriptors ?? [];
+  descriptors.push(Array.from(descriptor));
+  if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
+    descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
+  }
 
   const db = await openDB();
   return new Promise((resolve, reject) => {
