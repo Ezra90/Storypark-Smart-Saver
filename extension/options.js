@@ -1,5 +1,5 @@
 /**
- * options.js – Settings page for Storypark Extracts.
+ * options.js – Settings page for Storypark Smart Saver.
  *
  * Manages:
  *  - Read-only display of children (fetched from Storypark API by background)

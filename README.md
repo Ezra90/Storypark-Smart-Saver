@@ -1,6 +1,6 @@
-# Storypark Extracts – Chrome Extension
+# Storypark Smart Saver – Chrome Extension
 
-A **Manifest V3 Chrome Extension** that uses a **Headless API approach** — it calls Storypark's internal v3 JSON APIs directly rather than scraping the DOM — to automatically download your children's daycare photos to your local device.
+A **Manifest V3 Chrome Extension** that uses a **Headless API approach** — it calls Storypark's internal v3 JSON APIs directly rather than parsing the DOM — to automatically download your children's daycare photos to your local device.
 
 No server, no Python, no command-line. Install the extension, log in to Storypark, and click **Extract Latest**.
 
@@ -10,7 +10,7 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 
 | Feature | Details |
 |---|---|
-| **Headless API** | Calls `https://app.storypark.com/api/v3/*` endpoints with your browser session cookies — no DOM scraping, no content script |
+| **Headless API** | Calls `https://app.storypark.com/api/v3/*` endpoints with your browser session cookies — no DOM parsing, no content script |
 | **EXIF Metadata Injection** | Stamps `DateTimeOriginal` and `ImageDescription` (story body + room + daily routine) into every downloaded JPEG via `lib/exif.js` |
 | **Continuous Facial Recognition Learning** | Powered by `@vladmandic/human` (`human.js`) running in an offscreen document. Descriptors are stored in IndexedDB and improve automatically as you approve photos in the Review Queue |
 | **Anti-Bot Human Pacing** | `smartDelay(actionType)` replaces naive sleeps — uses action-specific timing profiles and inserts random 12–25 s "Coffee Break" pauses every 15–25 requests |
@@ -23,7 +23,7 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 
 ### Headless API Approach
 
-Instead of injecting a content script and scraping the rendered HTML, the extension calls Storypark's undocumented internal REST APIs:
+Instead of injecting a content script and parsing the rendered HTML, the extension calls Storypark's undocumented internal REST APIs:
 
 ```
 GET /api/v3/profile                          → children list
@@ -90,7 +90,7 @@ Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct co
 3. Open `chrome://extensions` in Chrome.
 4. Enable **Developer mode** (top-right toggle).
 5. Click **Load unpacked** and select the `extension/` folder.
-6. The 📸 Storypark Extracts icon will appear in your toolbar.
+6. The 📸 Storypark Smart Saver icon will appear in your toolbar.
 
 ### Face Recognition Setup (Optional)
 

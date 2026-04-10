@@ -176,7 +176,7 @@ function cropFaceToDataUrl(img, box) {
  * chrome.downloads.download(), then immediately revoke the URL.
  *
  * @param {Blob}   blob
- * @param {string} savePath   e.g. "Storypark_Extracts/Alice/photo.jpg"
+ * @param {string} savePath   e.g. "Storypark_Smart_Saver/Alice/photo.jpg"
  */
 function downloadBlob(blob, savePath) {
   return new Promise((resolve, reject) => {

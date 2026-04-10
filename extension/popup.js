@@ -1,5 +1,5 @@
 /**
- * popup.js – Popup UI for Storypark Extracts.
+ * popup.js – Popup UI for Storypark Smart Saver.
  *
  * Tab 1 (Extract): child selector, Extract Latest / Deep Rescan buttons,
  *                  status indicator, live progress log.
