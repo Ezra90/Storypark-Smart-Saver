@@ -2480,3 +2480,132 @@ SOFTWARE.
     }
 
 })();
+
+/* ================================================================== */
+/*  applyExif – ES module wrapper around piexif                        */
+/* ================================================================== */
+
+/**
+ * Filter a string to printable ASCII characters only (EXIF strings are
+ * encoded as ASCII).  Replaces any non-printable / non-ASCII character
+ * with a space.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function asciiFilter(str) {
+  return str.replace(/[^\x20-\x7E\n\r\t]/g, " ");
+}
+
+/**
+ * Format a Date object into the strict EXIF date-time string:
+ *   `YYYY:MM:DD HH:MM:SS`
+ *
+ * If the source date has no meaningful time component (midnight exactly,
+ * which is the default when parsing a date-only ISO string), the time
+ * is set to 12:00:00 so the photo doesn't appear to have been taken at
+ * midnight.
+ *
+ * @param {Date} date
+ * @returns {string}
+ */
+function formatExifDate(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const y   = date.getFullYear();
+  const mo  = pad(date.getMonth() + 1);
+  const d   = pad(date.getDate());
+  const h   = pad(date.getHours());
+  const mi  = pad(date.getMinutes());
+  const s   = pad(date.getSeconds());
+
+  // If the time is exactly 00:00:00, the original ISO string likely had
+  // no time component – use the safe midday fallback.
+  if (h === "00" && mi === "00" && s === "00") {
+    return `${y}:${mo}:${d} 12:00:00`;
+  }
+
+  return `${y}:${mo}:${d} ${h}:${mi}:${s}`;
+}
+
+/**
+ * Read a Blob as a data-URL string.
+ * @param {Blob} blob
+ * @returns {Promise<string>}
+ */
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader  = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Convert a data-URL back to a Blob.
+ * @param {string} dataUrl
+ * @returns {Blob}
+ */
+function dataUrlToBlob(dataUrl) {
+  const [header, b64] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] || "image/jpeg";
+  const binary = atob(b64);
+  const bytes  = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * Stamp EXIF metadata onto a JPEG blob and return a new Blob.
+ *
+ * Sets:
+ *  - IFD0  ImageDescription  (full description text, ASCII-filtered)
+ *  - IFD0  DateTime          (modify-date)
+ *  - Exif  DateTimeOriginal  (capture-date)
+ *
+ * GPS IFD is explicitly left empty so no location data leaks.
+ *
+ * @param {Blob}        blob         Source JPEG blob
+ * @param {Date|null}   date         Story creation date (may be null)
+ * @param {string}      description  Rich description text
+ * @returns {Promise<Blob>}          New JPEG blob with EXIF embedded
+ */
+export async function applyExif(blob, date, description) {
+  const piexif = window.piexif;
+  if (!piexif) {
+    // piexif not loaded – return original blob unchanged
+    return blob;
+  }
+
+  const dataUrl = await blobToDataUrl(blob);
+
+  // Build the EXIF object
+  const exifObj = {
+    "0th":     {},
+    "Exif":    {},
+    "GPS":     {},
+    "1st":     {},
+    "Interop": {},
+  };
+
+  // ImageDescription – ASCII-filtered, no length truncation
+  if (description) {
+    exifObj["0th"][piexif.ImageIFD.ImageDescription] = asciiFilter(description);
+  }
+
+  // DateTime / DateTimeOriginal
+  if (date && !isNaN(date)) {
+    const dateStr = formatExifDate(date);
+    exifObj["0th"][piexif.ImageIFD.DateTime]          = dateStr;
+    exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal]  = dateStr;
+  }
+
+  try {
+    const exifStr    = piexif.dump(exifObj);
+    const newDataUrl = piexif.insert(exifStr, dataUrl);
+    return dataUrlToBlob(newDataUrl);
+  } catch (err) {
+    console.warn("[exif] EXIF insertion failed, returning original:", err.message);
+    return blob;
+  }
+}

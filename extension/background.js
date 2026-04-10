@@ -312,25 +312,23 @@ async function fetchRoutineSummary(childId, dateStr) {
 }
 
 function buildRoutineSummary(data) {
-  const parts = [];
+  const events = [];
 
   if (Array.isArray(data.meals) && data.meals.length > 0) {
-    parts.push(
-      "Meals: " +
-        data.meals
-          .map((m) => m.description || m.type || "meal")
-          .join(", ")
-    );
+    for (const m of data.meals) {
+      events.push(m.description || m.type || "meal");
+    }
   }
   if (Array.isArray(data.sleeps) && data.sleeps.length > 0) {
-    const s = data.sleeps[0];
-    parts.push(`Sleep: ${s.start_time || ""}–${s.end_time || ""}`);
+    for (const s of data.sleeps) {
+      events.push(`Sleep ${s.start_time || ""}–${s.end_time || ""}`.trim());
+    }
   }
   if (Array.isArray(data.toileting) && data.toileting.length > 0) {
-    parts.push(`Toileting: ${data.toileting.length} time(s)`);
+    events.push(`Toileting x${data.toileting.length}`);
   }
 
-  return parts.join(" | ");
+  return events.join(", ");
 }
 
 /* ================================================================== */
@@ -342,6 +340,53 @@ const INVALID_FILENAME_CHARS = /[/\\:*?"<>|]/g;
 
 function sanitizeName(name) {
   return (name || "Unknown").replace(INVALID_FILENAME_CHARS, "_").trim() || "Unknown";
+}
+
+/**
+ * Strip HTML tags from a string, collapse whitespace, and trim.
+ * @param {string} html
+ * @returns {string}
+ */
+function stripHtml(html) {
+  return (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Build the EXIF ImageDescription string from story metadata,
+ * following the structured template format.
+ *
+ * @param {string} body           Raw story body (may contain HTML)
+ * @param {string} childFirstName Child's first name
+ * @param {string} routineText    Comma-separated routine events (may be empty)
+ * @param {string} roomName       Room / group name (may be empty)
+ * @param {string} centreName     Centre / service name (may be empty)
+ * @returns {string}
+ */
+function buildDescription(body, childFirstName, routineText, roomName, centreName) {
+  const DIVIDER = "------------------------------";
+  const parts   = [];
+
+  // 1. Full story text, stripped of HTML
+  const plainBody = stripHtml(body);
+  if (plainBody) parts.push(plainBody);
+
+  // 2. Routine section (only if routine data exists)
+  if (routineText) {
+    parts.push(DIVIDER);
+    parts.push(`${childFirstName || "Child"}'s Routine Was:`);
+    parts.push(routineText);
+  }
+
+  // 3. Location / attribution section
+  const locationLines = [];
+  if (roomName)   locationLines.push(roomName);
+  if (centreName) locationLines.push(centreName);
+  locationLines.push("Storypark");
+
+  parts.push(DIVIDER);
+  parts.push(locationLines.join("\n"));
+
+  return parts.join("\n");
 }
 
 /**
@@ -418,10 +463,12 @@ async function runExtraction(childId, childName, mode) {
       continue;
     }
 
-    const createdAt  = story.created_at || summary.created_at || "";
-    const body       = story.body       || "";
-    const groupName  = story.group_name || story.community_name || "";
+    const createdAt    = story.created_at || summary.created_at || "";
+    const body         = story.body       || "";
+    const roomName     = story.group_name     || "";
+    const centreName   = story.community_name || story.centre_name || story.service_name || "";
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
+    const childFirstName = (childName || "").split(/\s+/)[0];
 
     // Collect images with original_url
     const mediaItems = story.media_items || story.assets || story.media || [];
@@ -453,13 +500,9 @@ async function runExtraction(childId, childName, mode) {
       await smartDelay("DOWNLOAD_IMAGE");
 
       // Compile metadata string to embed in EXIF ImageDescription
-      const description = [
-        body,
-        groupName  ? `Room: ${groupName}`              : "",
-        routineText ? `Daily Routine: ${routineText}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const description = buildDescription(
+        body, childFirstName, routineText, roomName, centreName
+      );
 
       const savePath = `Storypark_Smart_Saver/${sanitizeName(childName)}/${img.filename}`;
 
