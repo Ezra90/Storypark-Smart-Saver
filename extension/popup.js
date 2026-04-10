@@ -1,8 +1,8 @@
 /**
  * popup.js – Popup UI for Storypark Smart Saver.
  *
- * Tab 1 (Extract): child selector, Extract Latest / Deep Rescan buttons,
- *                  status indicator, live progress log.
+ * Tab 1 (Save Photos): child selector, Download Latest / Full History Scan buttons,
+ *                       stop scan, progress bar, status indicator, live progress log.
  * Tab 2 (Pending Matches): HITL review queue from IndexedDB.
  * Tab 3 (Activity Log): scrollable terminal showing the persistent log.
  */
@@ -18,18 +18,49 @@ const childSelect      = document.getElementById("childSelect");
 const btnRefresh       = document.getElementById("btnRefresh");
 const btnExtractLatest = document.getElementById("btnExtractLatest");
 const btnDeepRescan    = document.getElementById("btnDeepRescan");
+const btnStopScan      = document.getElementById("btnStopScan");
 const statusDot        = document.getElementById("statusDot");
 const statusText       = document.getElementById("statusText");
 const logBox           = document.getElementById("logBox");
+const progressBar      = document.getElementById("progressBar");
+const progressText     = document.getElementById("progressText");
+const btnOpenStorypark = document.getElementById("btnOpenStorypark");
 
 const reviewBadge      = document.getElementById("reviewBadge");
 const reviewItems      = document.getElementById("reviewItems");
 const reviewEmpty      = document.getElementById("reviewEmpty");
+const btnUndoMatch     = document.getElementById("btnUndoMatch");
 
 const activityLogBox   = document.getElementById("activityLogBox");
 const btnClearLog      = document.getElementById("btnClearLog");
 
 const openOptions      = document.getElementById("openOptions");
+
+const onboardingOverlay     = document.getElementById("onboardingOverlay");
+const btnDismissOnboarding  = document.getElementById("btnDismissOnboarding");
+
+/* ================================================================== */
+/*  Open Storypark                                                     */
+/* ================================================================== */
+
+btnOpenStorypark.addEventListener("click", () => {
+  chrome.tabs.create({ url: "https://app.storypark.com" });
+});
+
+/* ================================================================== */
+/*  First-run onboarding                                               */
+/* ================================================================== */
+
+chrome.storage.local.get("hasSeenOnboarding", ({ hasSeenOnboarding }) => {
+  if (!hasSeenOnboarding) {
+    onboardingOverlay.style.display = "flex";
+  }
+});
+
+btnDismissOnboarding.addEventListener("click", () => {
+  chrome.storage.local.set({ hasSeenOnboarding: true });
+  onboardingOverlay.style.display = "none";
+});
 
 /* ================================================================== */
 /*  Tab switching                                                      */
@@ -181,6 +212,11 @@ function setRunning(running) {
   btnDeepRescan.disabled    = running;
   childSelect.disabled      = running;
   btnRefresh.disabled       = running;
+  btnStopScan.style.display = running ? "block" : "none";
+  if (!running) {
+    progressBar.style.display  = "none";
+    progressText.style.display = "none";
+  }
 }
 
 function triggerExtraction(type) {
@@ -196,14 +232,19 @@ function triggerExtraction(type) {
 
   setRunning(true);
   clearLog();
+  progressBar.value         = 0;
+  progressBar.max           = 100;
+  progressBar.style.display = "block";
+  progressText.style.display = "block";
+  progressText.textContent  = "Starting…";
   setStatus(
     "yellow",
-    type === "EXTRACT_LATEST" ? "Extracting latest…" : "Deep scanning…"
+    type === "EXTRACT_LATEST" ? "Downloading latest…" : "Full history scan…"
   );
   appendLog(
     type === "EXTRACT_LATEST"
-      ? "Starting incremental extraction…"
-      : "Starting deep rescan…"
+      ? "Starting incremental download…"
+      : "Starting full history scan…"
   );
 
   chrome.runtime.sendMessage({ type, childId, childName }, (res) => {
@@ -226,6 +267,16 @@ btnExtractLatest.addEventListener("click", () => triggerExtraction("EXTRACT_LATE
 btnDeepRescan.addEventListener("click",    () => triggerExtraction("DEEP_RESCAN"));
 
 /* ================================================================== */
+/*  Stop Scan                                                          */
+/* ================================================================== */
+
+btnStopScan.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "CANCEL_SCAN" });
+  btnStopScan.style.display = "none";
+  appendLog("⏹ Cancellation requested…");
+});
+
+/* ================================================================== */
 /*  Real-time messages from background                                 */
 /* ================================================================== */
 
@@ -233,6 +284,20 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "LOG")                appendLog(msg.message);
   if (msg.type === "LOG_ENTRY")          appendActivityEntry(msg.entry);
   if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
+
+  if (msg.type === "PROGRESS") {
+    progressBar.style.display  = "block";
+    progressText.style.display = "block";
+    progressBar.value = msg.current;
+    progressBar.max   = msg.total;
+    progressText.textContent =
+      `Processing story ${msg.current} of ${msg.total}` +
+      (msg.date ? ` (${msg.date})` : "");
+  }
+
+  if (msg.type === "SCAN_COMPLETE") {
+    setRunning(false);
+  }
 });
 
 /* ================================================================== */
@@ -281,6 +346,30 @@ function buildReviewItemEl(item) {
   meta.appendChild(pctEl);
   meta.appendChild(dateEl);
 
+  // Multi-face selector: if the item has multiple cropped faces,
+  // show thumbnails so the user can pick which face is their child.
+  if (item.allFaces && item.allFaces.length > 1) {
+    const faceSel = document.createElement("div");
+    faceSel.className = "review-face-selector";
+    item.allFaces.forEach((face, fi) => {
+      const fBtn = document.createElement("img");
+      fBtn.className = "review-face-btn" + (fi === (item.selectedFaceIndex || 0) ? " selected" : "");
+      fBtn.src = face.croppedDataUrl;
+      fBtn.alt = `Face ${fi + 1}`;
+      fBtn.title = `Face ${fi + 1} — ${face.matchPct ?? "?"}%`;
+      fBtn.addEventListener("click", () => {
+        // Update the selected face
+        faceSel.querySelectorAll(".review-face-btn").forEach((b) => b.classList.remove("selected"));
+        fBtn.classList.add("selected");
+        thumb.src = face.croppedDataUrl;
+        pctEl.textContent = `Match: ${face.matchPct ?? 0}%`;
+        item.selectedFaceIndex = fi;
+      });
+      faceSel.appendChild(fBtn);
+    });
+    meta.appendChild(faceSel);
+  }
+
   // Action buttons
   const actions = document.createElement("div");
   actions.className = "review-actions";
@@ -296,10 +385,10 @@ function buildReviewItemEl(item) {
   btnReject.textContent = "❌";
 
   btnApprove.addEventListener("click", () =>
-    handleApprove(item.id, el, btnApprove, btnReject)
+    handleApprove(item, el, btnApprove, btnReject)
   );
   btnReject.addEventListener("click", () =>
-    handleReject(item.id, el, btnApprove, btnReject)
+    handleReject(item, el, btnApprove, btnReject)
   );
 
   actions.appendChild(btnApprove);
@@ -317,6 +406,7 @@ function renderReviewQueue(queue) {
   if (queue.length === 0) {
     reviewEmpty.style.display = "block";
     reviewBadge.style.display = "none";
+    btnUndoMatch.style.display = "none";
     return;
   }
 
@@ -339,19 +429,26 @@ function refreshBadge() {
   const remaining         = reviewItems.querySelectorAll(".review-item").length;
   reviewBadge.textContent = remaining || "";
   reviewBadge.style.display = remaining ? "" : "none";
-  if (remaining === 0) reviewEmpty.style.display = "block";
+  if (remaining === 0) {
+    reviewEmpty.style.display = "block";
+    btnUndoMatch.style.display = "none";
+  }
 }
 
-function handleApprove(id, rowEl, btnApprove, btnReject) {
+function handleApprove(item, rowEl, btnApprove, btnReject) {
   btnApprove.disabled = true;
   btnReject.disabled  = true;
   btnApprove.textContent = "⏳";
 
-  chrome.runtime.sendMessage({ type: "REVIEW_APPROVE", id }, (res) => {
+  const selectedFaceIndex = item.selectedFaceIndex ?? 0;
+
+  chrome.runtime.sendMessage({ type: "REVIEW_APPROVE", id: item.id, selectedFaceIndex }, (res) => {
     if (res?.ok) {
       rowEl.remove();
       refreshBadge();
       appendLog("✓ Approved and downloaded photo.");
+      // Show undo button
+      btnUndoMatch.style.display = "block";
     } else {
       btnApprove.disabled    = false;
       btnReject.disabled     = false;
@@ -361,20 +458,40 @@ function handleApprove(id, rowEl, btnApprove, btnReject) {
   });
 }
 
-function handleReject(id, rowEl, btnApprove, btnReject) {
+function handleReject(item, rowEl, btnApprove, btnReject) {
   btnApprove.disabled = true;
   btnReject.disabled  = true;
 
-  chrome.runtime.sendMessage({ type: "REVIEW_REJECT", id }, (res) => {
+  chrome.runtime.sendMessage({ type: "REVIEW_REJECT", id: item.id }, (res) => {
     if (res?.ok) {
       rowEl.remove();
       refreshBadge();
+      // Show undo button
+      btnUndoMatch.style.display = "block";
     } else {
       btnApprove.disabled = false;
       btnReject.disabled  = false;
     }
   });
 }
+
+/* ================================================================== */
+/*  Undo Last Match                                                    */
+/* ================================================================== */
+
+btnUndoMatch.addEventListener("click", () => {
+  btnUndoMatch.disabled = true;
+  chrome.runtime.sendMessage({ type: "UNDO_LAST_REVIEW" }, (res) => {
+    btnUndoMatch.disabled = false;
+    if (res?.ok) {
+      appendLog("⤺ Last review action undone.");
+      loadReviewQueue();
+      btnUndoMatch.style.display = "none";
+    } else {
+      appendLog("✗ Undo failed: " + (res?.error || "Nothing to undo"));
+    }
+  });
+});
 
 /* ================================================================== */
 /*  Footer – open options                                              */

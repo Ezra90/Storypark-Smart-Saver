@@ -17,31 +17,47 @@ import { getDescriptors } from "./lib/db.js";
 
 const childrenList        = document.getElementById("childrenList");
 const btnRefreshChildren  = document.getElementById("btnRefreshChildren");
-const faceStrictnessSelect = document.getElementById("faceStrictness");
+const autoThresholdRange  = document.getElementById("autoThresholdRange");
+const autoThresholdNumber = document.getElementById("autoThresholdNumber");
+const minThresholdRange   = document.getElementById("minThresholdRange");
+const minThresholdNumber  = document.getElementById("minThresholdNumber");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
 const trainingPreviews     = document.getElementById("trainingPreviews");
 const trainingProgress     = document.getElementById("trainingProgress");
+const trainingLoading      = document.getElementById("trainingLoading");
+const trainingLoadingBar   = document.getElementById("trainingLoadingBar");
 const btnSaveTraining      = document.getElementById("btnSaveTraining");
+const btnResetFaceData     = document.getElementById("btnResetFaceData");
 const btnSave              = document.getElementById("btnSave");
 const toast                = document.getElementById("toast");
 const humanWarning         = document.getElementById("humanWarning");
 
 /* ================================================================== */
-/*  Strictness mapping                                                 */
+/*  Threshold sync (slider ↔ number)                                   */
 /* ================================================================== */
 
-const STRICTNESS_MAP = {
-  strict: { autoThreshold: 90, minThreshold: 60 },
-  normal: { autoThreshold: 85, minThreshold: 50 },
-  loose:  { autoThreshold: 70, minThreshold: 30 },
-};
-
-function thresholdsToStrictness(auto, min) {
-  if (auto >= 90 && min >= 60) return "strict";
-  if (auto >= 70 && min >= 30) return "normal";
-  return "loose";
+function clampThreshold(value) {
+  return Math.max(0, Math.min(100, parseInt(value, 10) || 0));
 }
+
+autoThresholdRange.addEventListener("input", () => {
+  autoThresholdNumber.value = autoThresholdRange.value;
+});
+autoThresholdNumber.addEventListener("input", () => {
+  const v = clampThreshold(autoThresholdNumber.value);
+  autoThresholdRange.value  = v;
+  autoThresholdNumber.value = v;
+});
+
+minThresholdRange.addEventListener("input", () => {
+  minThresholdNumber.value = minThresholdRange.value;
+});
+minThresholdNumber.addEventListener("input", () => {
+  const v = clampThreshold(minThresholdNumber.value);
+  minThresholdRange.value  = v;
+  minThresholdNumber.value = v;
+});
 
 /* ================================================================== */
 /*  Human library availability check                                   */
@@ -166,9 +182,22 @@ function matchBadgeClass(pct) {
 }
 
 function buildPreviewCard(entry, index) {
+  const wrapper = document.createElement("div");
+  wrapper.className    = "training-card-wrapper";
+  wrapper.dataset.index = index;
+
   const card = document.createElement("div");
   card.className    = "match-preview";
-  card.dataset.index = index;
+
+  // Remove button
+  const btnRemove = document.createElement("button");
+  btnRemove.className   = "btn-remove-training";
+  btnRemove.textContent = "✕";
+  btnRemove.title       = "Remove this photo";
+  btnRemove.addEventListener("click", () => {
+    pendingTrainingFiles.splice(index, 1);
+    renderTrainingPreviews();
+  });
 
   const img = document.createElement("img");
   img.src = entry.dataUrl;
@@ -225,7 +254,10 @@ function buildPreviewCard(entry, index) {
 
   card.appendChild(img);
   card.appendChild(info);
-  return card;
+
+  wrapper.appendChild(btnRemove);
+  wrapper.appendChild(card);
+  return wrapper;
 }
 
 function renderTrainingPreviews() {
@@ -319,6 +351,9 @@ btnSaveTraining.addEventListener("click", async () => {
 
   btnSaveTraining.disabled    = true;
   btnSaveTraining.textContent = "Saving…";
+  trainingLoading.style.display = "flex";
+  trainingLoadingBar.value      = 0;
+  trainingLoadingBar.max        = total;
 
   const total = pendingTrainingFiles.length;
   let saved   = 0;
@@ -354,6 +389,7 @@ btnSaveTraining.addEventListener("click", async () => {
     }
     trainingProgress.textContent =
       `Trained ${saved} of ${total} ${photoLabel(total)}…`;
+    trainingLoadingBar.value = i + 1;
   }
 
   if (saved > 0) {
@@ -365,6 +401,7 @@ btnSaveTraining.addEventListener("click", async () => {
   }
 
   trainingProgress.textContent = "";
+  trainingLoading.style.display = "none";
   btnSaveTraining.disabled    = false;
   btnSaveTraining.textContent = "💾 Save training photos";
 });
@@ -383,9 +420,8 @@ btnSave.addEventListener("click", async () => {
   btnSave.disabled    = true;
   btnSave.textContent = "Saving…";
 
-  const strictness = faceStrictnessSelect.value;
-  const { autoThreshold, minThreshold } =
-    STRICTNESS_MAP[strictness] || STRICTNESS_MAP.normal;
+  const autoThreshold = parseInt(autoThresholdNumber.value, 10) || 85;
+  const minThreshold  = parseInt(minThresholdNumber.value, 10) || 50;
 
   await chrome.storage.local.set({ autoThreshold, minThreshold });
 
@@ -401,8 +437,43 @@ btnSave.addEventListener("click", async () => {
 chrome.storage.local.get(
   ["autoThreshold", "minThreshold"],
   ({ autoThreshold = 85, minThreshold = 50 }) => {
-    faceStrictnessSelect.value = thresholdsToStrictness(autoThreshold, minThreshold);
+    autoThresholdRange.value  = autoThreshold;
+    autoThresholdNumber.value = autoThreshold;
+    minThresholdRange.value   = minThreshold;
+    minThresholdNumber.value  = minThreshold;
   }
 );
+
+/* ================================================================== */
+/*  Reset Face Data                                                    */
+/* ================================================================== */
+
+btnResetFaceData.addEventListener("click", () => {
+  const childId = trainingChildSelect.value;
+  if (!childId) {
+    alert("Please select a child first.");
+    return;
+  }
+  const childName =
+    trainingChildSelect.options[trainingChildSelect.selectedIndex]?.textContent || "";
+  if (
+    !confirm(
+      `Are you sure you want to reset all face training data for ${childName}? This cannot be undone.`
+    )
+  ) {
+    return;
+  }
+  btnResetFaceData.disabled = true;
+  chrome.runtime.sendMessage({ type: "RESET_FACE_DATA", childId }, (res) => {
+    btnResetFaceData.disabled = false;
+    if (res?.ok) {
+      showToast(`✓ Face data reset for ${childName}`);
+      pendingTrainingFiles = [];
+      renderTrainingPreviews();
+    } else {
+      alert("Reset failed: " + (res?.error || "Unknown error"));
+    }
+  });
+});
 
 loadChildren();
