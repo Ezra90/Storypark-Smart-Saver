@@ -75,6 +75,9 @@ const DELAY_PROFILES = {
 /** Global request counter for coffee-break logic. */
 let _requestCount = 0;
 
+/** Number of requests before the next Coffee Break. Re-randomised after each break. */
+let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
+
 /**
  * Smart human-paced delay that replaces the old sleep().
  * Every 15–25 requests forces an extended "Coffee Break" pause.
@@ -84,14 +87,16 @@ let _requestCount = 0;
 async function smartDelay(actionType) {
   _requestCount++;
 
-  // Coffee Break every 15–25 requests (random threshold to avoid pattern)
-  const coffeeBreakThreshold = Math.floor(Math.random() * 11) + 15; // 15–25
-  if (_requestCount % coffeeBreakThreshold === 0) {
+  // Coffee Break when the counter reaches the threshold
+  if (_requestCount >= _coffeeBreakAt) {
     const breakMs = Math.floor(Math.random() * (25000 - 12000 + 1)) + 12000;
     await logger(
       "INFO",
       `☕ Coffee Break — pausing ${(breakMs / 1000).toFixed(1)}s to avoid bot detection (request #${_requestCount})`
     );
+    // Reset for next break
+    _requestCount = 0;
+    _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
     await new Promise((r) => setTimeout(r, breakMs));
     return;
   }

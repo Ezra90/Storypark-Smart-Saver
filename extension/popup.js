@@ -73,7 +73,6 @@ const LEVEL_COLORS = { INFO: "level-INFO", SUCCESS: "level-SUCCESS", WARNING: "l
 /**
  * Render a single log entry object into the activity log terminal.
  * @param {{timestamp: string, level: string, message: string}} entry
- * @param {boolean} [prepend=false]
  */
 function appendActivityEntry(entry) {
   // Remove placeholder on first real entry
