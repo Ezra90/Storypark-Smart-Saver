@@ -231,7 +231,7 @@ async function processImage(msg) {
     const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
     const stampedBlob = await applyExif(srcBlob, date, description);
     await downloadBlob(stampedBlob, savePath);
-    return { result: "approve" };
+    return { ok: true, result: "approve" };
   }
 
   // ---- 3. Load image for face detection ----
@@ -249,7 +249,7 @@ async function processImage(msg) {
   const faces = detectionResult?.face ?? [];
 
   if (faces.length === 0) {
-    return { result: "reject" };
+    return { ok: true, result: "reject" };
   }
 
   // ---- 4. Match faces against all known child descriptors ----
@@ -277,7 +277,7 @@ async function processImage(msg) {
 
   // ---- 5. Decision ----
   if (bestPct < minThreshold) {
-    return { result: "reject" };
+    return { ok: true, result: "reject" };
   }
 
   if (bestPct >= autoThreshold) {
@@ -286,7 +286,7 @@ async function processImage(msg) {
     const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
     const stampedBlob = await applyExif(srcBlob, date, description);
     await downloadBlob(stampedBlob, savePath);
-    return { result: "approve" };
+    return { ok: true, result: "approve" };
   }
 
   // Review queue: crop the best face, store in IndexedDB
@@ -305,7 +305,7 @@ async function processImage(msg) {
     matchedChildren: [...matchedNames].sort(),
   });
 
-  return { result: "review", matchPct: bestPct };
+  return { ok: true, result: "review", matchPct: bestPct };
 }
 
 /* ================================================================== */

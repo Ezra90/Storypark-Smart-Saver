@@ -392,10 +392,11 @@ async function runExtraction(childId, childName, mode) {
       .filter((m) => m.original_url)
       .map((m) => ({
         originalUrl: m.original_url,
-        filename:
+        filename: sanitizeName(
           m.filename ||
           m.original_url.split("/").pop().split("?")[0] ||
-          `${summary.id}.jpg`,
+          `${summary.id}.jpg`
+        ),
       }));
 
     if (images.length === 0) {

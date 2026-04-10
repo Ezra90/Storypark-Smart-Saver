@@ -12,7 +12,7 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 |---|---|
 | **Headless API** | Calls `https://app.storypark.com/api/v3/*` endpoints with your browser session cookies — no DOM scraping, no content script |
 | **EXIF Metadata Injection** | Stamps `DateTimeOriginal` and `ImageDescription` (story body + room + daily routine) into every downloaded JPEG via `lib/exif.js` |
-| **Continuous Facial Recognition Learning** | Powered by `face-api.js` (TensorFlow.js) running in an offscreen document. Descriptors are stored in IndexedDB and improve automatically as you approve photos in the Review Queue |
+| **Continuous Facial Recognition Learning** | Powered by `@vladmandic/human` (`human.js`) running in an offscreen document. Descriptors are stored in IndexedDB and improve automatically as you approve photos in the Review Queue |
 | **Anti-Bot Human Pacing** | `smartDelay(actionType)` replaces naive sleeps — uses action-specific timing profiles and inserts random 12–25 s "Coffee Break" pauses every 15–25 requests |
 | **Cloudflare Circuit Breaker** | Throws `AuthError` (401) and `RateLimitError` (403 / 429); immediately stops the extraction loop on either error to protect your account |
 | **Persistent Activity Log** | Every log event is stored as a structured entry `{timestamp, level, message}` in `chrome.storage.local` (rolling 200-entry window) and streamed in real-time to the popup's Activity Log tab |
@@ -37,7 +37,7 @@ All requests are made with `credentials: "include"` so the browser automatically
 ### Manifest V3 Compliance
 
 - **Service Worker** (`background.js`, `type: module`) — orchestrates API calls, pacing, circuit-breaking, and logging.
-- **Offscreen Document** (`offscreen.html` / `offscreen.js`) — runs `face-api.js` and EXIF processing, which need DOM/Canvas APIs unavailable in service workers.
+- **Offscreen Document** (`offscreen.html` / `offscreen.js`) — runs `@vladmandic/human` (`human.js`) and EXIF processing, which need DOM/Canvas APIs unavailable in service workers.
 - **No persistent background page**, no `XMLHttpRequest`, no remote code evaluation.
 
 ### Human Pacing Algorithm
@@ -93,10 +93,10 @@ Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct co
 
 ### Face Recognition Setup (Optional)
 
-Face recognition requires additional model files that are not bundled in this repository:
+Face recognition requires additional files that are not bundled in this repository:
 
-1. Download `face-api.min.js` and place it at `extension/lib/face-api.min.js`.
-2. Download the model weights listed in `extension/models/README.md` and place them in `extension/models/`.
+1. Place `human.js` (from `@vladmandic/human`) at `extension/lib/human.js`.
+2. Place the `blazeface` and `faceres` model files (`.bin` and `.json`) in `extension/models/` — see `extension/models/README.md` for the full list.
 3. Open **⚙ Settings** → **Face Training Data** and upload 5–10 clear reference photos for each child.
 
 Without these files, all photos pass through without face filtering (every image is downloaded automatically).
@@ -117,7 +117,7 @@ Without these files, all photos pass through without face filtering (every image
 extension/
 ├── manifest.json          # Chrome Extension manifest (V3)
 ├── background.js          # Service worker — API calls, pacing, circuit breaker, logger
-├── offscreen.html         # Offscreen document host (face-api.js needs Canvas/DOM)
+├── offscreen.html         # Offscreen document host (@vladmandic/human needs Canvas/DOM)
 ├── offscreen.js           # Face recognition + EXIF worker (offscreen document)
 ├── popup.html / popup.js  # Popup UI — Extract, Pending Matches, Activity Log tabs
 ├── options.html / options.js  # Settings — children, thresholds, face training
@@ -126,7 +126,7 @@ extension/
 │   ├── exif.js            # Pure-JS EXIF writer (DateTimeOriginal + ImageDescription)
 │   ├── face.js            # Face detection helpers (options page live preview)
 │   └── utils.js           # Shared helpers
-├── models/                # face-api.js model weights (user-supplied — see models/README.md)
+├── models/                # @vladmandic/human model weights — blazeface + faceres (.bin + .json, user-supplied — see models/README.md)
 └── icons/                 # Extension icons (16 px, 48 px, 128 px)
 ```
 
@@ -135,7 +135,7 @@ extension/
 | Module | Role |
 |---|---|
 | `background.js` | Service worker: profile fetch, story pagination, `smartDelay`, circuit breaker, `logger`, offscreen coordination, review queue management |
-| `offscreen.js` | Offscreen worker: image download, face-api.js recognition, EXIF injection via `lib/exif.js`, `chrome.downloads` save |
+| `offscreen.js` | Offscreen worker: image download, @vladmandic/human recognition, EXIF injection via `lib/exif.js`, `chrome.downloads` save |
 | `popup.js` | Popup UI: extraction controls, real-time status, Pending Matches HITL, Activity Log terminal |
 | `options.js` | Settings page: children management, confidence thresholds, face descriptor training |
 | `lib/db.js` | IndexedDB: processed-story ledger (unlimited capacity) + face descriptor store |
@@ -162,7 +162,7 @@ extension/
 | No children in dropdown | Click **↻** while logged in to Storypark; check the Activity Log for errors |
 | No photos downloaded | Check the Activity Log for errors; confirm your child has photo posts on Storypark |
 | All photos going to Review Queue | Lower thresholds in Settings or add more face training photos |
-| Face recognition not working | Ensure `lib/face-api.min.js` and all model weights are present in `extension/models/` |
+| Face recognition not working | Ensure `lib/human.js` is present and the `blazeface` + `faceres` model files (`.bin` + `.json`) are in `extension/models/` |
 | Want to reprocess everything | Use **🔁 Deep Rescan** — or clear `processedStories` in Chrome DevTools → IndexedDB → `storyparkSyncDB` |
 
 ---
