@@ -164,8 +164,10 @@ function populateChildren(children) {
     opt.value = "";
     opt.textContent = "No children found — open Storypark first";
     childSelect.appendChild(opt);
-    // Disable extract buttons: no valid child to scan
-    setRunning(true);
+    // Just disable the scan buttons — don't call setRunning(true) which would
+    // show the Stop button and permanently hide the extract buttons.
+    btnExtractLatest.disabled = true;
+    btnDeepRescan.disabled    = true;
     return;
   }
   for (const child of children) {
@@ -176,6 +178,14 @@ function populateChildren(children) {
   }
   setRunning(false);
 }
+
+// Re-enable scan buttons when the user selects a valid child.
+childSelect.addEventListener("change", () => {
+  if (!isRunning && childSelect.value) {
+    btnExtractLatest.disabled = false;
+    btnDeepRescan.disabled    = false;
+  }
+});
 
 function loadChildren() {
   chrome.runtime.sendMessage({ type: "GET_CHILDREN" }, (res) => {
