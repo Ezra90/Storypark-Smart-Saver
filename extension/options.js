@@ -37,11 +37,15 @@ const humanWarning         = document.getElementById("humanWarning");
 /*  Threshold sync (slider ↔ number)                                   */
 /* ================================================================== */
 
+function clampThreshold(value) {
+  return Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+}
+
 autoThresholdRange.addEventListener("input", () => {
   autoThresholdNumber.value = autoThresholdRange.value;
 });
 autoThresholdNumber.addEventListener("input", () => {
-  const v = Math.max(0, Math.min(100, parseInt(autoThresholdNumber.value, 10) || 0));
+  const v = clampThreshold(autoThresholdNumber.value);
   autoThresholdRange.value  = v;
   autoThresholdNumber.value = v;
 });
@@ -50,7 +54,7 @@ minThresholdRange.addEventListener("input", () => {
   minThresholdNumber.value = minThresholdRange.value;
 });
 minThresholdNumber.addEventListener("input", () => {
-  const v = Math.max(0, Math.min(100, parseInt(minThresholdNumber.value, 10) || 0));
+  const v = clampThreshold(minThresholdNumber.value);
   minThresholdRange.value  = v;
   minThresholdNumber.value = v;
 });

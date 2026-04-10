@@ -353,12 +353,6 @@ function sanitizeName(name) {
  * @returns {Promise<{approved, queued, rejected}>}
  */
 async function runExtraction(childId, childName, mode) {
-  if (isScanning) {
-    throw new Error("A scan is already in progress. Please wait or cancel it.");
-  }
-  isScanning      = true;
-  cancelRequested = false;
-
   await logger(
     "INFO",
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
@@ -614,6 +608,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: false, error: "A scan is already in progress." });
         return false;
       }
+      // Set scanning flag synchronously to prevent race conditions
+      isScanning      = true;
+      cancelRequested = false;
       runExtraction(childId, childName || childId, msg.type)
         .then((stats) => sendResponse({ ok: true, stats }))
         .catch((err)  => sendResponse({ ok: false, error: err.message }));
