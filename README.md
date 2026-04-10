@@ -1,15 +1,76 @@
-# Storypark Photo Sync – Chrome Extension
+# Storypark Extracts – Chrome Extension
 
-A Google Chrome extension that automatically syncs your children's daycare photos from [Storypark](https://app.storypark.com) to your [Google Photos](https://photos.google.com) account.
+A **Manifest V3 Chrome Extension** that uses a **Headless API approach** — it calls Storypark's internal v3 JSON APIs directly rather than scraping the DOM — to automatically download your children's daycare photos to your local device.
 
-**What it does:**
+No server, no Python, no command-line. Install the extension, log in to Storypark, and click **Extract Latest**.
 
-1. **Scrapes** your Storypark activity feed for photos.
-2. **Filters** photos using client-side facial recognition (only keeps pictures of *your* children).
-3. **Stamps EXIF metadata** — embeds the original Storypark post date and your daycare's GPS coordinates so photos sort correctly in Google Photos.
-4. **Uploads** directly to Google Photos (optionally into a specific album).
+---
 
-No server, no Python, no command-line — just install the extension and click **Sync Now**.
+## Key Features
+
+| Feature | Details |
+|---|---|
+| **Headless API** | Calls `https://app.storypark.com/api/v3/*` endpoints with your browser session cookies — no DOM scraping, no content script |
+| **EXIF Metadata Injection** | Stamps `DateTimeOriginal` and `ImageDescription` (story body + room + daily routine) into every downloaded JPEG via `lib/exif.js` |
+| **Continuous Facial Recognition Learning** | Powered by `face-api.js` (TensorFlow.js) running in an offscreen document. Descriptors are stored in IndexedDB and improve automatically as you approve photos in the Review Queue |
+| **Anti-Bot Human Pacing** | `smartDelay(actionType)` replaces naive sleeps — uses action-specific timing profiles and inserts random 12–25 s "Coffee Break" pauses every 15–25 requests |
+| **Cloudflare Circuit Breaker** | Throws `AuthError` (401) and `RateLimitError` (403 / 429); immediately stops the extraction loop on either error to protect your account |
+| **Persistent Activity Log** | Every log event is stored as a structured entry `{timestamp, level, message}` in `chrome.storage.local` (rolling 200-entry window) and streamed in real-time to the popup's Activity Log tab |
+
+---
+
+## Architecture
+
+### Headless API Approach
+
+Instead of injecting a content script and scraping the rendered HTML, the extension calls Storypark's undocumented internal REST APIs:
+
+```
+GET /api/v3/profile                          → children list
+GET /api/v3/children/:id/stories             → paginated story feed
+GET /api/v3/stories/:id                      → full story with media_items[]
+GET /api/v3/children/:id/routines?date=…     → daily routine summary
+```
+
+All requests are made with `credentials: "include"` so the browser automatically attaches your logged-in session cookies. **You must be logged in to Storypark in the same Chrome profile.**
+
+### Manifest V3 Compliance
+
+- **Service Worker** (`background.js`, `type: module`) — orchestrates API calls, pacing, circuit-breaking, and logging.
+- **Offscreen Document** (`offscreen.html` / `offscreen.js`) — runs `face-api.js` and EXIF processing, which need DOM/Canvas APIs unavailable in service workers.
+- **No persistent background page**, no `XMLHttpRequest`, no remote code evaluation.
+
+### Human Pacing Algorithm
+
+```
+FEED_SCROLL     →  800 – 1 500 ms
+READ_STORY      → 2 500 – 6 000 ms
+DOWNLOAD_IMAGE  → 1 000 – 2 000 ms
+Coffee Break    → every 15–25 requests → 12 000 – 25 000 ms
+```
+
+A global request counter is incremented on every `smartDelay()` call. When the counter hits a random threshold between 15 and 25, an extended "Coffee Break" pause fires and is logged to the Activity Log.
+
+### Cloudflare Circuit Breaker
+
+`apiFetch()` inspects the HTTP status code before parsing JSON:
+
+| Status | Behaviour |
+|---|---|
+| `401` | Throws `AuthError` — session expired or not logged in |
+| `403` or `429` | Throws `RateLimitError` — Cloudflare / server rate limit |
+| Other `!ok` | Throws a generic `Error` |
+
+In the main extraction loops, catching `AuthError` or `RateLimitError` immediately `break`s the loop and logs an `ERROR` entry — no further requests are made.
+
+### Persistent Activity Log
+
+`logger(level, message)` in `background.js`:
+1. Creates a `{timestamp, level, message}` entry.
+2. Appends it to `activityLog` in `chrome.storage.local`, trimming to the last 200 entries.
+3. Broadcasts a `LOG_ENTRY` message to the popup for real-time display.
+
+Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct colour in the terminal-style Activity Log tab.
 
 ---
 
@@ -20,92 +81,33 @@ No server, no Python, no command-line — just install the extension and click *
 | Requirement | Details |
 |---|---|
 | **Google Chrome** | Version 116 or later (Manifest V3 support) |
-| **Storypark account** | You must already have a parent account on [app.storypark.com](https://app.storypark.com) |
-| **Google account** | The Google account you want to save photos to |
+| **Storypark account** | A parent account on [app.storypark.com](https://app.storypark.com) — you must be logged in |
 
-### 1. Install the Extension
+### Install (Developer Mode)
 
-1. Open the [Chrome Web Store listing](#) *(link will be available once the extension is published — ask whoever shared this with you for the install link)*.
-2. Click **Add to Chrome** → **Add extension**.
-3. The Storypark Photo Sync icon will appear in your Chrome toolbar. 🎉
+1. Download or clone this repository.
+2. Open `chrome://extensions` in Chrome.
+3. Enable **Developer mode** (top-right toggle).
+4. Click **Load unpacked** and select the `extension/` folder.
+5. The 📸 Storypark Extracts icon will appear in your toolbar.
 
-### 2. Connect Your Google Account
+### Face Recognition Setup (Optional)
 
-1. Click the extension icon in your toolbar.
-2. Click **Connect to Google** and sign in with the Google account you want photos saved to.
-3. Grant the requested permissions (the extension only accesses Google Photos).
+Face recognition requires additional model files that are not bundled in this repository:
 
-### 3. Open Storypark
+1. Download `face-api.min.js` and place it at `extension/lib/face-api.min.js`.
+2. Download the model weights listed in `extension/models/README.md` and place them in `extension/models/`.
+3. Open **⚙ Settings** → **Face Training Data** and upload 5–10 clear reference photos for each child.
 
-Open a new tab, go to [app.storypark.com](https://app.storypark.com), and log in to your account. The extension needs this tab open to find new photos.
+Without these files, all photos pass through without face filtering (every image is downloaded automatically).
 
-### 4. Configure Your Settings (Optional)
+### Usage
 
-Click **⚙ Settings** (or right-click the extension icon → **Options**) to personalise:
-
-- **Children**: Add your child's name and a clear reference photo so the extension can recognise them.
-- **Daycare Location**: Enter your daycare's name and GPS coordinates so photos sort correctly on the Google Photos map. ([Find coordinates on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?")
-- **Face Recognition Strictness**: Choose how carefully the extension checks faces (Normal is recommended for most families).
-- **Album**: Choose or create a Google Photos album for uploads.
-
-Click **💾 Save Settings** when done.
-
-### 5. Sync!
-
-Click the extension icon → **🔄 Sync Now**. The extension will find new daycare photos and save them straight to your Google Photos. Progress appears in the popup — sit back and enjoy! ☕
-
----
-
-## Usage
-
-### First-Time Setup
-
-1. Click the extension icon → **Connect to Google** → authorize with your Google account.
-2. Click **⚙ Settings** (or right-click the icon → Options) to open the Settings page.
-3. Configure:
-   - **Children**: Add names and upload a clear reference photo for each child.
-   - **Daycare Location**: Enter your daycare's name and GPS coordinates (latitude/longitude). [Find on Google Maps](https://www.google.com/maps) — right-click any location → "What's here?" to get coordinates.
-   - **Face Recognition Strictness**: Choose how carefully the extension checks faces (Normal is recommended).
-   - **Album**: Choose an existing Google Photos album or create a new one.
-4. Click **💾 Save Settings**.
-5. *(Optional)* In the **Face Training Data** section, upload 5–10 clear face photos of each child to build the recognition model. A live match % is shown for each photo to help you choose high-quality training images. You can also import photos directly from a Google Photos album.
-
-### Syncing Photos
-
-1. Open a tab with [app.storypark.com](https://app.storypark.com) and log in.
-2. Click the extension icon → **🔄 Sync Now**.
-3. The extension will:
-   - Scroll your Storypark feed to discover photos
-   - Download new images
-   - Apply facial recognition (if configured) and classify photos:
-     - **Auto-approved** (match ≥ Auto-Approve threshold) → uploaded immediately
-     - **Review Queue** (match between thresholds) → held for manual review
-     - **Discarded** (match below Minimum threshold) → skipped
-   - Stamp EXIF date, GPS, and daycare name into each photo
-   - Upload approved photos to Google Photos
-4. Progress is shown in the popup's log panel.
-
-### Face Recognition Strictness
-
-The **Settings** page lets you choose how carefully the extension checks that a photo contains your child's face:
-
-| Setting | Auto-Approve | Minimum Review | Behaviour |
-|---|---|---|---|
-| **Strict** | 90% | 60% | Fewer mistakes, might miss some photos |
-| **Normal** *(recommended)* | 85% | 50% | Balanced for most families |
-| **Loose** | 70% | 30% | Catches everything, might include other kids |
-
-> **Tip:** Start with **Normal**. If too many wrong kids appear, switch to **Strict**. If you're missing photos of your child, try **Loose**.
-
-### Review Queue
-
-When a sync runs, photos that fall between the two thresholds appear in the **Review Queue** at the bottom of the popup. For each photo you can:
-- **✅ Approve** — stamps EXIF data and uploads it to Google Photos immediately.
-- **❌ Reject** — discards the photo (it will not be processed again).
-
-### Incremental Sync
-
-The extension remembers which images have already been processed. On subsequent syncs, it stops scrolling early once it encounters previously-seen photos, making follow-up syncs much faster.
+1. Open [app.storypark.com](https://app.storypark.com) in a Chrome tab and log in.
+2. Click the extension icon.
+3. Select a child from the dropdown (click **↻** to refresh if needed).
+4. Click **⬇ Extract Latest** for an incremental fetch, or **🔁 Deep Rescan** to reprocess everything.
+5. Monitor progress in the **Activity Log** tab.
 
 ---
 
@@ -114,76 +116,40 @@ The extension remembers which images have already been processed. On subsequent 
 ```
 extension/
 ├── manifest.json          # Chrome Extension manifest (V3)
-├── background.js          # Service worker – orchestrates the sync pipeline
-├── content.js             # Content script – injected into Storypark, scrapes the feed
+├── background.js          # Service worker — API calls, pacing, circuit breaker, logger
 ├── offscreen.html         # Offscreen document host (face-api.js needs Canvas/DOM)
-├── offscreen.js           # Face recognition worker (runs in offscreen document)
-├── popup.html / popup.js  # Popup UI – Connect, Sync, progress log, Review Queue
-├── options.html / options.js  # Settings page – children, thresholds, GPS, album, training
+├── offscreen.js           # Face recognition + EXIF worker (offscreen document)
+├── popup.html / popup.js  # Popup UI — Extract, Pending Matches, Activity Log tabs
+├── options.html / options.js  # Settings — children, thresholds, face training
 ├── lib/
-│   ├── db.js              # IndexedDB helper – processed-URL ledger (unlimited storage)
-│   ├── utils.js           # Shared constants and helpers
-│   ├── exif.js            # EXIF metadata writer (date + GPS)
-│   └── face.js            # Face detection/recognition helpers (used by options page)
-├── models/                # face-api.js model weights (user-supplied)
-└── icons/                 # Extension icons
+│   ├── db.js              # IndexedDB helper — processed-story ledger + face descriptors
+│   ├── exif.js            # Pure-JS EXIF writer (DateTimeOriginal + ImageDescription)
+│   ├── face.js            # Face detection helpers (options page live preview)
+│   └── utils.js           # Shared helpers
+├── models/                # face-api.js model weights (user-supplied — see models/README.md)
+└── icons/                 # Extension icons (16 px, 48 px, 128 px)
 ```
 
 ### Module Responsibilities
 
 | Module | Role |
 |---|---|
-| `background.js` | Service worker: Google OAuth, image download, offscreen face filtering, EXIF stamping, Google Photos upload, review queue management |
-| `content.js` | Content script: scrolls Storypark feed, extracts image URLs and post dates from the DOM |
-| `offscreen.js` | Offscreen document worker: face-api.js face recognition (requires Canvas/DOM APIs unavailable in service worker) |
-| `popup.js` | Popup UI: 1-click sync, connection status, live progress log, Review Queue HITL |
-| `options.js` | Settings page: children, daycare name/GPS, confidence thresholds, album selection, face training |
-| `lib/db.js` | IndexedDB helper: stores the processed-URL ledger with virtually unlimited capacity |
-| `lib/exif.js` | Pure-JS EXIF writer — stamps DateTimeOriginal and GPS into JPEG blobs |
-| `lib/face.js` | Face detection/recognition via face-api.js (TensorFlow.js, runs 100% client-side) |
-| `lib/utils.js` | Shared selectors, timing constants, logging, date parsing |
-
----
-
-## Architecture Notes
-
-### Manifest V3 Compliance
-
-- Uses a **service worker** (`background.js`) instead of a persistent background page.
-- All network requests use `fetch()` (no XMLHttpRequest).
-- OAuth handled through `chrome.identity.getAuthToken()`.
-- User settings, thresholds, and face descriptors stored in `chrome.storage.local`.
-- The **processed-URL ledger** (history of every image already handled) is stored in **IndexedDB** via `lib/db.js`. This provides virtually unlimited capacity and avoids the 5 MB hard limit that `chrome.storage.local` would hit for users with years of Storypark history.
-
-### Anti-Bot Measures
-
-The content script mimics human browsing to avoid triggering Storypark's rate limiting:
-- Random delays (1.5–3.5 seconds) between scroll actions.
-- Prefers clicking "Load more" buttons over infinite scroll.
-- Stops early during incremental syncs.
-
-### EXIF Metadata
-
-Every uploaded photo is stamped with:
-- **DateTimeOriginal / DateTimeDigitized** → the Storypark post date (so photos sort chronologically).
-- **GPS coordinates** → your daycare's location (so photos appear on the Google Photos map).
-
-### Quota Handling
-
-Google Photos API has daily upload limits. If the quota is reached mid-sync, the extension:
-- Saves progress (already-uploaded images are marked as processed).
-- Displays a friendly message: *"Daily quota reached. Try again tomorrow."*
-- The next sync picks up where it left off.
+| `background.js` | Service worker: profile fetch, story pagination, `smartDelay`, circuit breaker, `logger`, offscreen coordination, review queue management |
+| `offscreen.js` | Offscreen worker: image download, face-api.js recognition, EXIF injection via `lib/exif.js`, `chrome.downloads` save |
+| `popup.js` | Popup UI: extraction controls, real-time status, Pending Matches HITL, Activity Log terminal |
+| `options.js` | Settings page: children management, confidence thresholds, face descriptor training |
+| `lib/db.js` | IndexedDB: processed-story ledger (unlimited capacity) + face descriptor store |
+| `lib/exif.js` | Writes `DateTimeOriginal` (0x0132) and `ImageDescription` (0x010E) tags into JPEG blobs; no GPS |
 
 ---
 
 ## Privacy & Security
 
-- **No external servers.** Everything runs locally in your browser.
-- **No passwords stored.** Storypark login happens in your existing browser session; the extension reads the DOM while you're logged in.
-- **Google OAuth tokens** are managed by Chrome's built-in `chrome.identity` API and are never exposed to the extension's code as raw strings on disk.
-- **Face recognition** runs entirely client-side via TensorFlow.js — no images are sent to any remote service.
-- **Reference photos** are stored in `chrome.storage.local` (encrypted at rest by Chrome).
+- **No external servers.** All processing happens inside Chrome.
+- **No passwords stored.** Authentication uses your existing Storypark browser session.
+- **Face recognition** runs 100 % client-side via TensorFlow.js — no images leave your device.
+- **Face descriptors** are stored in IndexedDB (not transmitted anywhere).
+- **Downloaded photos** are saved via `chrome.downloads` to your local filesystem.
 
 ---
 
@@ -191,15 +157,13 @@ Google Photos API has daily upload limits. If the quota is reached mid-sync, the
 
 | Problem | Solution |
 |---|---|
-| "No Storypark tab found" | Open [app.storypark.com](https://app.storypark.com) in a tab and log in before syncing |
-| "Not connected to Google" | Click **Connect to Google** in the popup |
-| No photos uploaded | Check that your Storypark feed has images; try scrolling manually first to confirm they load |
-| All photos going to Review Queue | Change Face Recognition Strictness to **Normal** or **Loose** in Settings |
-| Too many wrong photos uploaded | Change Face Recognition Strictness to **Strict** and/or add more training photos |
-| Face recognition not working | Add training photos in Settings → Face Training Data |
-| "Daily quota reached" | Google Photos limits uploads per day; wait 24 hours and sync again |
-| Want to reprocess everything | Open Chrome DevTools → Application → Storage → IndexedDB → `storyparkSyncDB` → `processedUrls` → clear the object store |
-| Review Queue not clearing | Use ✅ Approve or ❌ Reject buttons in the popup for each item |
+| "Authentication required" in Activity Log | Log in to [app.storypark.com](https://app.storypark.com) in the same Chrome profile |
+| "Rate limited by Storypark" in Activity Log | Wait a few minutes; the circuit breaker stopped the scan to protect your account |
+| No children in dropdown | Click **↻** while logged in to Storypark; check the Activity Log for errors |
+| No photos downloaded | Check the Activity Log for errors; confirm your child has photo posts on Storypark |
+| All photos going to Review Queue | Lower thresholds in Settings or add more face training photos |
+| Face recognition not working | Ensure `lib/face-api.min.js` and all model weights are present in `extension/models/` |
+| Want to reprocess everything | Use **🔁 Deep Rescan** — or clear `processedStories` in Chrome DevTools → IndexedDB → `storyparkSyncDB` |
 
 ---
 

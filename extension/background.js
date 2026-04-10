@@ -12,6 +12,8 @@
  *   GET_REVIEW_QUEUE  – Return the IndexedDB HITL queue
  *   REVIEW_APPROVE    – Confirm face, update descriptor, download photo
  *   REVIEW_REJECT     – Discard review queue item
+ *   GET_ACTIVITY_LOG  – Return the persisted activity log array
+ *   CLEAR_ACTIVITY_LOG – Clear the persisted activity log
  */
 
 import {
@@ -25,19 +27,78 @@ import {
 } from "./lib/db.js";
 
 /* ================================================================== */
-/*  Anti-bot jitter                                                    */
+/*  Activity Log                                                       */
+/* ================================================================== */
+
+const LOG_MAX_ENTRIES = 200;
+
+/**
+ * Log a message at the given severity level.
+ * Saves to chrome.storage.local (rolling 200-entry array) and
+ * broadcasts to the popup in real-time.
+ *
+ * @param {"INFO"|"SUCCESS"|"WARNING"|"ERROR"} level
+ * @param {string} message
+ */
+async function logger(level, message) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+  };
+
+  // Persist to storage (rolling window)
+  const { activityLog = [] } = await chrome.storage.local.get("activityLog");
+  activityLog.push(entry);
+  if (activityLog.length > LOG_MAX_ENTRIES) {
+    activityLog.splice(0, activityLog.length - LOG_MAX_ENTRIES);
+  }
+  await chrome.storage.local.set({ activityLog });
+
+  // Broadcast to popup (fire-and-forget)
+  chrome.runtime.sendMessage({ type: "LOG_ENTRY", entry }).catch(() => {});
+}
+
+/* ================================================================== */
+/*  Anti-bot jitter — Human Pacing Algorithm ("Coffee Break")         */
 /* ================================================================== */
 
 /**
- * Sleep for a random duration between min and max milliseconds.
- * All sequential API calls must be wrapped with this to avoid Cloudflare bans.
- *
- * @param {number} minMs  Default 1500 ms
- * @param {number} maxMs  Default 3500 ms
+ * Delay profiles (ms ranges) keyed by action type.
  */
-function sleep(minMs = 1500, maxMs = 3500) {
+const DELAY_PROFILES = {
+  FEED_SCROLL:    [800,  1500],
+  READ_STORY:     [2500, 6000],
+  DOWNLOAD_IMAGE: [1000, 2000],
+};
+
+/** Global request counter for coffee-break logic. */
+let _requestCount = 0;
+
+/**
+ * Smart human-paced delay that replaces the old sleep().
+ * Every 15–25 requests forces an extended "Coffee Break" pause.
+ *
+ * @param {"FEED_SCROLL"|"READ_STORY"|"DOWNLOAD_IMAGE"} actionType
+ */
+async function smartDelay(actionType) {
+  _requestCount++;
+
+  // Coffee Break every 15–25 requests (random threshold to avoid pattern)
+  const coffeeBreakThreshold = Math.floor(Math.random() * 11) + 15; // 15–25
+  if (_requestCount % coffeeBreakThreshold === 0) {
+    const breakMs = Math.floor(Math.random() * (25000 - 12000 + 1)) + 12000;
+    await logger(
+      "INFO",
+      `☕ Coffee Break — pausing ${(breakMs / 1000).toFixed(1)}s to avoid bot detection (request #${_requestCount})`
+    );
+    await new Promise((r) => setTimeout(r, breakMs));
+    return;
+  }
+
+  const [minMs, maxMs] = DELAY_PROFILES[actionType] || [1000, 2000];
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  return new Promise((r) => setTimeout(r, ms));
+  await new Promise((r) => setTimeout(r, ms));
 }
 
 /* ================================================================== */
@@ -46,30 +107,45 @@ function sleep(minMs = 1500, maxMs = 3500) {
 
 const STORYPARK_BASE = "https://app.storypark.com";
 
+/** Thrown when the server returns 401 (session expired / not logged in). */
+class AuthError extends Error {
+  constructor(url) {
+    super(`Authentication required — please log in to Storypark (401) — ${url}`);
+    this.name = "AuthError";
+  }
+}
+
+/** Thrown when Cloudflare / Storypark rate-limits us (429 or 403). */
+class RateLimitError extends Error {
+  constructor(status, url) {
+    super(`Rate limited by Storypark (${status}) — ${url}`);
+    this.name = "RateLimitError";
+  }
+}
+
 /**
  * Fetch a Storypark API URL using the browser's active session cookies.
  * Never call this inside Promise.all – always await sequentially.
  *
  * @param {string} url
  * @returns {Promise<Object>} Parsed JSON response body
+ * @throws {AuthError}      on HTTP 401
+ * @throws {RateLimitError} on HTTP 403 or 429
  */
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
+  if (res.status === 401) {
+    throw new AuthError(url);
+  }
+  if (res.status === 429 || res.status === 403) {
+    throw new RateLimitError(res.status, url);
+  }
   if (!res.ok) {
     throw new Error(
       `Storypark API ${res.status} ${res.statusText} — ${url}`
     );
   }
   return res.json();
-}
-
-/* ================================================================== */
-/*  Progress log                                                       */
-/* ================================================================== */
-
-function sendLog(message) {
-  // Fire-and-forget; popup may not be open
-  chrome.runtime.sendMessage({ type: "LOG", message }).catch(() => {});
 }
 
 /* ================================================================== */
@@ -127,7 +203,7 @@ async function loadAndCacheProfile() {
     await chrome.storage.local.set({ children });
     return children;
   } catch (err) {
-    console.error("[background] Profile fetch failed:", err.message);
+    await logger("ERROR", `Profile fetch failed: ${err.message}`);
     return [];
   }
 }
@@ -162,7 +238,7 @@ async function fetchStorySummaries(childId, mode) {
     url.searchParams.set("story_type", "all");
     if (pageToken) url.searchParams.set("next_page_token", pageToken);
 
-    sendLog(`Fetching story page ${pageNum + 1}…`);
+    await logger("INFO", `Fetching story page ${pageNum + 1}…`);
     const data   = await apiFetch(url.toString());
     const stories = data.stories || data.items || [];
 
@@ -181,10 +257,10 @@ async function fetchStorySummaries(childId, mode) {
 
     if (hitKnown || !pageToken) break;
 
-    await sleep();
+    await smartDelay("FEED_SCROLL");
   }
 
-  sendLog(`Found ${summaries.length} stories to process.`);
+  await logger("INFO", `Found ${summaries.length} stories to process.`);
   return summaries;
 }
 
@@ -199,7 +275,7 @@ async function fetchRoutineSummary(childId, dateStr) {
   if (routineCache.has(dateStr)) return routineCache.get(dateStr);
 
   try {
-    await sleep(500, 1500);
+    await smartDelay("FEED_SCROLL");
     const url  = `${STORYPARK_BASE}/api/v3/children/${childId}/routines?date=${dateStr}`;
     const data = await apiFetch(url);
     const summary = buildRoutineSummary(data);
@@ -252,7 +328,8 @@ function sanitizeName(name) {
  * @returns {Promise<{approved, queued, rejected}>}
  */
 async function runExtraction(childId, childName, mode) {
-  sendLog(
+  await logger(
+    "INFO",
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
   );
 
@@ -274,8 +351,8 @@ async function runExtraction(childId, childName, mode) {
   let rejected = 0;
 
   for (const summary of summaries) {
-    await sleep();
-    sendLog(`Processing story ${summary.id}…`);
+    await smartDelay("READ_STORY");
+    await logger("INFO", `Processing story ${summary.id}…`);
 
     // Fetch full story detail
     let story;
@@ -285,7 +362,11 @@ async function runExtraction(childId, childName, mode) {
       );
       story = detail.story || detail;
     } catch (err) {
-      sendLog(`  ✗ Story ${summary.id} fetch failed: ${err.message}`);
+      if (err instanceof AuthError || err instanceof RateLimitError) {
+        await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
+        break;
+      }
+      await logger("WARNING", `  ✗ Story ${summary.id} fetch failed: ${err.message}`);
       continue;
     }
 
@@ -317,8 +398,9 @@ async function runExtraction(childId, childName, mode) {
       : "";
 
     // Process each image sequentially
+    let aborted = false;
     for (const img of images) {
-      await sleep();
+      await smartDelay("DOWNLOAD_IMAGE");
 
       // Compile metadata string to embed in EXIF ImageDescription
       const description = [
@@ -353,16 +435,22 @@ async function runExtraction(childId, childName, mode) {
           minThreshold,
         });
       } catch (err) {
-        sendLog(`  ✗ Processing error: ${err.message}`);
+        if (err instanceof AuthError || err instanceof RateLimitError) {
+          await logger("ERROR", `🛑 ${err.message} — stopping scan to protect account.`);
+          aborted = true;
+          break;
+        }
+        await logger("WARNING", `  ✗ Processing error: ${err.message}`);
         continue;
       }
 
       if (result?.result === "approve") {
         approved++;
-        sendLog(`  ✓ Downloaded: ${img.filename}`);
+        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}`);
       } else if (result?.result === "review") {
         queued++;
-        sendLog(
+        await logger(
+          "INFO",
           `  👀 Queued for review: ${img.filename} (${result.matchPct ?? "?"}% match)`
         );
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
@@ -371,12 +459,14 @@ async function runExtraction(childId, childName, mode) {
       }
     }
 
+    if (aborted) break;
+
     await markStoryProcessed(summary.id, createdAt, childId);
   }
 
   routineCache.clear();
   const msg = `Scan complete — Downloaded: ${approved}, Review: ${queued}, Rejected: ${rejected}`;
-  sendLog(msg);
+  await logger("SUCCESS", msg);
   return { approved, queued, rejected };
 }
 
@@ -460,6 +550,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case "REVIEW_REJECT": {
       removeFromReviewQueue(msg.id)
         .then(()    => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "GET_ACTIVITY_LOG": {
+      chrome.storage.local.get("activityLog", ({ activityLog = [] }) => {
+        sendResponse({ ok: true, activityLog });
+      });
+      return true;
+    }
+
+    case "CLEAR_ACTIVITY_LOG": {
+      chrome.storage.local.set({ activityLog: [] })
+        .then(() => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }

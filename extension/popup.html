@@ -193,6 +193,43 @@
     .btn-reject:hover:not(:disabled)  { background: rgba(233,69,96,0.3);  }
     .btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* ---- Activity Log tab ---- */
+    #tabLog .log-terminal {
+      background: #0d1117;
+      border-radius: 7px;
+      padding: 8px 10px;
+      height: 220px;
+      overflow-y: auto;
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+      font-size: 10px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    #tabLog .log-terminal p {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #tabLog .log-terminal p.level-SUCCESS { color: var(--success); }
+    #tabLog .log-terminal p.level-WARNING { color: var(--warning); }
+    #tabLog .log-terminal p.level-ERROR   { color: var(--accent);  }
+    #tabLog .log-terminal p.level-INFO    { color: var(--muted);   }
+    .log-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 6px;
+    }
+    .btn-clear-log {
+      font-size: 11px;
+      padding: 3px 8px;
+      border: none;
+      border-radius: 5px;
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .btn-clear-log:hover { color: var(--text); }
+
     /* ---- Footer ---- */
     .footer {
       margin-top: 10px;
@@ -216,6 +253,7 @@
       Pending Matches
       <span class="tab-badge" id="reviewBadge" style="display:none;"></span>
     </button>
+    <button class="tab" data-tab="log">Activity Log</button>
   </div>
 
   <!-- ---- Tab: Extract ---- -->
@@ -251,6 +289,16 @@
   <div id="tabPending" class="tab-panel">
     <p id="reviewEmpty">No photos pending review.</p>
     <div id="reviewItems"></div>
+  </div>
+
+  <!-- ---- Tab: Activity Log ---- -->
+  <div id="tabLog" class="tab-panel">
+    <div class="log-toolbar">
+      <button class="btn-clear-log" id="btnClearLog">Clear log</button>
+    </div>
+    <div class="log-terminal" id="activityLogBox">
+      <p class="level-INFO">No activity yet.</p>
+    </div>
   </div>
 
   <!-- Footer -->
