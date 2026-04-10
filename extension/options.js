@@ -9,7 +9,7 @@
  */
 
 import { loadModels, buildEncoding, computeMatchPercent } from "./lib/face.js";
-import { getDescriptors, setDescriptors } from "./lib/db.js";
+import { getDescriptors } from "./lib/db.js";
 
 /* ================================================================== */
 /*  Element refs                                                       */
@@ -21,6 +21,7 @@ const faceStrictnessSelect = document.getElementById("faceStrictness");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
 const trainingPreviews     = document.getElementById("trainingPreviews");
+const trainingProgress     = document.getElementById("trainingProgress");
 const btnSaveTraining      = document.getElementById("btnSaveTraining");
 const btnSave              = document.getElementById("btnSave");
 const toast                = document.getElementById("toast");
@@ -98,9 +99,18 @@ function populateTrainingChildSelect(children) {
 }
 
 function loadChildren() {
+  // Show any cached data immediately so the UI isn't blank
   chrome.storage.local.get("children", ({ children = [] }) => {
     renderChildrenList(children);
     populateTrainingChildSelect(children);
+  });
+  // Then auto-refresh from the Storypark API so the list is always current
+  chrome.runtime.sendMessage({ type: "REFRESH_PROFILE" }, (res) => {
+    if (chrome.runtime.lastError) return; // background not yet ready; cached data is sufficient
+    if (res?.ok && res.children.length > 0) {
+      renderChildrenList(res.children);
+      populateTrainingChildSelect(res.children);
+    }
   });
 }
 
@@ -256,26 +266,60 @@ btnSaveTraining.addEventListener("click", async () => {
     return;
   }
 
-  const valid = pendingTrainingFiles.filter((e) => e.descriptor !== null);
-  if (valid.length === 0) {
-    alert("No valid face photos detected. Please choose clearer photos.");
+  if (pendingTrainingFiles.length === 0) {
+    alert("No photos selected. Please choose photos first.");
     return;
   }
 
   btnSaveTraining.disabled    = true;
   btnSaveTraining.textContent = "Saving…";
 
-  try {
-    await setDescriptors(childId, childName, valid.map((e) => e.descriptor));
-    showToast(`✓ Saved ${valid.length} training photo(s) for ${childName}`);
-    pendingTrainingFiles = [];
-    renderTrainingPreviews();
-  } catch (err) {
-    alert("Failed to save descriptors: " + err.message);
+  const total = pendingTrainingFiles.length;
+  let saved   = 0;
+  const photoLabel = (n) => `photo${n !== 1 ? "s" : ""}`;
+  trainingProgress.textContent = `Training 0 of ${total} ${photoLabel(total)}…`;
+
+  for (let i = 0; i < pendingTrainingFiles.length; i++) {
+    const entry = pendingTrainingFiles[i];
+    try {
+      await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type:         "PROCESS_TRAINING_IMAGE",
+            childId,
+            childName,
+            imageDataUri: entry.dataUrl,
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!res?.ok) {
+              reject(new Error(res?.error || "Unknown error"));
+            } else {
+              resolve();
+            }
+          }
+        );
+      });
+      saved++;
+    } catch (err) {
+      console.warn(`[options] Training image ${i + 1} failed:`, err.message);
+    }
+    trainingProgress.textContent =
+      `Trained ${saved} of ${total} ${photoLabel(total)}…`;
   }
 
+  if (saved > 0) {
+    showToast(`✓ Saved ${saved} training photo(s) for ${childName}`);
+    pendingTrainingFiles = [];
+    renderTrainingPreviews();
+  } else {
+    alert("No faces could be detected. Please try again with clearer, well-lit photos.");
+  }
+
+  trainingProgress.textContent = "";
   btnSaveTraining.disabled    = false;
-  btnSaveTraining.textContent = "�� Save training photos";
+  btnSaveTraining.textContent = "💾 Save training photos";
 });
 
 /* ================================================================== */
