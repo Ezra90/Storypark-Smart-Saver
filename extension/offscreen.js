@@ -262,6 +262,7 @@ async function processImage(msg) {
     childEncodings = [],
     autoThreshold  = 85,
     minThreshold   = 50,
+    gpsCoords      = null,
   } = msg;
 
   // ---- 1. Fetch image ----
@@ -273,7 +274,7 @@ async function processImage(msg) {
   if (childEncodings.length === 0) {
     const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
     const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await applyExif(srcBlob, date, description);
+    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
     await downloadBlob(stampedBlob, savePath);
     return { ok: true, result: "approve" };
   }
@@ -332,7 +333,7 @@ async function processImage(msg) {
     // Auto-approve: stamp EXIF and download
     const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
     const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await applyExif(srcBlob, date, description);
+    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
     await downloadBlob(stampedBlob, savePath);
 
     // Continuous learning: persist the confirmed descriptor so future scans
@@ -384,7 +385,7 @@ async function processImage(msg) {
  * Called by the background's REVIEW_APPROVE handler.
  */
 async function downloadApproved(msg) {
-  const { storyData, description, savePath } = msg;
+  const { storyData, description, savePath, gpsCoords = null } = msg;
 
   const res = await fetch(storyData.originalUrl, { credentials: "include" });
   if (!res.ok) throw new Error(`Image fetch ${res.status}: ${storyData.originalUrl}`);
@@ -392,7 +393,7 @@ async function downloadApproved(msg) {
 
   const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
   const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-  const stampedBlob = await applyExif(srcBlob, date, description);
+  const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
   await downloadBlob(stampedBlob, savePath);
 }
 

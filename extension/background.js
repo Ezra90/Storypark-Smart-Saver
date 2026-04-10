@@ -226,10 +226,44 @@ async function loadAndCacheProfile() {
       name: c.name || c.display_name || `Child ${c.id}`,
     }));
     await chrome.storage.local.set({ children });
+
+    // Auto-discover centres/communities from the profile response.
+    // The API may include them under various keys; we merge whatever we find.
+    const rawCommunities = data.user?.communities || data.communities || [];
+    if (rawCommunities.length > 0) {
+      const names = rawCommunities
+        .map((c) => c.name || c.display_name || "")
+        .filter(Boolean);
+      await discoverCentres(names);
+    }
+
     return children;
   } catch (err) {
     await logger("ERROR", `Profile fetch failed: ${err.message}`);
     return [];
+  }
+}
+
+/**
+ * Merge newly-discovered centre names into the persisted centreLocations
+ * map without overwriting existing GPS data.  Each key is a centre name;
+ * values are { lat: number|null, lng: number|null }.
+ *
+ * @param {string[]} names  One or more centre/community names
+ */
+async function discoverCentres(names) {
+  if (!names || names.length === 0) return;
+  const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+  let changed = false;
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (trimmed && !(trimmed in centreLocations)) {
+      centreLocations[trimmed] = { lat: null, lng: null };
+      changed = true;
+    }
+  }
+  if (changed) {
+    await chrome.storage.local.set({ centreLocations });
   }
 }
 
@@ -470,6 +504,21 @@ async function runExtraction(childId, childName, mode) {
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 
+    // Auto-discover this centre name for the Settings UI
+    if (centreName) {
+      discoverCentres([centreName]).catch(() => {});
+    }
+
+    // Look up GPS coordinates for this centre (user-configured)
+    let gpsCoords = null;
+    if (centreName) {
+      const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+      const loc = centreLocations[centreName];
+      if (loc && loc.lat != null && loc.lng != null) {
+        gpsCoords = { lat: loc.lat, lng: loc.lng };
+      }
+    }
+
     // Collect images with original_url
     const mediaItems = story.media_items || story.assets || story.media || [];
     const images = mediaItems
@@ -515,7 +564,8 @@ async function runExtraction(childId, childName, mode) {
             storyId:     summary.id,
             createdAt,
             body,
-            groupName,
+            roomName,
+            centreName,
             originalUrl: img.originalUrl,
             filename:    img.filename,
           },
@@ -526,6 +576,7 @@ async function runExtraction(childId, childName, mode) {
           childEncodings,
           autoThreshold,
           minThreshold,
+          gpsCoords,
         });
       } catch (err) {
         if (err.name === "AuthError" || err.message.includes("401")) {
@@ -596,6 +647,17 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
     sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
   }
 
+  // Look up GPS coordinates for this centre at review-approve time
+  let gpsCoords = null;
+  const centreName = item.storyData?.centreName;
+  if (centreName) {
+    const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
+    const loc = centreLocations[centreName];
+    if (loc && loc.lat != null && loc.lng != null) {
+      gpsCoords = { lat: loc.lat, lng: loc.lng };
+    }
+  }
+
   // Delegate image fetch + EXIF stamp + download to the offscreen document
   await sendToOffscreen({
     type:      "DOWNLOAD_APPROVED",
@@ -603,6 +665,7 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
     description: item.description || "",
     childName:  item.childName,
     savePath:   item.savePath,
+    gpsCoords,
   });
 
   await removeFromReviewQueue(id);

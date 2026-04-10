@@ -2562,15 +2562,18 @@ function dataUrlToBlob(dataUrl) {
  *  - IFD0  ImageDescription  (full description text, ASCII-filtered)
  *  - IFD0  DateTime          (modify-date)
  *  - Exif  DateTimeOriginal  (capture-date)
+ *  - GPS   Lat/Lng           (if gpsCoords provided by user settings)
  *
- * GPS IFD is explicitly left empty so no location data leaks.
+ * GPS IFD is only populated when the user has configured coordinates
+ * for the centre/service associated with the story.
  *
  * @param {Blob}        blob         Source JPEG blob
  * @param {Date|null}   date         Story creation date (may be null)
  * @param {string}      description  Rich description text
+ * @param {{lat:number, lng:number}|null} gpsCoords  Optional GPS coordinates
  * @returns {Promise<Blob>}          New JPEG blob with EXIF embedded
  */
-export async function applyExif(blob, date, description) {
+export async function applyExif(blob, date, description, gpsCoords = null) {
   const piexif = window.piexif;
   if (!piexif) {
     // piexif not loaded – return original blob unchanged
@@ -2598,6 +2601,16 @@ export async function applyExif(blob, date, description) {
     const dateStr = formatExifDate(date);
     exifObj["0th"][piexif.ImageIFD.DateTime]          = dateStr;
     exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal]  = dateStr;
+  }
+
+  // GPS coordinates (user-configured per centre)
+  if (gpsCoords && gpsCoords.lat != null && gpsCoords.lng != null) {
+    const lat = gpsCoords.lat;
+    const lng = gpsCoords.lng;
+    exifObj["GPS"][piexif.GPSIFD.GPSLatitudeRef]  = lat >= 0 ? "N" : "S";
+    exifObj["GPS"][piexif.GPSIFD.GPSLatitude]      = piexif.GPSHelper.degToDmsRational(lat);
+    exifObj["GPS"][piexif.GPSIFD.GPSLongitudeRef] = lng >= 0 ? "E" : "W";
+    exifObj["GPS"][piexif.GPSIFD.GPSLongitude]     = piexif.GPSHelper.degToDmsRational(lng);
   }
 
   try {

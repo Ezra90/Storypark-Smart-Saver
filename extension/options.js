@@ -21,6 +21,8 @@ const autoThresholdRange  = document.getElementById("autoThresholdRange");
 const autoThresholdNumber = document.getElementById("autoThresholdNumber");
 const minThresholdRange   = document.getElementById("minThresholdRange");
 const minThresholdNumber  = document.getElementById("minThresholdNumber");
+const centreList           = document.getElementById("centreList");
+const btnAddCentre         = document.getElementById("btnAddCentre");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
 const trainingPreviews     = document.getElementById("trainingPreviews");
@@ -57,6 +59,141 @@ minThresholdNumber.addEventListener("input", () => {
   const v = clampThreshold(minThresholdNumber.value);
   minThresholdRange.value  = v;
   minThresholdNumber.value = v;
+});
+
+/* ================================================================== */
+/*  Centre Locations (GPS for EXIF)                                    */
+/* ================================================================== */
+
+/**
+ * In-memory mirror of the persisted centreLocations object.
+ * Keys are centre names; values are { lat: number|null, lng: number|null }.
+ */
+let centreLocationsCache = {};
+
+function buildCentreRow(name, loc) {
+  const row = document.createElement("div");
+  row.className = "centre-row";
+
+  // Centre name (read-only for API-discovered, editable for manual adds)
+  const nameField = document.createElement("div");
+  nameField.className = "centre-field centre-name-field";
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Centre Name";
+  const nameInput = document.createElement("input");
+  nameInput.type        = "text";
+  nameInput.value       = name;
+  nameInput.placeholder = "e.g. Sunshine Childcare";
+  nameInput.dataset.originalName = name;
+  nameField.appendChild(nameLabel);
+  nameField.appendChild(nameInput);
+
+  // Latitude
+  const latField = document.createElement("div");
+  latField.className = "centre-field centre-coord-field";
+  const latLabel = document.createElement("label");
+  latLabel.textContent = "Latitude";
+  const latInput = document.createElement("input");
+  latInput.type        = "number";
+  latInput.step        = "any";
+  latInput.placeholder = "-36.8485";
+  latInput.value       = loc.lat != null ? loc.lat : "";
+  latField.appendChild(latLabel);
+  latField.appendChild(latInput);
+
+  // Longitude
+  const lngField = document.createElement("div");
+  lngField.className = "centre-field centre-coord-field";
+  const lngLabel = document.createElement("label");
+  lngLabel.textContent = "Longitude";
+  const lngInput = document.createElement("input");
+  lngInput.type        = "number";
+  lngInput.step        = "any";
+  lngInput.placeholder = "174.7633";
+  lngInput.value       = loc.lng != null ? loc.lng : "";
+  lngField.appendChild(lngLabel);
+  lngField.appendChild(lngInput);
+
+  // Google Maps search button
+  const btnMaps = document.createElement("button");
+  btnMaps.className   = "btn-maps-search";
+  btnMaps.textContent = "🔍 Maps";
+  btnMaps.title       = "Search Google Maps for this centre";
+  btnMaps.type        = "button";
+  btnMaps.addEventListener("click", () => {
+    const q = encodeURIComponent(nameInput.value || name);
+    window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
+  });
+
+  // Remove button
+  const btnRemove = document.createElement("button");
+  btnRemove.className   = "btn-remove-centre";
+  btnRemove.textContent = "✕";
+  btnRemove.title       = "Remove this centre";
+  btnRemove.type        = "button";
+  btnRemove.addEventListener("click", () => {
+    const key = nameInput.dataset.originalName || nameInput.value;
+    delete centreLocationsCache[key];
+    row.remove();
+  });
+
+  row.appendChild(nameField);
+  row.appendChild(latField);
+  row.appendChild(lngField);
+  row.appendChild(btnMaps);
+  row.appendChild(btnRemove);
+
+  // Keep cache in sync on input changes
+  const updateCache = () => {
+    const oldKey = nameInput.dataset.originalName;
+    const newKey = nameInput.value.trim();
+    const lat    = latInput.value !== "" ? parseFloat(latInput.value) : null;
+    const lng    = lngInput.value !== "" ? parseFloat(lngInput.value) : null;
+
+    if (oldKey && oldKey !== newKey) {
+      delete centreLocationsCache[oldKey];
+      nameInput.dataset.originalName = newKey;
+    }
+    if (newKey) {
+      centreLocationsCache[newKey] = {
+        lat: lat != null && !isNaN(lat) ? lat : null,
+        lng: lng != null && !isNaN(lng) ? lng : null,
+      };
+    }
+  };
+  nameInput.addEventListener("input", updateCache);
+  latInput.addEventListener("input",  updateCache);
+  lngInput.addEventListener("input",  updateCache);
+
+  return row;
+}
+
+function renderCentreList(locations) {
+  centreList.innerHTML = "";
+  const entries = Object.entries(locations);
+  if (entries.length === 0) {
+    const p = document.createElement("p");
+    p.style.cssText = "font-size:13px;color:var(--muted);margin-bottom:8px;";
+    p.textContent   = "No centres discovered yet. Run a scan or refresh your profile to auto-detect centres.";
+    centreList.appendChild(p);
+    return;
+  }
+  for (const [name, loc] of entries) {
+    centreList.appendChild(buildCentreRow(name, loc));
+  }
+}
+
+function loadCentreLocations() {
+  chrome.storage.local.get("centreLocations", ({ centreLocations = {} }) => {
+    centreLocationsCache = centreLocations;
+    renderCentreList(centreLocationsCache);
+  });
+}
+
+btnAddCentre.addEventListener("click", () => {
+  const name = `New Centre ${Object.keys(centreLocationsCache).length + 1}`;
+  centreLocationsCache[name] = { lat: null, lng: null };
+  centreList.appendChild(buildCentreRow(name, { lat: null, lng: null }));
 });
 
 /* ================================================================== */
@@ -423,7 +560,11 @@ btnSave.addEventListener("click", async () => {
   const autoThreshold = parseInt(autoThresholdNumber.value, 10) || 85;
   const minThreshold  = parseInt(minThresholdNumber.value, 10) || 50;
 
-  await chrome.storage.local.set({ autoThreshold, minThreshold });
+  await chrome.storage.local.set({
+    autoThreshold,
+    minThreshold,
+    centreLocations: centreLocationsCache,
+  });
 
   btnSave.disabled    = false;
   btnSave.textContent = "💾 Save Settings";
@@ -477,3 +618,4 @@ btnResetFaceData.addEventListener("click", () => {
 });
 
 loadChildren();
+loadCentreLocations();

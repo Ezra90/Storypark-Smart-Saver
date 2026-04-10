@@ -205,6 +205,65 @@
       margin-bottom: 12px;
     }
 
+    /* Centre location rows */
+    .centre-row {
+      display: flex;
+      gap: 6px;
+      align-items: flex-end;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .centre-row .centre-field {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .centre-row .centre-field label {
+      font-size: 11px;
+      margin-bottom: 0;
+    }
+    .centre-row .centre-field input {
+      margin-bottom: 0;
+    }
+    .centre-row .centre-name-field {
+      flex: 2;
+      min-width: 140px;
+    }
+    .centre-row .centre-coord-field {
+      flex: 1;
+      min-width: 80px;
+    }
+    .centre-row .centre-coord-field input {
+      width: 100%;
+    }
+    .centre-row .btn-maps-search {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: none;
+      color: var(--primary);
+      cursor: pointer;
+      font-size: 14px;
+      white-space: nowrap;
+      align-self: flex-end;
+    }
+    .centre-row .btn-maps-search:hover {
+      border-color: var(--primary);
+    }
+    .centre-row .btn-remove-centre {
+      padding: 8px 10px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 13px;
+      align-self: flex-end;
+    }
+    .centre-row .btn-remove-centre:hover {
+      background: #fee2e2;
+    }
+
     /* Face selector (multi-face photos) */
     .face-selector {
       display: flex;
@@ -348,6 +407,19 @@
         0% means EVERY photo gets flagged for review.
       </p>
     </div>
+  </div>
+
+  <!-- Centre / Service Locations (GPS for EXIF) -->
+  <div class="card">
+    <h2>📍 Centre Locations</h2>
+    <p class="help" style="margin-bottom:14px;">
+      Add GPS coordinates for each childcare centre so downloaded photos
+      include location data in Google Photos. Your child may attend
+      multiple centres — add one row per centre.
+      Click the 🔍 button to search Google Maps and copy the coordinates.
+    </p>
+    <div id="centreList"></div>
+    <button class="btn-add" id="btnAddCentre">＋ Add Centre</button>
   </div>
 
   <!-- Face Training -->
