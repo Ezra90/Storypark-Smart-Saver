@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Storypark Photo Sync",
-  "version": "1.0.0",
-  "description": "Scrapes your Storypark feed, filters photos by facial recognition, stamps EXIF metadata, and uploads to Google Photos.",
+  "name": "Storypark Extracts",
+  "version": "2.0.0",
+  "description": "Calls Storypark's internal v3 APIs to download your child's photos, stamps EXIF metadata, and saves them locally.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -11,15 +11,13 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "identity",
     "activeTab",
-    "scripting",
     "offscreen",
-    "alarms"
+    "alarms",
+    "downloads"
   ],
   "host_permissions": [
-    "https://app.storypark.com/*",
-    "https://photoslibrary.googleapis.com/*"
+    "https://app.storypark.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -36,20 +34,6 @@
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://app.storypark.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "oauth2": {
-    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-    "scopes": [
-      "https://www.googleapis.com/auth/photoslibrary.readonly",
-      "https://www.googleapis.com/auth/photoslibrary.appendonly"
-    ]
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

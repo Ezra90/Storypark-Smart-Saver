@@ -3,11 +3,14 @@
 <head><meta charset="UTF-8"><title>Storypark Offscreen</title></head>
 <body>
   <!--
-    This document exists solely to give @vladmandic/human access to the Canvas
-    and HTMLImageElement APIs that are unavailable in a Manifest V3 service worker.
-    human.js is copied into extension/lib/ by running `npm run build`.
+    This document provides Canvas/Blob/URL API access to the face
+    recognition and EXIF processing pipeline.
+
+    human.js is a UMD bundle that sets the global `Human`; it must load
+    before the module script that imports from ./lib/exif.js and ./lib/db.js.
+    Run `npm run build` to copy human.js into extension/lib/.
   -->
   <script src="lib/human.js"></script>
-  <script src="offscreen.js"></script>
+  <script type="module" src="offscreen.js"></script>
 </body>
 </html>
