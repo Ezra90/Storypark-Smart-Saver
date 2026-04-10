@@ -58,23 +58,23 @@ Returns the logged-in user's profile, including all linked children and communit
   "user": {
     "id": 12345,
     "email": "parent@example.com",
-    "administered_family_children_teacher_stories": 516,   // total story count
+    "administered_family_children_teacher_stories": 123,   // total story count
     "communities": [                                        // daycare centres
       {
         "id": 99,
-        "name": "Bahrs Scrub Early Learning",              // daycare name
-        "display_name": "Bahrs Scrub Early Learning"
+        "name": "My Daycare Centre",              // daycare name
+        "display_name": "My Daycare Centre"
       }
     ],
     // Alternative top-level keys also checked:
-    "community_name": "Bahrs Scrub Early Learning",
+    "community_name": "My Daycare Centre",
     "service_name":   "...",
     "centre_name":    "...",
     "children": [
       {
-        "id": 3814824849872783328,
-        "name": "Olivia Smith",
-        "display_name": "Olivia Smith"
+        "id": 1234567890987654321,
+        "name": "Alex Smith",
+        "display_name": "Alex Smith"
       }
     ]
   }
@@ -83,7 +83,7 @@ Returns the logged-in user's profile, including all linked children and communit
 
 **Extension usage:** `loadAndCacheProfile()` — cached in `chrome.storage.local` as `{ children: [{id, name}] }`.
 
-**Total story count field:** `administered_family_children_teacher_stories` (integer, e.g. `516`).
+**Total story count field:** `administered_family_children_teacher_stories` (integer).
 
 **Daycare / centre name resolution order:**
 1. `user.communities[].name`
@@ -106,8 +106,8 @@ Returns detailed profile data for a single child.
 ```jsonc
 {
   "child": {
-    "id": 3814824849872783328,
-    "first_name": "Olivia",
+    "id": 1234567890987654321,
+    "first_name": "Alex",
     "last_name":  "Smith",
     "groups": [                    // room names within the daycare
       {
@@ -118,7 +118,7 @@ Returns detailed profile data for a single child.
     "companies": [                 // daycare / organisation
       {
         "id": 99,
-        "name": "Bahrs Scrub Early Learning"
+        "name": "My Daycare Centre"
       }
     ]
   }
@@ -184,13 +184,13 @@ Returns the full story object including body text, media items, and metadata.
     "created_at": "2024-03-15T08:30:00.000Z",   // ISO 8601 — used for EXIF DateTimeOriginal
     "body":       "<p>Had a great day at kindy…</p>",  // story text (may contain HTML)
     "group_name":     "Butterflies Room",              // room name
-    "community_name": "Bahrs Scrub Early Learning",    // centre name (preferred)
+    "community_name": "My Daycare Centre",    // centre name (preferred)
     "centre_name":    "...",                            // fallback
     "service_name":   "...",                            // fallback
     "media_items": [
       {
         "id":           "media-abc123",
-        "token":        "rrWEbXgHajurHQUj8PVuSXmNvh",
+        "token":        "AbCdEfGhIjKlMnOpQrSt",
         "original_url": "https://assets.storypark.com/…/original/photo.jpg",
         "filename":     "photo.jpg"
       }
@@ -218,7 +218,7 @@ Media items expose a direct CDN URL via `original_url`. The URL format follows t
 Example using token and id from the media item:
 
 ```
-https://assets.storypark.com/media_items/rrWEbXgHajurHQUj8PVuSXmNvh/media-abc123/original/photo.jpg
+https://assets.storypark.com/media_items/AbCdEfGhIjKlMnOpQrSt/media-abc123/original/photo.jpg
 ```
 
 In practice, the extension uses `media_items[].original_url` directly — no URL construction needed.
@@ -240,8 +240,6 @@ Returns the day's routine events (sleep, meals, bottles, nappy changes, etc.) fo
 | Parameter | Format | Example |
 |---|---|---|
 | `date` | `YYYY-MM-DD` | `2024-03-15` |
-
-**Known child IDs with routine data:** `3814824849872783328`, `3206581817603786511`
 
 **Response shape:**
 
@@ -290,7 +288,7 @@ An alternative feed that returns combined activity across all linked children. C
       "media": [
         {
           "id":    "media-abc123",
-          "token": "rrWEbXgHajurHQUj8PVuSXmNvh"
+          "token": "AbCdEfGhIjKlMnOpQrSt"
         }
       ]
     }
@@ -354,7 +352,7 @@ interface StoryparkStory {
 // Media item (inside story.media_items)
 interface StoryparkMedia {
   id: string;
-  token: string;               // e.g. "rrWEbXgHajurHQUj8PVuSXmNvh"
+  token: string;               // e.g. "AbCdEfGhIjKlMnOpQrSt"
   original_url: string;        // direct CDN URL for the original image
   filename?: string;
 }
@@ -414,7 +412,7 @@ Had a wonderful day at kindy. We made paper boats and floated them in the water 
 Routine: Slept 12:00 PM – 1:30 PM, Ate lunch well
 ------------------------------
 Butterflies Room
-Bahrs Scrub Early Learning
+My Daycare Centre
 Storypark
 ```
 
@@ -446,17 +444,3 @@ All API calls go through `smartDelay(actionType)` before firing:
 | `READ_STORY` | 2 500 – 6 000 ms | Before fetching full story detail |
 | `DOWNLOAD_IMAGE` | 1 000 – 2 000 ms | Before each image download |
 | Coffee Break | 12 000 – 25 000 ms | Auto-fires every 15–25 requests |
-
----
-
-## Identified Centre & Child Data
-
-The following values were observed in network logs and are noted here for reference:
-
-| Field | Value |
-|---|---|
-| Daycare centre | Bahrs Scrub Early Learning |
-| Total stories | 516 (`administered_family_children_teacher_stories`) |
-| Child ID (example 1) | `3814824849872783328` |
-| Child ID (example 2) | `3206581817603786511` |
-| Media token (example) | `rrWEbXgHajurHQUj8PVuSXmNvh` |
