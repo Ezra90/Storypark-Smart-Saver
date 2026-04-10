@@ -191,7 +191,10 @@ function loadCentreLocations() {
 }
 
 btnAddCentre.addEventListener("click", () => {
-  const name = `New Centre ${Object.keys(centreLocationsCache).length + 1}`;
+  // Find a unique default name
+  let idx = 1;
+  while ((`New Centre ${idx}`) in centreLocationsCache) idx++;
+  const name = `New Centre ${idx}`;
   centreLocationsCache[name] = { lat: null, lng: null };
   centreList.appendChild(buildCentreRow(name, { lat: null, lng: null }));
 });

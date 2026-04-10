@@ -355,7 +355,13 @@ function buildRoutineSummary(data) {
   }
   if (Array.isArray(data.sleeps) && data.sleeps.length > 0) {
     for (const s of data.sleeps) {
-      events.push(`Sleep ${s.start_time || ""}–${s.end_time || ""}`.trim());
+      const start = s.start_time || "";
+      const end   = s.end_time   || "";
+      if (start || end) {
+        events.push(`Sleep ${start}${start && end ? "–" : ""}${end}`.trim());
+      } else {
+        events.push("Sleep");
+      }
     }
   }
   if (Array.isArray(data.toileting) && data.toileting.length > 0) {

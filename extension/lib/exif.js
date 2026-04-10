@@ -2494,7 +2494,7 @@ SOFTWARE.
  * @returns {string}
  */
 function asciiFilter(str) {
-  return str.replace(/[^\x20-\x7E\n\r\t]/g, " ");
+  return str.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/ {2,}/g, " ");
 }
 
 /**
@@ -2547,7 +2547,9 @@ function blobToDataUrl(blob) {
  * @returns {Blob}
  */
 function dataUrlToBlob(dataUrl) {
-  const [header, b64] = dataUrl.split(",");
+  const commaIdx = dataUrl.indexOf(",");
+  const header   = dataUrl.slice(0, commaIdx);
+  const b64      = dataUrl.slice(commaIdx + 1);
   const mime = header.match(/:(.*?);/)?.[1] || "image/jpeg";
   const binary = atob(b64);
   const bytes  = new Uint8Array(binary.length);
