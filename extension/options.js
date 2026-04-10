@@ -23,6 +23,7 @@ const minThresholdRange   = document.getElementById("minThresholdRange");
 const minThresholdNumber  = document.getElementById("minThresholdNumber");
 const centreList           = document.getElementById("centreList");
 const btnAddCentre         = document.getElementById("btnAddCentre");
+const btnSaveLocations     = document.getElementById("btnSaveLocations");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
 const trainingPreviews     = document.getElementById("trainingPreviews");
@@ -125,6 +126,24 @@ function buildCentreRow(name, loc) {
     window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
   });
 
+  // Google Maps link (visible when coordinates are set)
+  const mapsLink = document.createElement("a");
+  mapsLink.style.cssText  = "font-size:12px; white-space:nowrap; align-self:flex-end; padding-bottom:8px;";
+  mapsLink.target         = "_blank";
+  mapsLink.rel            = "noopener";
+  const updateMapsLink = () => {
+    const lat = latInput.value !== "" ? parseFloat(latInput.value) : null;
+    const lng = lngInput.value !== "" ? parseFloat(lngInput.value) : null;
+    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+      mapsLink.href        = `https://www.google.com/maps?q=${lat},${lng}`;
+      mapsLink.textContent = "📍 View on Map";
+      mapsLink.style.display = "";
+    } else {
+      mapsLink.style.display = "none";
+    }
+  };
+  updateMapsLink();
+
   // Remove button
   const btnRemove = document.createElement("button");
   btnRemove.className   = "btn-remove-centre";
@@ -140,6 +159,7 @@ function buildCentreRow(name, loc) {
   row.appendChild(nameField);
   row.appendChild(latField);
   row.appendChild(lngField);
+  row.appendChild(mapsLink);
   row.appendChild(btnMaps);
   row.appendChild(btnRemove);
 
@@ -160,6 +180,7 @@ function buildCentreRow(name, loc) {
         lng: lng != null && !isNaN(lng) ? lng : null,
       };
     }
+    updateMapsLink();
   };
   nameInput.addEventListener("input", updateCache);
   latInput.addEventListener("input",  updateCache);
@@ -197,6 +218,15 @@ btnAddCentre.addEventListener("click", () => {
   const name = `New Centre ${idx}`;
   centreLocationsCache[name] = { lat: null, lng: null };
   centreList.appendChild(buildCentreRow(name, { lat: null, lng: null }));
+});
+
+btnSaveLocations.addEventListener("click", async () => {
+  btnSaveLocations.disabled    = true;
+  btnSaveLocations.textContent = "Saving…";
+  await chrome.storage.local.set({ centreLocations: centreLocationsCache });
+  btnSaveLocations.disabled    = false;
+  btnSaveLocations.textContent = "💾 Save Locations";
+  showToast("✓ Locations saved!");
 });
 
 /* ================================================================== */

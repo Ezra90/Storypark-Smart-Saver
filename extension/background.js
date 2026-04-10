@@ -249,9 +249,13 @@ async function loadAndCacheProfile() {
  * map without overwriting existing GPS data.  Each key is a centre name;
  * values are { lat: number|null, lng: number|null }.
  *
+ * When a centre is discovered for the first time, automatically attempt
+ * to geocode it using the Nominatim (OpenStreetMap) API.
+ *
  * @param {string[]} names  One or more centre/community names
+ * @param {string}   [address]  Optional address hint for geocoding
  */
-async function discoverCentres(names) {
+async function discoverCentres(names, address) {
   if (!names || names.length === 0) return;
   const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
   let changed = false;
@@ -260,11 +264,57 @@ async function discoverCentres(names) {
     if (trimmed && !(trimmed in centreLocations)) {
       centreLocations[trimmed] = { lat: null, lng: null };
       changed = true;
+
+      // Auto-geocode the new centre
+      const coords = await geocodeLocation(trimmed, address);
+      if (coords) {
+        centreLocations[trimmed] = { lat: coords.lat, lng: coords.lng };
+        await logger("INFO", `📍 Auto-geocoded "${trimmed}" → ${coords.lat}, ${coords.lng}`);
+      }
     }
   }
   if (changed) {
     await chrome.storage.local.set({ centreLocations });
   }
+}
+
+/* ================================================================== */
+/*  GPS Geocoding via OpenStreetMap Nominatim                          */
+/* ================================================================== */
+
+/**
+ * Geocode a location name/address using the free Nominatim API.
+ *
+ * @param {string} name     Centre/community name
+ * @param {string} [address]  Optional address string (preferred over name)
+ * @returns {Promise<{lat: number, lng: number}|null>}
+ */
+async function geocodeLocation(name, address) {
+  try {
+    const query = address || name;
+    if (!query) return null;
+
+    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+      encodeURIComponent(query);
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "StoryparkSmartSaver/1.0" },
+    });
+
+    if (!res.ok) return null;
+
+    const results = await res.json();
+    if (results && results.length > 0) {
+      const lat = parseFloat(results[0].lat);
+      const lng = parseFloat(results[0].lon);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        return { lat, lng };
+      }
+    }
+  } catch (err) {
+    console.warn("[background] Geocode failed for", name, err.message);
+  }
+  return null;
 }
 
 /* ================================================================== */
@@ -348,24 +398,19 @@ async function fetchRoutineSummary(childId, dateStr) {
 function buildRoutineSummary(data) {
   const events = [];
 
-  if (Array.isArray(data.meals) && data.meals.length > 0) {
-    for (const m of data.meals) {
-      events.push(m.description || m.type || "meal");
-    }
-  }
-  if (Array.isArray(data.sleeps) && data.sleeps.length > 0) {
-    for (const s of data.sleeps) {
-      const start = s.start_time || "";
-      const end   = s.end_time   || "";
-      if (start || end) {
-        events.push(`Sleep ${start}${start && end ? "–" : ""}${end}`.trim());
-      } else {
-        events.push("Sleep");
+  // Iterate through ALL top-level arrays in the routine response and collect
+  // every event description exactly as Storypark outputs them, without
+  // filtering or categorizing by type.
+  if (data && typeof data === "object") {
+    for (const key of Object.keys(data)) {
+      const items = data[key];
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        const desc =
+          item.description || item.summary || item.type || item.name || "";
+        if (desc) events.push(desc);
       }
     }
-  }
-  if (Array.isArray(data.toileting) && data.toileting.length > 0) {
-    events.push(`Toileting x${data.toileting.length}`);
   }
 
   return events.join(", ");
@@ -396,7 +441,7 @@ function stripHtml(html) {
  * following the structured template format.
  *
  * @param {string} body           Raw story body (may contain HTML)
- * @param {string} childFirstName Child's first name
+ * @param {string} childFirstName Child's first name (unused in current format)
  * @param {string} routineText    Comma-separated routine events (may be empty)
  * @param {string} roomName       Room / group name (may be empty)
  * @param {string} centreName     Centre / service name (may be empty)
@@ -413,8 +458,7 @@ function buildDescription(body, childFirstName, routineText, roomName, centreNam
   // 2. Routine section (only if routine data exists)
   if (routineText) {
     parts.push(DIVIDER);
-    parts.push(`${childFirstName || "Child"}'s Routine Was:`);
-    parts.push(routineText);
+    parts.push(`Routine: ${routineText}`);
   }
 
   // 3. Location / attribution section
@@ -510,9 +554,10 @@ async function runExtraction(childId, childName, mode) {
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 
-    // Auto-discover this centre name for the Settings UI
+    // Auto-discover this centre name and attempt geocoding
     if (centreName) {
-      discoverCentres([centreName]).catch(() => {});
+      const centreAddress = story.community_address || story.centre_address || story.address || "";
+      await discoverCentres([centreName], centreAddress);
     }
 
     // Look up GPS coordinates for this centre (user-configured)
