@@ -523,9 +523,9 @@ btnSaveTraining.addEventListener("click", async () => {
   btnSaveTraining.textContent = "Saving…";
   trainingLoading.style.display = "flex";
   trainingLoadingBar.value      = 0;
-  trainingLoadingBar.max        = total;
 
   const total = pendingTrainingFiles.length;
+  trainingLoadingBar.max        = total;
   let saved   = 0;
   const photoLabel = (n) => `photo${n !== 1 ? "s" : ""}`;
   trainingProgress.textContent = `Training 0 of ${total} ${photoLabel(total)}…`;
