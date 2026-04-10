@@ -1,33 +1,55 @@
 /**
- * popup.js – Popup UI logic for the Storypark Photo Sync extension.
+ * popup.js – Popup UI for Storypark Extracts.
  *
- * Handles:
- *  - Google connection status indicator
- *  - "Connect to Google" / "Disconnect" toggle
- *  - "Sync Now" button → sends SYNC_NOW to background
- *  - Live progress log fed by runtime messages
- *  - Review Queue (HITL) – shows photos pending manual approval / rejection
+ * Tab 1 (Extract): child selector, Extract Latest / Deep Rescan buttons,
+ *                  status indicator, live progress log.
+ * Tab 2 (Pending Matches): HITL review queue from IndexedDB.
  */
 
-const btnConnect   = document.getElementById("btnConnect");
-const btnSync      = document.getElementById("btnSync");
-const statusDot    = document.getElementById("statusDot");
-const statusText   = document.getElementById("statusText");
-const logBox       = document.getElementById("logBox");
-const openOptions  = document.getElementById("openOptions");
-const reviewSection = document.getElementById("reviewSection");
-const reviewBadge  = document.getElementById("reviewBadge");
-const reviewItems  = document.getElementById("reviewItems");
-const reviewEmpty  = document.getElementById("reviewEmpty");
+/* ================================================================== */
+/*  Element refs                                                       */
+/* ================================================================== */
 
-let isConnected = false;
-let isSyncing   = false;
+const tabButtons       = document.querySelectorAll(".tab");
+const tabPanels        = document.querySelectorAll(".tab-panel");
 
-/* ------------------------------------------------------------------ */
-/*  Log display                                                        */
-/* ------------------------------------------------------------------ */
+const childSelect      = document.getElementById("childSelect");
+const btnRefresh       = document.getElementById("btnRefresh");
+const btnExtractLatest = document.getElementById("btnExtractLatest");
+const btnDeepRescan    = document.getElementById("btnDeepRescan");
+const statusDot        = document.getElementById("statusDot");
+const statusText       = document.getElementById("statusText");
+const logBox           = document.getElementById("logBox");
+
+const reviewBadge      = document.getElementById("reviewBadge");
+const reviewItems      = document.getElementById("reviewItems");
+const reviewEmpty      = document.getElementById("reviewEmpty");
+
+const openOptions      = document.getElementById("openOptions");
+
+/* ================================================================== */
+/*  Tab switching                                                      */
+/* ================================================================== */
+
+tabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tabButtons.forEach((b) => b.classList.remove("active"));
+    tabPanels.forEach((p)  => p.classList.remove("active"));
+    btn.classList.add("active");
+    const panelId = "tab" + btn.dataset.tab.charAt(0).toUpperCase() + btn.dataset.tab.slice(1);
+    document.getElementById(panelId).classList.add("active");
+  });
+});
+
+/* ================================================================== */
+/*  Log helpers                                                        */
+/* ================================================================== */
 
 function appendLog(message) {
+  // Remove the placeholder "Waiting…" paragraph on first real entry
+  if (logBox.firstElementChild?.textContent === "Waiting for action…") {
+    logBox.innerHTML = "";
+  }
   const p = document.createElement("p");
   p.textContent = message;
   logBox.appendChild(p);
@@ -38,170 +60,189 @@ function clearLog() {
   logBox.innerHTML = "";
 }
 
-// Listen for real-time log messages from background / content script
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "LOG") {
-    appendLog(msg.message);
-  } else if (msg.type === "REVIEW_QUEUE_UPDATED") {
-    loadReviewQueue();
-  }
-});
+/* ================================================================== */
+/*  Status indicator                                                   */
+/* ================================================================== */
 
-// Load persisted log on popup open
-chrome.storage.local.get("syncLog", ({ syncLog = [] }) => {
-  clearLog();
-  const recent = syncLog.slice(-30);
-  if (recent.length === 0) {
-    appendLog("No activity yet.");
-  } else {
-    recent.forEach((line) => appendLog(line));
-  }
-});
-
-/* ------------------------------------------------------------------ */
-/*  Google connection                                                  */
-/* ------------------------------------------------------------------ */
-
-function setConnected(connected) {
-  isConnected = connected;
-  if (connected) {
-    statusDot.className = "dot green";
-    statusText.textContent = "Connected to Google Photos";
-    btnConnect.textContent = "Disconnect Google";
-    btnSync.disabled = isSyncing;
-  } else {
-    statusDot.className = "dot red";
-    statusText.textContent = "Not connected";
-    btnConnect.textContent = "Connect to Google";
-    btnSync.disabled = true;
-  }
+function setStatus(color, text) {
+  statusDot.className  = "dot" + (color ? ` ${color}` : "");
+  statusText.textContent = text;
 }
 
-chrome.runtime.sendMessage({ type: "GOOGLE_STATUS" }, (res) => {
-  setConnected(res?.connected ?? false);
-});
+/* ================================================================== */
+/*  Children dropdown                                                  */
+/* ================================================================== */
 
-btnConnect.addEventListener("click", () => {
-  if (isConnected) {
-    chrome.runtime.sendMessage({ type: "GOOGLE_DISCONNECT" }, () => {
-      setConnected(false);
-      appendLog("Disconnected from Google.");
-    });
-  } else {
-    btnConnect.disabled = true;
-    btnConnect.textContent = "Connecting…";
-    chrome.runtime.sendMessage({ type: "GOOGLE_CONNECT" }, (res) => {
-      btnConnect.disabled = false;
-      if (res?.ok) {
-        setConnected(true);
-        appendLog("✓ Connected to Google Photos.");
-      } else {
-        setConnected(false);
-        appendLog("✗ Connection failed: " + (res?.error || "Unknown error"));
-      }
-    });
+function populateChildren(children) {
+  childSelect.innerHTML = "";
+  if (!children || children.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No children found — open Storypark first";
+    childSelect.appendChild(opt);
+    setRunning(true); // keep buttons disabled
+    return;
   }
-});
+  for (const child of children) {
+    const opt = document.createElement("option");
+    opt.value = child.id;
+    opt.textContent = child.name;
+    childSelect.appendChild(opt);
+  }
+  setRunning(false);
+}
 
-/* ------------------------------------------------------------------ */
-/*  Sync                                                               */
-/* ------------------------------------------------------------------ */
+function loadChildren() {
+  chrome.runtime.sendMessage({ type: "GET_CHILDREN" }, (res) => {
+    if (res?.ok) populateChildren(res.children);
+  });
+}
 
-btnSync.addEventListener("click", () => {
-  if (isSyncing) return;
-  isSyncing = true;
-  btnSync.disabled = true;
-  btnSync.textContent = "⏳ Syncing…";
-  statusDot.className = "dot yellow";
-  statusText.textContent = "Sync in progress…";
-  clearLog();
-  appendLog("Starting sync…");
-
-  chrome.runtime.sendMessage({ type: "SYNC_NOW" }, (res) => {
-    isSyncing = false;
-    btnSync.disabled = false;
-    btnSync.textContent = "🔄 Sync Now";
-
+btnRefresh.addEventListener("click", () => {
+  childSelect.innerHTML = "<option>Refreshing…</option>";
+  btnExtractLatest.disabled = true;
+  btnDeepRescan.disabled    = true;
+  chrome.runtime.sendMessage({ type: "REFRESH_PROFILE" }, (res) => {
     if (res?.ok) {
-      const s = res.summary;
-      statusDot.className = "dot green";
-      statusText.textContent = "Sync complete";
-      const parts = [`✓ Done! Scraped: ${s.scraped}, Uploaded: ${s.uploaded}`];
-      if (s.reviewQueued > 0) parts.push(`Review queue: ${s.reviewQueued}`);
-      if (s.quotaHit) parts.push("quota reached");
-      appendLog(parts.join(", "));
-      // Refresh review queue if new items were queued
-      if (s.reviewQueued > 0) loadReviewQueue();
+      populateChildren(res.children);
     } else {
-      statusDot.className = "dot red";
-      statusText.textContent = "Sync failed";
-      appendLog("✗ Error: " + (res?.error || "Unknown error"));
+      childSelect.innerHTML =
+        '<option value="">Failed — open Storypark in a tab and try again</option>';
     }
   });
 });
 
-/* ------------------------------------------------------------------ */
-/*  Review Queue (HITL)                                                */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  Extraction                                                         */
+/* ================================================================== */
 
-function formatDate(isoString) {
-  if (!isoString) return "";
-  const d = new Date(isoString);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
+let isRunning = false;
+
+function setRunning(running) {
+  isRunning                 = running;
+  btnExtractLatest.disabled = running;
+  btnDeepRescan.disabled    = running;
+  childSelect.disabled      = running;
+  btnRefresh.disabled       = running;
+}
+
+function triggerExtraction(type) {
+  if (isRunning) return;
+
+  const childId   = childSelect.value;
+  const childName = childSelect.options[childSelect.selectedIndex]?.text || "";
+
+  if (!childId) {
+    appendLog("Please select a child first.");
+    return;
+  }
+
+  setRunning(true);
+  clearLog();
+  setStatus(
+    "yellow",
+    type === "EXTRACT_LATEST" ? "Extracting latest…" : "Deep scanning…"
+  );
+  appendLog(
+    type === "EXTRACT_LATEST"
+      ? "Starting incremental extraction…"
+      : "Starting deep rescan…"
+  );
+
+  chrome.runtime.sendMessage({ type, childId, childName }, (res) => {
+    setRunning(false);
+    if (res?.ok) {
+      setStatus("green", "Done");
+      const s = res.stats;
+      appendLog(
+        `✓ Complete — Downloaded: ${s.approved}, Review: ${s.queued}, Rejected: ${s.rejected}`
+      );
+      if (s.queued > 0) loadReviewQueue();
+    } else {
+      setStatus("red", "Error");
+      appendLog("✗ Error: " + (res?.error || "Unknown error"));
+    }
   });
 }
 
-function buildReviewItem(item) {
+btnExtractLatest.addEventListener("click", () => triggerExtraction("EXTRACT_LATEST"));
+btnDeepRescan.addEventListener("click",    () => triggerExtraction("DEEP_RESCAN"));
+
+/* ================================================================== */
+/*  Real-time messages from background                                 */
+/* ================================================================== */
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "LOG")                appendLog(msg.message);
+  if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
+});
+
+/* ================================================================== */
+/*  Review queue                                                       */
+/* ================================================================== */
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+  });
+}
+
+function buildReviewItemEl(item) {
   const el = document.createElement("div");
   el.className = "review-item";
-  el.dataset.id = item.id;
 
+  // Face thumbnail
   const thumb = document.createElement("img");
   thumb.className = "review-thumb";
-  thumb.alt = "Photo";
-  // Load thumbnail from the scraped image URL
-  thumb.src = item.imageUrl;
-  thumb.onerror = () => { thumb.style.background = "var(--primary)"; };
+  thumb.alt       = "Cropped face";
+  if (item.croppedFaceDataUrl) {
+    thumb.src = item.croppedFaceDataUrl;
+  }
 
+  // Metadata
   const meta = document.createElement("div");
   meta.className = "review-meta";
 
-  const childName = document.createElement("div");
-  childName.className = "child-name";
-  childName.textContent = item.matchedChildren?.length
-    ? item.matchedChildren.join(", ")
-    : "Unknown";
+  const nameEl = document.createElement("div");
+  nameEl.className   = "child-name";
+  nameEl.textContent = item.matchedChildren?.length
+    ? `Is this ${item.matchedChildren.join(" or ")}?`
+    : "Unknown child — is this your child?";
 
-  const matchPct = document.createElement("div");
-  matchPct.className = "match-pct";
-  matchPct.textContent = `Match: ${item.matchPct ?? 0}%`;
+  const pctEl = document.createElement("div");
+  pctEl.className   = "match-pct";
+  pctEl.textContent = `Match: ${item.matchPct ?? 0}%`;
 
-  const postDate = document.createElement("div");
-  postDate.className = "post-date";
-  postDate.textContent = formatDate(item.postDate);
+  const dateEl = document.createElement("div");
+  dateEl.className   = "post-date";
+  dateEl.textContent = formatDate(item.storyData?.createdAt);
 
-  meta.appendChild(childName);
-  meta.appendChild(matchPct);
-  meta.appendChild(postDate);
+  meta.appendChild(nameEl);
+  meta.appendChild(pctEl);
+  meta.appendChild(dateEl);
 
+  // Action buttons
   const actions = document.createElement("div");
   actions.className = "review-actions";
 
   const btnApprove = document.createElement("button");
-  btnApprove.className = "btn-approve";
-  btnApprove.title = "Approve – upload to Google Photos";
+  btnApprove.className   = "btn-approve";
+  btnApprove.title       = "Yes – download this photo";
   btnApprove.textContent = "✅";
-  btnApprove.addEventListener("click", () => handleApprove(item.id, el, btnApprove, btnReject));
 
   const btnReject = document.createElement("button");
-  btnReject.className = "btn-reject";
-  btnReject.title = "Reject – discard this photo";
+  btnReject.className   = "btn-reject";
+  btnReject.title       = "No – discard this photo";
   btnReject.textContent = "❌";
-  btnReject.addEventListener("click", () => handleReject(item.id, el, btnApprove, btnReject));
+
+  btnApprove.addEventListener("click", () =>
+    handleApprove(item.id, el, btnApprove, btnReject)
+  );
+  btnReject.addEventListener("click", () =>
+    handleReject(item.id, el, btnApprove, btnReject)
+  );
 
   actions.appendChild(btnApprove);
   actions.appendChild(btnReject);
@@ -214,15 +255,19 @@ function buildReviewItem(item) {
 
 function renderReviewQueue(queue) {
   reviewItems.innerHTML = "";
+
   if (queue.length === 0) {
-    reviewSection.style.display = "none";
+    reviewEmpty.style.display = "block";
+    reviewBadge.style.display = "none";
     return;
   }
-  reviewSection.style.display = "block";
-  reviewBadge.textContent = queue.length;
-  reviewEmpty.style.display = queue.length === 0 ? "block" : "none";
+
+  reviewEmpty.style.display  = "none";
+  reviewBadge.style.display  = "";
+  reviewBadge.textContent    = queue.length;
+
   for (const item of queue) {
-    reviewItems.appendChild(buildReviewItem(item));
+    reviewItems.appendChild(buildReviewItemEl(item));
   }
 }
 
@@ -232,20 +277,26 @@ function loadReviewQueue() {
   });
 }
 
+function refreshBadge() {
+  const remaining         = reviewItems.querySelectorAll(".review-item").length;
+  reviewBadge.textContent = remaining || "";
+  reviewBadge.style.display = remaining ? "" : "none";
+  if (remaining === 0) reviewEmpty.style.display = "block";
+}
+
 function handleApprove(id, rowEl, btnApprove, btnReject) {
   btnApprove.disabled = true;
-  btnReject.disabled = true;
+  btnReject.disabled  = true;
   btnApprove.textContent = "⏳";
+
   chrome.runtime.sendMessage({ type: "REVIEW_APPROVE", id }, (res) => {
     if (res?.ok) {
       rowEl.remove();
-      const remaining = reviewItems.querySelectorAll(".review-item").length;
-      reviewBadge.textContent = remaining;
-      if (remaining === 0) reviewSection.style.display = "none";
-      appendLog(`✓ Approved and uploaded photo.`);
+      refreshBadge();
+      appendLog("✓ Approved and downloaded photo.");
     } else {
-      btnApprove.disabled = false;
-      btnReject.disabled = false;
+      btnApprove.disabled    = false;
+      btnReject.disabled     = false;
       btnApprove.textContent = "✅";
       appendLog("✗ Approve failed: " + (res?.error || "Unknown error"));
     }
@@ -254,29 +305,31 @@ function handleApprove(id, rowEl, btnApprove, btnReject) {
 
 function handleReject(id, rowEl, btnApprove, btnReject) {
   btnApprove.disabled = true;
-  btnReject.disabled = true;
+  btnReject.disabled  = true;
+
   chrome.runtime.sendMessage({ type: "REVIEW_REJECT", id }, (res) => {
     if (res?.ok) {
       rowEl.remove();
-      const remaining = reviewItems.querySelectorAll(".review-item").length;
-      reviewBadge.textContent = remaining;
-      if (remaining === 0) reviewSection.style.display = "none";
+      refreshBadge();
     } else {
       btnApprove.disabled = false;
-      btnReject.disabled = false;
-      appendLog("✗ Reject failed: " + (res?.error || "Unknown error"));
+      btnReject.disabled  = false;
     }
   });
 }
 
-// Load review queue on popup open
-loadReviewQueue();
-
-/* ------------------------------------------------------------------ */
-/*  Settings link                                                      */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  Footer – open options                                              */
+/* ================================================================== */
 
 openOptions.addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
 });
+
+/* ================================================================== */
+/*  Init                                                               */
+/* ================================================================== */
+
+loadChildren();
+loadReviewQueue();

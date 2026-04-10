@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Storypark Photo Sync – Settings</title>
+  <title>Storypark Extracts – Settings</title>
   <style>
     :root {
-      --bg: #f4f4f8;
+      --bg:      #f4f4f8;
       --surface: #ffffff;
-      --border: #ddd;
+      --border:  #ddd;
       --primary: #0f3460;
-      --accent: #e94560;
-      --text: #222;
-      --muted: #666;
+      --accent:  #e94560;
+      --text:    #222;
+      --muted:   #666;
       --success: #16a34a;
       --warning: #d97706;
     }
@@ -48,7 +48,6 @@
       color: var(--muted);
     }
     input[type="text"],
-    input[type="number"],
     select {
       width: 100%;
       padding: 8px 10px;
@@ -62,49 +61,75 @@
       border-color: var(--primary);
     }
 
-    .child-row {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
+    /* Children read-only list */
+    .child-display-row {
       padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      background: var(--bg);
     }
-    .child-row-main {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .child-row-main input[type="text"] { flex: 1; margin-bottom: 0; }
-    .child-row-main input[type="file"] { flex: 1; font-size: 12px; }
-    .child-row-main button {
-      padding: 6px 12px;
+    #noChildrenMsg {
       font-size: 13px;
+      color: var(--muted);
+    }
+
+    .btn-refresh {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--primary);
+      padding: 7px 14px;
       border-radius: 6px;
       cursor: pointer;
-      border: none;
-      background: var(--accent);
-      color: #fff;
-      flex-shrink: 0;
+      font-size: 13px;
+      margin-top: 4px;
     }
-    .child-album-row {
+    .btn-refresh:hover { border-color: var(--primary); }
+
+    /* Strictness */
+    .strictness-row { margin-bottom: 14px; }
+    .strictness-row label { margin-bottom: 6px; }
+
+    /* Training */
+    .training-child-select { margin-bottom: 12px; }
+
+    .match-preview {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border-radius: 6px;
+      font-size: 13px;
+      min-height: 40px;
+      margin-bottom: 8px;
     }
-    .child-album-row label {
-      font-size: 11px;
-      color: var(--muted);
-      margin-bottom: 0;
-      white-space: nowrap;
-      flex-shrink: 0;
+    .match-preview img {
+      width: 40px; height: 40px;
+      object-fit: cover;
+      border-radius: 4px;
     }
-    .child-album-row select {
-      flex: 1;
+    .match-badge {
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
       font-size: 12px;
-      padding: 4px 8px;
-      margin-bottom: 0;
+    }
+    .match-badge.good { background: #dcfce7; color: #166534; }
+    .match-badge.ok   { background: #fef9c3; color: #854d0e; }
+    .match-badge.bad  { background: #fee2e2; color: #991b1b; }
+    .match-badge.none { background: #f3f4f6; color: #6b7280; }
+
+    #humanWarning {
+      background: #fff7ed;
+      border: 1px solid #fdba74;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--warning);
+      margin-bottom: 14px;
+      display: none;
     }
 
     .btn-add {
@@ -119,11 +144,9 @@
       margin-top: 4px;
     }
     .btn-add:hover { border-color: var(--primary); }
+    .btn-add:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .actions {
-      display: flex;
-      gap: 12px;
-    }
+    .actions { display: flex; gap: 12px; }
     .btn-save {
       background: var(--primary);
       color: #fff;
@@ -149,142 +172,34 @@
       font-weight: 600;
       box-shadow: 0 2px 12px rgba(0,0,0,0.15);
     }
-    .gps-row {
-      display: flex;
-      gap: 12px;
-    }
-    .gps-row > div { flex: 1; }
     .help {
       font-size: 11px;
       color: var(--muted);
       margin-top: -8px;
       margin-bottom: 12px;
     }
-
-    #albumSection select { margin-bottom: 0; }
-    #albumRefresh {
-      font-size: 12px;
-      background: none;
-      border: 1px solid var(--border);
-      padding: 4px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-left: 8px;
-      color: var(--primary);
-    }
-
-    /* ---- Face Recognition Strictness ---- */
-    .strictness-row {
-      margin-bottom: 14px;
-    }
-    .strictness-row label { margin-bottom: 6px; }
-
-    /* ---- Face training ---- */
-    .training-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 14px;
-    }
-    .training-tab {
-      padding: 6px 14px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--bg);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--muted);
-    }
-    .training-tab.active {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
-    }
-    .training-panel { display: none; }
-    .training-panel.active { display: block; }
-
-    .training-child-select {
-      margin-bottom: 12px;
-    }
-    .match-preview {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      background: var(--bg);
-      border-radius: 6px;
-      font-size: 13px;
-      min-height: 40px;
-      margin-bottom: 8px;
-    }
-    .match-preview img {
-      width: 40px;
-      height: 40px;
-      object-fit: cover;
-      border-radius: 4px;
-    }
-    .match-badge {
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 12px;
-    }
-    .match-badge.good  { background: #dcfce7; color: #166534; }
-    .match-badge.ok    { background: #fef9c3; color: #854d0e; }
-    .match-badge.bad   { background: #fee2e2; color: #991b1b; }
-    .match-badge.none  { background: #f3f4f6; color: #6b7280; }
-
-    #humanWarning {
-      background: #fff7ed;
-      border: 1px solid #fdba74;
-      border-radius: 6px;
-      padding: 10px 12px;
-      font-size: 12px;
-      color: var(--warning);
-      margin-bottom: 14px;
-      display: none;
-    }
   </style>
 </head>
 <body>
   <h1>⚙ Settings</h1>
-  <p class="subtitle">Configure your children, daycare location, face recognition, and upload preferences.</p>
+  <p class="subtitle">Configure face recognition and train the model for your children.</p>
 
-  <!-- human.js warning (shown when library is absent) -->
+  <!-- human.js warning -->
   <div id="humanWarning">
     ⚠ <strong>human.js not found.</strong>
-    Face recognition features are disabled. Run <code>npm run build</code> from the
-    repository root to copy the library into <code>extension/lib/</code>, then reload the extension.
+    Face recognition is disabled. Run <code>npm run build</code> from the repository root
+    to copy the library into <code>extension/lib/</code>, then reload the extension.
   </div>
 
-  <!-- Children -->
+  <!-- Children (read-only, fetched from Storypark API) -->
   <div class="card">
     <h2>👶 Children</h2>
-    <p class="help">Add your children's names and upload a clear reference face photo for each.</p>
-    <div id="childrenList"></div>
-    <button class="btn-add" id="btnAddChild">+ Add child</button>
-  </div>
-
-  <!-- GPS + Daycare Name -->
-  <div class="card">
-    <h2>📍 Daycare Location</h2>
-    <p class="help">
-      GPS coordinates are embedded in every photo's EXIF data so they appear in the correct
-      location in Google Photos.
-      <a href="https://www.google.com/maps" target="_blank">Find on Google Maps →</a>
+    <p class="help" style="margin-bottom:10px;">
+      Children are automatically fetched from your Storypark account when the extension loads.
+      Open Storypark in a tab and click Refresh if the list is empty.
     </p>
-    <label for="daycareName">Daycare Name</label>
-    <input type="text" id="daycareName" placeholder="e.g. Bahrs Scrub Early Learning">
-    <div class="gps-row">
-      <div>
-        <label for="lat">Latitude</label>
-        <input type="number" id="lat" step="any" placeholder="-33.8688">
-      </div>
-      <div>
-        <label for="lon">Longitude</label>
-        <input type="number" id="lon" step="any" placeholder="151.2093">
-      </div>
-    </div>
+    <div id="childrenList"></div>
+    <button class="btn-refresh" id="btnRefreshChildren">↻ Refresh from Storypark</button>
   </div>
 
   <!-- Face Recognition Strictness -->
@@ -303,25 +218,6 @@
     </div>
   </div>
 
-  <!-- Album -->
-  <div class="card" id="albumSection">
-    <h2>📁 Google Photos Album</h2>
-    <p class="help">Choose an album for uploads, or select "None" to add to the main library.</p>
-    <div style="display:flex;align-items:center;">
-      <select id="albumSelect" style="flex:1;">
-        <option value="">None (main library)</option>
-      </select>
-      <button id="albumRefresh">↻ Refresh</button>
-    </div>
-    <div style="margin-top:10px;">
-      <label for="newAlbumName">Or create a new album:</label>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="newAlbumName" placeholder="My Daycare Photos" style="flex:1;margin-bottom:0;">
-        <button class="btn-add" id="btnCreateAlbum" style="width:auto;margin-top:0;padding:8px 14px;">Create</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Face Training -->
   <div class="card" id="trainingCard">
     <h2>🧠 Face Training Data</h2>
@@ -337,70 +233,18 @@
       </select>
     </div>
 
-    <div class="training-tabs">
-      <button class="training-tab active" data-tab="manual" data-panel="panelManual">📤 Manual Upload</button>
-      <button class="training-tab" data-tab="album" data-panel="panelAlbum">📷 Import from Album</button>
-    </div>
-
-    <!-- Manual upload panel -->
-    <div class="training-panel active" id="panelManual">
-      <p class="help" style="margin-bottom:10px;">
-        Select up to 10 face photos. A live match % is shown for each to help you
-        choose high-quality training images.
-      </p>
-      <input type="file" id="trainingFileInput" accept="image/*" multiple>
-      <div id="trainingPreviews" style="margin-top:10px;"></div>
-      <button class="btn-add" id="btnSaveTraining" style="margin-top:10px;" disabled>
-        💾 Save training photos
-      </button>
-    </div>
-
-    <!-- Album import panel -->
-    <div class="training-panel" id="panelAlbum">
-      <p class="help" style="margin-bottom:10px;">
-        Pick an album containing face photos of this child.
-        Up to 10 photos will be used to build the recognition model.
-      </p>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-        <select id="trainingAlbumSelect" style="flex:1;margin-bottom:0;">
-          <option value="">— select album —</option>
-        </select>
-        <button id="trainingAlbumRefresh" style="
-          font-size:12px;background:none;border:1px solid var(--border);
-          padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--primary);
-          width:auto;">↻</button>
-      </div>
-      <button class="btn-add" id="btnImportAlbum" disabled>
-        ⬇ Import from selected album
-      </button>
-      <p id="importStatus" style="font-size:12px;color:var(--muted);margin-top:8px;"></p>
-    </div>
-  </div>
-
-  <!-- Auto-Sync -->
-  <div class="card">
-    <h2>⏰ Auto-Sync</h2>
-    <p class="help" style="margin-bottom:14px;">
-      When enabled, the extension will automatically run a sync in the background
-      without you needing to click the popup. Storypark must be open in a tab for
-      the sync to scrape new photos.
+    <p class="help" style="margin-bottom:10px;">
+      Select up to 10 face photos. A live match % is shown to help you pick
+      high-quality training images.
     </p>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-      <input type="checkbox" id="autoSyncEnabled" style="width:auto;margin-bottom:0;">
-      <label for="autoSyncEnabled" style="font-size:14px;color:var(--text);margin-bottom:0;font-weight:600;">
-        Enable Auto-Sync
-      </label>
-    </div>
-    <div id="autoSyncFreqRow">
-      <label for="autoSyncFrequency">Frequency</label>
-      <select id="autoSyncFrequency">
-        <option value="daily">Daily</option>
-        <option value="weekly-friday">Weekly on Fridays</option>
-      </select>
-    </div>
+    <input type="file" id="trainingFileInput" accept="image/*" multiple>
+    <div id="trainingPreviews" style="margin-top:10px;"></div>
+    <button class="btn-add" id="btnSaveTraining" style="margin-top:10px;" disabled>
+      💾 Save training photos
+    </button>
   </div>
 
-  <!-- Save -->
+  <!-- Save strictness settings -->
   <div class="actions">
     <button class="btn-save" id="btnSave">💾 Save Settings</button>
   </div>
@@ -408,8 +252,8 @@
   <div id="toast">✓ Settings saved!</div>
 
   <!--
-    human.js is required for face recognition in the training preview.
-    It is copied into extension/lib/ by running `npm run build`.
+    human.js is required for live face-encoding in the training preview.
+    Copied into extension/lib/ by running `npm run build`.
   -->
   <script src="lib/human.js" onerror="window._humanMissing=true"></script>
   <script type="module" src="options.js"></script>
