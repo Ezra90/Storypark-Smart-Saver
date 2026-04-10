@@ -22,10 +22,26 @@ import {
   getReviewQueue,
   getReviewQueueItem,
   removeFromReviewQueue,
+  addToReviewQueue,
   getAllDescriptors,
+  getDescriptors,
   saveDescriptor,
   appendDescriptor,
+  setDescriptors,
 } from "./lib/db.js";
+
+/* ================================================================== */
+/*  Scan state                                                         */
+/* ================================================================== */
+
+let isScanning      = false;
+let cancelRequested = false;
+
+/**
+ * Temporary history of the last reviewed item for undo support.
+ * Stores { action: "approve"|"reject", item, descriptor? }
+ */
+let lastReviewAction = null;
 
 /* ================================================================== */
 /*  Activity Log                                                       */
@@ -337,6 +353,12 @@ function sanitizeName(name) {
  * @returns {Promise<{approved, queued, rejected}>}
  */
 async function runExtraction(childId, childName, mode) {
+  if (isScanning) {
+    throw new Error("A scan is already in progress. Please wait or cancel it.");
+  }
+  isScanning      = true;
+  cancelRequested = false;
+
   await logger(
     "INFO",
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
@@ -354,15 +376,33 @@ async function runExtraction(childId, childName, mode) {
   }));
 
   const summaries = await fetchStorySummaries(childId, mode);
+  const totalStories = summaries.length;
 
   let approved = 0;
   let queued   = 0;
   let rejected = 0;
 
   try {
-  for (const summary of summaries) {
+  for (let si = 0; si < summaries.length; si++) {
+    if (cancelRequested) {
+      await logger("WARNING", "Scan cancelled by user.");
+      chrome.runtime.sendMessage({ type: "LOG", message: "⏹ Scan cancelled." }).catch(() => {});
+      break;
+    }
+
+    const summary = summaries[si];
+    const dateStr = summary.created_at ? summary.created_at.split("T")[0] : null;
+
+    // Broadcast progress
+    chrome.runtime.sendMessage({
+      type: "PROGRESS",
+      current: si + 1,
+      total: totalStories,
+      date: dateStr || "",
+    }).catch(() => {});
+
     await smartDelay("READ_STORY");
-    await logger("INFO", `Processing story ${summary.id}…`);
+    await logger("INFO", `Processing story ${summary.id}${dateStr ? ` (${dateStr})` : ""}…`);
 
     // Fetch full story detail
     let story;
@@ -387,6 +427,7 @@ async function runExtraction(childId, childName, mode) {
     const createdAt  = story.created_at || summary.created_at || "";
     const body       = story.body       || "";
     const groupName  = story.group_name || story.community_name || "";
+    const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
 
     // Collect images with original_url
     const mediaItems = story.media_items || story.assets || story.media || [];
@@ -407,14 +448,14 @@ async function runExtraction(childId, childName, mode) {
     }
 
     // Fetch routine data for the story date (deduplicated by cache)
-    const dateStr      = createdAt ? createdAt.split("T")[0] : null;
-    const routineText  = dateStr
-      ? await fetchRoutineSummary(childId, dateStr)
+    const routineText  = storyDateStr
+      ? await fetchRoutineSummary(childId, storyDateStr)
       : "";
 
     // Process each image sequentially
     let aborted = false;
     for (const img of images) {
+      if (cancelRequested) { aborted = true; break; }
       await smartDelay("DOWNLOAD_IMAGE");
 
       // Compile metadata string to embed in EXIF ImageDescription
@@ -464,14 +505,15 @@ async function runExtraction(childId, childName, mode) {
         continue;
       }
 
+      const dateSuffix = storyDateStr ? ` [${storyDateStr}]` : "";
       if (result?.result === "approve") {
         approved++;
-        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}`);
+        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${dateSuffix}`);
       } else if (result?.result === "review") {
         queued++;
         await logger(
           "INFO",
-          `  👀 Queued for review: ${img.filename} (${result.matchPct ?? "?"}% match)`
+          `  👀 Queued for review: ${img.filename}${dateSuffix} (${result.matchPct ?? "?"}% match)`
         );
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
@@ -485,6 +527,9 @@ async function runExtraction(childId, childName, mode) {
   }
   } finally {
     routineCache.clear();
+    isScanning      = false;
+    cancelRequested = false;
+    chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
   }
 
   const msg = `Scan complete — Downloaded: ${approved}, Review: ${queued}, Rejected: ${rejected}`;
@@ -496,13 +541,19 @@ async function runExtraction(childId, childName, mode) {
 /*  Review approve handler                                             */
 /* ================================================================== */
 
-async function handleReviewApprove(id) {
+async function handleReviewApprove(id, selectedFaceIndex = 0) {
   const item = await getReviewQueueItem(id);
   if (!item) throw new Error("Review item not found.");
 
+  // Determine which descriptor to use (multi-face support)
+  let descriptor = item.descriptor;
+  if (item.allFaces && item.allFaces.length > selectedFaceIndex) {
+    descriptor = item.allFaces[selectedFaceIndex].descriptor;
+  }
+
   // Persist the confirmed face descriptor for continuous learning
-  if (item.descriptor && item.childId) {
-    await appendDescriptor(item.childId, item.childName, item.descriptor);
+  if (descriptor && item.childId) {
+    await appendDescriptor(item.childId, item.childName, descriptor);
     // Refresh the offscreen document's in-memory profile cache so the next
     // batch of processed photos uses the expanded descriptor set.
     sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
@@ -518,6 +569,14 @@ async function handleReviewApprove(id) {
   });
 
   await removeFromReviewQueue(id);
+
+  // Store undo state
+  lastReviewAction = {
+    action: "approve",
+    item,
+    descriptor: descriptor ? Array.from(descriptor) : null,
+  };
+
   chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
 }
 
@@ -551,10 +610,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: false, error: "No child selected." });
         return false;
       }
+      if (isScanning) {
+        sendResponse({ ok: false, error: "A scan is already in progress." });
+        return false;
+      }
       runExtraction(childId, childName || childId, msg.type)
         .then((stats) => sendResponse({ ok: true, stats }))
         .catch((err)  => sendResponse({ ok: false, error: err.message }));
       return true;
+    }
+
+    case "CANCEL_SCAN": {
+      cancelRequested = true;
+      sendResponse({ ok: true });
+      return false;
     }
 
     case "GET_REVIEW_QUEUE": {
@@ -565,15 +634,71 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     case "REVIEW_APPROVE": {
-      handleReviewApprove(msg.id)
+      handleReviewApprove(msg.id, msg.selectedFaceIndex ?? 0)
         .then(()    => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }
 
     case "REVIEW_REJECT": {
-      removeFromReviewQueue(msg.id)
-        .then(()    => sendResponse({ ok: true }))
+      (async () => {
+        const item = await getReviewQueueItem(msg.id).catch(() => null);
+        await removeFromReviewQueue(msg.id);
+        // Store undo state
+        if (item) {
+          lastReviewAction = { action: "reject", item };
+        }
+        chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
+        sendResponse({ ok: true });
+      })().catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "UNDO_LAST_REVIEW": {
+      (async () => {
+        if (!lastReviewAction) {
+          sendResponse({ ok: false, error: "Nothing to undo." });
+          return;
+        }
+        const { action, item, descriptor } = lastReviewAction;
+
+        // If we approved and learned a descriptor, remove it
+        if (action === "approve" && descriptor && item.childId) {
+          const existing = await getDescriptors(item.childId).catch(() => null);
+          if (existing?.descriptors) {
+            // Remove the last descriptor that matches
+            const descStr = JSON.stringify(descriptor);
+            const idx = existing.descriptors.findLastIndex(
+              (d) => JSON.stringify(d) === descStr
+            );
+            if (idx !== -1) {
+              existing.descriptors.splice(idx, 1);
+              await setDescriptors(item.childId, existing.childName, existing.descriptors);
+              sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
+            }
+          }
+        }
+
+        // Put the item back in the review queue
+        await addToReviewQueue(item);
+        lastReviewAction = null;
+        chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
+        sendResponse({ ok: true });
+      })().catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "RESET_FACE_DATA": {
+      const { childId } = msg;
+      if (!childId) {
+        sendResponse({ ok: false, error: "No child specified." });
+        return false;
+      }
+      setDescriptors(childId, "", [])
+        .then(() => {
+          sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
+          sendResponse({ ok: true });
+        })
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }

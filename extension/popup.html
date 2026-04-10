@@ -24,7 +24,25 @@
       padding: 14px;
     }
 
-    h1 { font-size: 15px; margin-bottom: 12px; }
+    h1 { font-size: 15px; margin-bottom: 6px; }
+
+    /* ---- Open Storypark link ---- */
+    .open-storypark {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
+      border: none;
+      border-radius: 6px;
+      background: var(--primary);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 12px;
+      text-decoration: none;
+    }
+    .open-storypark:hover { opacity: 0.85; }
 
     /* ---- Tabs ---- */
     .tabs {
@@ -64,7 +82,7 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* ---- Extract tab ---- */
+    /* ---- Save Photos tab ---- */
     .child-row {
       display: flex;
       gap: 6px;
@@ -98,7 +116,7 @@
     .action-btns {
       display: flex;
       gap: 8px;
-      margin-bottom: 10px;
+      margin-bottom: 4px;
     }
     .btn-action {
       flex: 1;
@@ -114,6 +132,29 @@
     .btn-action:hover:not(:disabled) { opacity: 0.85; }
     #btnExtractLatest { background: var(--primary); color: var(--text); }
     #btnDeepRescan    { background: var(--accent);  color: #fff; }
+
+    .helper-text {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    /* ---- Stop Scan button ---- */
+    #btnStopScan {
+      display: none;
+      width: 100%;
+      padding: 7px 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    #btnStopScan:hover { opacity: 0.85; }
 
     .status {
       display: flex;
@@ -134,6 +175,31 @@
     .dot.green  { background: var(--success); }
     .dot.yellow { background: var(--warning); }
     .dot.red    { background: var(--accent);  }
+
+    /* ---- Progress bar ---- */
+    #progressBar {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      appearance: none;
+      -webkit-appearance: none;
+      display: none;
+    }
+    #progressBar::-webkit-progress-bar {
+      background: var(--surface);
+      border-radius: 3px;
+    }
+    #progressBar::-webkit-progress-value {
+      background: var(--success);
+      border-radius: 3px;
+    }
+    #progressText {
+      font-size: 10px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: none;
+    }
 
     .log-container {
       background: var(--surface);
@@ -169,6 +235,25 @@
       border-radius: 6px;
       flex-shrink: 0;
       background: var(--primary);
+      cursor: pointer;
+    }
+    .review-face-selector {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .review-face-btn {
+      width: 32px; height: 32px;
+      object-fit: cover;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      padding: 0;
+      background: none;
+    }
+    .review-face-btn.selected {
+      border-color: var(--success);
     }
     .review-meta { flex: 1; min-width: 0; }
     .review-meta .child-name {
@@ -192,6 +277,21 @@
     .btn-reject  { background: rgba(233,69,96,0.15);  color: var(--accent);  }
     .btn-reject:hover:not(:disabled)  { background: rgba(233,69,96,0.3);  }
     .btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-undo {
+      width: 100%;
+      padding: 7px 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--muted);
+      margin-top: 8px;
+      display: none;
+    }
+    .btn-undo:hover { color: var(--text); }
 
     /* ---- Activity Log tab ---- */
     #tabLog .log-terminal {
@@ -241,14 +341,57 @@
       text-decoration: none;
     }
     .footer a:hover { text-decoration: underline; }
+
+    /* ---- Onboarding overlay ---- */
+    .onboarding-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.82);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .onboarding-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 22px 18px;
+      text-align: center;
+      max-width: 320px;
+    }
+    .onboarding-card h2 {
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+    .onboarding-card p {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    .onboarding-card button {
+      padding: 8px 24px;
+      border: none;
+      border-radius: 8px;
+      background: var(--primary);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .onboarding-card button:hover { opacity: 0.85; }
   </style>
 </head>
 <body>
   <h1>📸 Storypark Smart Saver</h1>
 
+  <!-- Open Storypark link -->
+  <button class="open-storypark" id="btnOpenStorypark">🔗 Open Storypark</button>
+
   <!-- Tab bar -->
   <div class="tabs">
-    <button class="tab active" data-tab="extract">Extract</button>
+    <button class="tab active" data-tab="savePhotos">Save Photos</button>
     <button class="tab" data-tab="pending">
       Pending Matches
       <span class="tab-badge" id="reviewBadge" style="display:none;"></span>
@@ -256,8 +399,8 @@
     <button class="tab" data-tab="log">Activity Log</button>
   </div>
 
-  <!-- ---- Tab: Extract ---- -->
-  <div id="tabExtract" class="tab-panel active">
+  <!-- ---- Tab: Save Photos ---- -->
+  <div id="tabSavePhotos" class="tab-panel active">
 
     <!-- Child selector -->
     <div class="child-row">
@@ -269,15 +412,26 @@
 
     <!-- Action buttons -->
     <div class="action-btns">
-      <button class="btn-action" id="btnExtractLatest" disabled>⬇ Extract Latest</button>
-      <button class="btn-action" id="btnDeepRescan"    disabled>🔁 Deep Rescan</button>
+      <button class="btn-action" id="btnExtractLatest" disabled>⬇ Download Latest</button>
+      <button class="btn-action" id="btnDeepRescan"    disabled>🔁 Full History Scan</button>
     </div>
+    <div class="helper-text">
+      <strong>Download Latest:</strong> Use daily/weekly to get new photos.<br>
+      <strong>Full History Scan:</strong> First run or re-processing old photos.
+    </div>
+
+    <!-- Stop Scan button (hidden by default) -->
+    <button id="btnStopScan">🛑 Stop Scan</button>
 
     <!-- Status bar -->
     <div class="status">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">Ready</span>
     </div>
+
+    <!-- Progress bar -->
+    <progress id="progressBar" value="0" max="100"></progress>
+    <div id="progressText"></div>
 
     <!-- Progress log -->
     <div class="log-container" id="logBox">
@@ -289,6 +443,7 @@
   <div id="tabPending" class="tab-panel">
     <p id="reviewEmpty">No photos pending review.</p>
     <div id="reviewItems"></div>
+    <button class="btn-undo" id="btnUndoMatch">⤺ Undo Last Match</button>
   </div>
 
   <!-- ---- Tab: Activity Log ---- -->
@@ -304,6 +459,18 @@
   <!-- Footer -->
   <div class="footer">
     <a href="#" id="openOptions">⚙ Settings</a>
+  </div>
+
+  <!-- First-run onboarding overlay -->
+  <div class="onboarding-overlay" id="onboardingOverlay" style="display:none;">
+    <div class="onboarding-card">
+      <h2>👋 Welcome!</h2>
+      <p>
+        To start saving photos, first open your child's Storypark profile
+        in your current tab, then click '<strong>Full History Scan</strong>'.
+      </p>
+      <button id="btnDismissOnboarding">Got it!</button>
+    </div>
   </div>
 
   <script src="popup.js"></script>

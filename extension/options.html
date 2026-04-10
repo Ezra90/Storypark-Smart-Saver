@@ -91,6 +91,32 @@
     .strictness-row { margin-bottom: 14px; }
     .strictness-row label { margin-bottom: 6px; }
 
+    /* Threshold controls */
+    .threshold-row { margin-bottom: 8px; }
+    .threshold-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .threshold-controls input[type="range"] {
+      flex: 1;
+      height: 6px;
+      accent-color: var(--primary);
+    }
+    .threshold-num {
+      width: 60px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      text-align: center;
+    }
+    .threshold-pct {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
     /* Training */
     .training-child-select { margin-bottom: 12px; }
 
@@ -200,6 +226,69 @@
       color: #fff;
       border-color: var(--primary);
     }
+
+    /* Remove button on training thumbnails */
+    .training-card-wrapper {
+      position: relative;
+    }
+    .btn-remove-training {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 18px;
+      height: 18px;
+      border: none;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .btn-remove-training:hover { opacity: 0.8; }
+
+    /* Reset Face Data button */
+    .btn-reset-face {
+      background: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+    .btn-reset-face:hover { background: #fee2e2; }
+    .btn-reset-face:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Training upload loading bar */
+    .training-loading {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .training-loading progress {
+      flex: 1;
+      height: 8px;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .training-loading progress::-webkit-progress-bar {
+      background: var(--bg);
+      border-radius: 4px;
+    }
+    .training-loading progress::-webkit-progress-value {
+      background: var(--primary);
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
@@ -224,19 +313,40 @@
     <button class="btn-refresh" id="btnRefreshChildren">↻ Refresh from Storypark</button>
   </div>
 
-  <!-- Face Recognition Strictness -->
+  <!-- Face Recognition Thresholds -->
   <div class="card">
-    <h2>🎯 Face Recognition Strictness</h2>
+    <h2>🎯 Face Recognition Thresholds</h2>
     <p class="help" style="margin-bottom:16px;">
-      Choose how carefully the extension checks that a photo contains your child's face.
+      Fine-tune how the AI decides which photos to download automatically
+      and which to flag for your review.
     </p>
-    <div class="strictness-row">
-      <label for="faceStrictness">Strictness Level</label>
-      <select id="faceStrictness">
-        <option value="strict">Strict (Fewer mistakes, might miss some photos)</option>
-        <option value="normal" selected>Normal (Recommended)</option>
-        <option value="loose">Loose (Catches everything, might include other kids)</option>
-      </select>
+
+    <div class="threshold-row">
+      <label for="autoThresholdRange">Auto-Approve Threshold</label>
+      <div class="threshold-controls">
+        <input type="range" id="autoThresholdRange" min="0" max="100" value="85">
+        <input type="number" id="autoThresholdNumber" min="0" max="100" value="85" class="threshold-num">
+        <span class="threshold-pct">%</span>
+      </div>
+      <p class="help" style="margin-top:4px;">
+        Default is 85%. Photos matching this percentage or higher are downloaded
+        automatically. 100% means perfect matches only (might skip blurry photos).
+        Lower numbers catch more photos but risk downloading the wrong child.
+      </p>
+    </div>
+
+    <div class="threshold-row" style="margin-top:16px;">
+      <label for="minThresholdRange">Manual Review Threshold</label>
+      <div class="threshold-controls">
+        <input type="range" id="minThresholdRange" min="0" max="100" value="50">
+        <input type="number" id="minThresholdNumber" min="0" max="100" value="50" class="threshold-num">
+        <span class="threshold-pct">%</span>
+      </div>
+      <p class="help" style="margin-top:4px;">
+        Default is 50%. Photos matching between this number and your Auto-Approve
+        setting are sent to 'Pending Matches' for manual confirmation.
+        0% means EVERY photo gets flagged for review.
+      </p>
     </div>
   </div>
 
@@ -264,9 +374,13 @@
     <input type="file" id="trainingFileInput" accept="image/*" multiple>
     <div id="trainingPreviews" style="margin-top:10px;"></div>
     <p id="trainingProgress" style="font-size:13px;color:var(--muted);margin-top:8px;min-height:18px;"></p>
+    <div class="training-loading" id="trainingLoading">
+      Uploading… <progress id="trainingLoadingBar" value="0" max="100"></progress>
+    </div>
     <button class="btn-add" id="btnSaveTraining" style="margin-top:4px;" disabled>
       💾 Save training photos
     </button>
+    <button class="btn-reset-face" id="btnResetFaceData">🗑 Reset Face Data</button>
   </div>
 
   <!-- Save strictness settings -->
