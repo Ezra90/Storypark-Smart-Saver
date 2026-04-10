@@ -89,42 +89,41 @@ function buildCentreRow(name, loc) {
   nameField.appendChild(nameLabel);
   nameField.appendChild(nameInput);
 
-  // Latitude
-  const latField = document.createElement("div");
-  latField.className = "centre-field centre-coord-field";
-  const latLabel = document.createElement("label");
-  latLabel.textContent = "Latitude";
-  const latInput = document.createElement("input");
-  latInput.type        = "number";
-  latInput.step        = "any";
-  latInput.placeholder = "-36.8485";
-  latInput.value       = loc.lat != null ? loc.lat : "";
-  latField.appendChild(latLabel);
-  latField.appendChild(latInput);
+  // Combined Google Maps URL / coordinates field
+  const mapsField = document.createElement("div");
+  mapsField.className = "centre-field centre-maps-field";
+  const mapsLabel = document.createElement("label");
+  mapsLabel.textContent = "Google Maps Link or Coordinates";
+  const mapsInput = document.createElement("input");
+  mapsInput.type        = "text";
+  mapsInput.placeholder = "Paste a Maps URL or -27.741, 153.186";
+  // Pre-fill with existing coordinates if present
+  if (loc.lat != null && loc.lng != null) {
+    mapsInput.value = `${loc.lat}, ${loc.lng}`;
+  }
+  mapsField.appendChild(mapsLabel);
+  mapsField.appendChild(mapsInput);
 
-  // Longitude
-  const lngField = document.createElement("div");
-  lngField.className = "centre-field centre-coord-field";
-  const lngLabel = document.createElement("label");
-  lngLabel.textContent = "Longitude";
-  const lngInput = document.createElement("input");
-  lngInput.type        = "number";
-  lngInput.step        = "any";
-  lngInput.placeholder = "174.7633";
-  lngInput.value       = loc.lng != null ? loc.lng : "";
-  lngField.appendChild(lngLabel);
-  lngField.appendChild(lngInput);
-
-  // Google Maps search button
-  const btnMaps = document.createElement("button");
-  btnMaps.className   = "btn-maps-search";
-  btnMaps.textContent = "🔍 Maps";
-  btnMaps.title       = "Search Google Maps for this centre";
-  btnMaps.type        = "button";
-  btnMaps.addEventListener("click", () => {
-    const q = encodeURIComponent(nameInput.value || name);
-    window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
-  });
+  /**
+   * Parse the input value and return {lat, lng} or null.
+   * Accepts:
+   *   - Google Maps URL containing /@lat,lng
+   *   - Plain "lat, lng" coordinates
+   */
+  function parseCoords(raw) {
+    if (!raw) return null;
+    // Google Maps URL: extract from /@lat,lng
+    const urlMatch = raw.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (urlMatch) {
+      return { lat: parseFloat(urlMatch[1]), lng: parseFloat(urlMatch[2]) };
+    }
+    // Plain coordinates: lat,lng or lat, lng
+    const coordMatch = raw.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (coordMatch) {
+      return { lat: parseFloat(coordMatch[1]), lng: parseFloat(coordMatch[2]) };
+    }
+    return null;
+  }
 
   // Google Maps link (visible when coordinates are set)
   const mapsLink = document.createElement("a");
@@ -132,10 +131,9 @@ function buildCentreRow(name, loc) {
   mapsLink.target         = "_blank";
   mapsLink.rel            = "noopener";
   const updateMapsLink = () => {
-    const lat = latInput.value !== "" ? parseFloat(latInput.value) : null;
-    const lng = lngInput.value !== "" ? parseFloat(lngInput.value) : null;
-    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-      mapsLink.href        = `https://www.google.com/maps?q=${lat},${lng}`;
+    const coords = parseCoords(mapsInput.value);
+    if (coords) {
+      mapsLink.href        = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
       mapsLink.textContent = "📍 View on Map";
       mapsLink.style.display = "";
     } else {
@@ -157,18 +155,20 @@ function buildCentreRow(name, loc) {
   });
 
   row.appendChild(nameField);
-  row.appendChild(latField);
-  row.appendChild(lngField);
+  row.appendChild(mapsField);
   row.appendChild(mapsLink);
-  row.appendChild(btnMaps);
   row.appendChild(btnRemove);
 
   // Keep cache in sync on input changes
   const updateCache = () => {
     const oldKey = nameInput.dataset.originalName;
     const newKey = nameInput.value.trim();
-    const lat    = latInput.value !== "" ? parseFloat(latInput.value) : null;
-    const lng    = lngInput.value !== "" ? parseFloat(lngInput.value) : null;
+    const coords = parseCoords(mapsInput.value);
+
+    // If a Maps URL was pasted, replace the input value with clean coordinates
+    if (coords && (mapsInput.value.includes("maps.google") || mapsInput.value.includes("google.com/maps"))) {
+      mapsInput.value = `${coords.lat}, ${coords.lng}`;
+    }
 
     if (oldKey && oldKey !== newKey) {
       delete centreLocationsCache[oldKey];
@@ -176,15 +176,15 @@ function buildCentreRow(name, loc) {
     }
     if (newKey) {
       centreLocationsCache[newKey] = {
-        lat: lat != null && !isNaN(lat) ? lat : null,
-        lng: lng != null && !isNaN(lng) ? lng : null,
+        lat: coords ? coords.lat : null,
+        lng: coords ? coords.lng : null,
       };
     }
     updateMapsLink();
   };
   nameInput.addEventListener("input", updateCache);
-  latInput.addEventListener("input",  updateCache);
-  lngInput.addEventListener("input",  updateCache);
+  mapsInput.addEventListener("input",  updateCache);
+  mapsInput.addEventListener("paste",  () => setTimeout(updateCache, 0));
 
   return row;
 }

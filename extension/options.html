@@ -229,26 +229,9 @@
       flex: 2;
       min-width: 140px;
     }
-    .centre-row .centre-coord-field {
-      flex: 1;
-      min-width: 80px;
-    }
-    .centre-row .centre-coord-field input {
-      width: 100%;
-    }
-    .centre-row .btn-maps-search {
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: none;
-      color: var(--primary);
-      cursor: pointer;
-      font-size: 14px;
-      white-space: nowrap;
-      align-self: flex-end;
-    }
-    .centre-row .btn-maps-search:hover {
-      border-color: var(--primary);
+    .centre-row .centre-maps-field {
+      flex: 3;
+      min-width: 160px;
     }
     .centre-row .btn-remove-centre {
       padding: 8px 10px;
@@ -416,7 +399,7 @@
       Add GPS coordinates for each childcare centre so downloaded photos
       include location data in Google Photos. Your child may attend
       multiple centres — add one row per centre.
-      Click the 🔍 button to search Google Maps and copy the coordinates.
+      Paste a Google Maps URL or enter coordinates directly (e.g. <code>-27.741, 153.186</code>).
     </p>
     <div id="centreList"></div>
     <button class="btn-add" id="btnAddCentre">＋ Add Centre</button>

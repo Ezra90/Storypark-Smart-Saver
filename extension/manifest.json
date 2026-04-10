@@ -18,8 +18,7 @@
     "downloads"
   ],
   "host_permissions": [
-    "*://app.storypark.com/*",
-    "*://nominatim.openstreetmap.org/*"
+    "*://app.storypark.com/*"
   ],
   "background": {
     "service_worker": "background.js",

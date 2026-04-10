@@ -102,6 +102,7 @@ let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
  * @param {"FEED_SCROLL"|"READ_STORY"|"DOWNLOAD_IMAGE"} actionType
  */
 async function smartDelay(actionType) {
+  if (cancelRequested) return;
   _requestCount++;
 
   // Coffee Break when the counter reaches the threshold
@@ -114,13 +115,23 @@ async function smartDelay(actionType) {
     // Reset for next break
     _requestCount = 0;
     _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
-    await new Promise((r) => setTimeout(r, breakMs));
+    await new Promise((r) => {
+      const handle = setTimeout(() => { clearInterval(poll); r(); }, breakMs);
+      const poll   = setInterval(() => {
+        if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); }
+      }, 100);
+    });
     return;
   }
 
   const [minMs, maxMs] = DELAY_PROFILES[actionType] || [1000, 2000];
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
-  await new Promise((r) => setTimeout(r, ms));
+  await new Promise((r) => {
+    const handle = setTimeout(() => { clearInterval(poll); r(); }, ms);
+    const poll   = setInterval(() => {
+      if (cancelRequested) { clearTimeout(handle); clearInterval(poll); r(); }
+    }, 100);
+  });
 }
 
 /* ================================================================== */
@@ -249,13 +260,9 @@ async function loadAndCacheProfile() {
  * map without overwriting existing GPS data.  Each key is a centre name;
  * values are { lat: number|null, lng: number|null }.
  *
- * When a centre is discovered for the first time, automatically attempt
- * to geocode it using the Nominatim (OpenStreetMap) API.
- *
  * @param {string[]} names  One or more centre/community names
- * @param {string}   [address]  Optional address hint for geocoding
  */
-async function discoverCentres(names, address) {
+async function discoverCentres(names) {
   if (!names || names.length === 0) return;
   const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
   let changed = false;
@@ -264,57 +271,11 @@ async function discoverCentres(names, address) {
     if (trimmed && !(trimmed in centreLocations)) {
       centreLocations[trimmed] = { lat: null, lng: null };
       changed = true;
-
-      // Auto-geocode the new centre
-      const coords = await geocodeLocation(trimmed, address);
-      if (coords) {
-        centreLocations[trimmed] = { lat: coords.lat, lng: coords.lng };
-        await logger("INFO", `📍 Auto-geocoded "${trimmed}" → ${coords.lat}, ${coords.lng}`);
-      }
     }
   }
   if (changed) {
     await chrome.storage.local.set({ centreLocations });
   }
-}
-
-/* ================================================================== */
-/*  GPS Geocoding via OpenStreetMap Nominatim                          */
-/* ================================================================== */
-
-/**
- * Geocode a location name/address using the free Nominatim API.
- *
- * @param {string} name     Centre/community name
- * @param {string} [address]  Optional address string (preferred over name)
- * @returns {Promise<{lat: number, lng: number}|null>}
- */
-async function geocodeLocation(name, address) {
-  try {
-    const query = address || name;
-    if (!query) return null;
-
-    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
-      encodeURIComponent(query);
-
-    const res = await fetch(url, {
-      headers: { "User-Agent": "StoryparkSmartSaver/1.0" },
-    });
-
-    if (!res.ok) return null;
-
-    const results = await res.json();
-    if (results && results.length > 0) {
-      const lat = parseFloat(results[0].lat);
-      const lng = parseFloat(results[0].lon);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        return { lat, lng };
-      }
-    }
-  } catch (err) {
-    console.warn("[background] Geocode failed for", name, err.message);
-  }
-  return null;
 }
 
 /* ================================================================== */
@@ -554,10 +515,9 @@ async function runExtraction(childId, childName, mode) {
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 
-    // Auto-discover this centre name and attempt geocoding
+    // Auto-discover this centre name (registers it for GPS lookup in Options)
     if (centreName) {
-      const centreAddress = story.community_address || story.centre_address || story.address || "";
-      await discoverCentres([centreName], centreAddress);
+      await discoverCentres([centreName]);
     }
 
     // Look up GPS coordinates for this centre (user-configured)
