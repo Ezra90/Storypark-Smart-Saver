@@ -202,8 +202,9 @@ async function sendToOffscreen(message) {
  */
 async function loadAndCacheProfile() {
   try {
-    const data = await apiFetch(`${STORYPARK_BASE}/api/v3/profile`);
-    const children = (data.children || []).map((c) => ({
+    const data = await apiFetch(`${STORYPARK_BASE}/api/v3/users/me`);
+    const rawChildren = data.user?.children || data.children || [];
+    const children = rawChildren.map((c) => ({
       id: String(c.id),
       name: c.name || c.display_name || `Child ${c.id}`,
     }));
