@@ -185,19 +185,29 @@ async function apiFetch(url) {
 /*  Offscreen document                                                 */
 /* ================================================================== */
 
-let offscreenReady = false;
+let offscreenReady    = false;
+let offscreenCreating = null;
 
 async function ensureOffscreen() {
   if (offscreenReady) return;
-  const exists = await chrome.offscreen.hasDocument().catch(() => false);
-  if (!exists) {
-    await chrome.offscreen.createDocument({
-      url: chrome.runtime.getURL("offscreen.html"),
-      reasons: ["BLOBS"],
-      justification: "Face recognition and EXIF processing for Storypark images",
-    });
+  // If another concurrent call is already creating the document, wait for it
+  if (offscreenCreating) {
+    await offscreenCreating;
+    return;
   }
-  offscreenReady = true;
+  offscreenCreating = (async () => {
+    const exists = await chrome.offscreen.hasDocument().catch(() => false);
+    if (!exists) {
+      await chrome.offscreen.createDocument({
+        url: chrome.runtime.getURL("offscreen.html"),
+        reasons: ["BLOBS"],
+        justification: "Face recognition and EXIF processing for Storypark images",
+      });
+    }
+    offscreenReady    = true;
+    offscreenCreating = null;
+  })();
+  await offscreenCreating;
 }
 
 /**
@@ -260,6 +270,12 @@ async function loadAndCacheProfile() {
     const names = [...new Set([...namesFromArray, ...scalarNames])];
     if (names.length > 0) {
       await discoverCentres(names);
+      // Persist the first community as the active centre name for use as a
+      // fallback when individual stories do not carry a community_name field.
+      const { activeCentreName } = await chrome.storage.local.get("activeCentreName");
+      if (!activeCentreName) {
+        await chrome.storage.local.set({ activeCentreName: names[0] });
+      }
     }
 
     return children;
@@ -360,7 +376,7 @@ async function fetchRoutineSummary(childId, dateStr) {
 
   try {
     await smartDelay("FEED_SCROLL");
-    const url  = `${STORYPARK_BASE}/api/v3/children/${childId}/routines?date=${dateStr}`;
+    const url  = `${STORYPARK_BASE}/children/${childId}/routines.json?date=${dateStr}`;
     const data = await apiFetch(url);
     const summary = buildRoutineSummary(data);
     routineCache.set(dateStr, summary);
@@ -462,8 +478,8 @@ async function runExtraction(childId, childName, mode) {
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
   );
 
-  const { autoThreshold = 85, minThreshold = 50 } =
-    await chrome.storage.local.get(["autoThreshold", "minThreshold"]);
+  const { autoThreshold = 85, minThreshold = 50, activeCentreName = "" } =
+    await chrome.storage.local.get(["autoThreshold", "minThreshold", "activeCentreName"]);
 
   // Load known face descriptors for all children
   const allDescriptors  = await getAllDescriptors();
@@ -525,7 +541,7 @@ async function runExtraction(childId, childName, mode) {
     const createdAt    = story.created_at || summary.created_at || "";
     const body         = story.body       || "";
     const roomName     = story.group_name     || "";
-    const centreName   = story.community_name || story.centre_name || story.service_name || "";
+    const centreName   = story.community_name || story.centre_name || story.service_name || activeCentreName || "";
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 

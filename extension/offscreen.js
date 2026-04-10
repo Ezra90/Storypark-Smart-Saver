@@ -228,10 +228,12 @@ function downloadBlob(blob, savePath) {
     chrome.downloads.download(
       { url, filename: savePath, conflictAction: "uniquify" },
       (downloadId) => {
-        URL.revokeObjectURL(url); // revoke immediately regardless of outcome
         if (chrome.runtime.lastError) {
+          URL.revokeObjectURL(url);
           reject(new Error(chrome.runtime.lastError.message));
         } else {
+          // Delay revocation so the browser has time to read the blob data
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
           resolve(downloadId);
         }
       }
