@@ -198,6 +198,12 @@ btnRefresh.addEventListener("click", () => {
   btnExtractLatest.disabled = true;
   btnDeepRescan.disabled    = true;
   chrome.runtime.sendMessage({ type: "REFRESH_PROFILE" }, (res) => {
+    if (chrome.runtime.lastError) {
+      appendLog("⚠ Refresh failed: " + chrome.runtime.lastError.message);
+      childSelect.innerHTML =
+        '<option value="">Failed — open Storypark in a tab and try again</option>';
+      return;
+    }
     if (res?.ok) {
       populateChildren(res.children);
     } else {
@@ -265,6 +271,11 @@ function triggerExtraction(type) {
 
   chrome.runtime.sendMessage({ type, childId, childName }, (res) => {
     setRunning(false);
+    if (chrome.runtime.lastError) {
+      setStatus("red", "Error");
+      appendLog("⚠ " + chrome.runtime.lastError.message);
+      return;
+    }
     if (res?.ok) {
       setStatus("green", "Done");
       const s = res.stats;

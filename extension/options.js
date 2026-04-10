@@ -133,7 +133,7 @@ function buildCentreRow(name, loc) {
   const updateMapsLink = () => {
     const coords = parseCoords(mapsInput.value);
     if (coords) {
-      mapsLink.href        = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+      mapsLink.href        = `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`;
       mapsLink.textContent = "📍 View on Map";
       mapsLink.style.display = "";
     } else {
