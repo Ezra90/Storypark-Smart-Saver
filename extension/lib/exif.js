@@ -2470,13 +2470,89 @@ SOFTWARE.
     };
     
     
+    // Always expose on window so the ES-module export below can reference it.
+    window.piexif = that;
+
     if (typeof exports !== 'undefined') {
         if (typeof module !== 'undefined' && module.exports) {
             exports = module.exports = that;
         }
         exports.piexif = that;
-    } else {
-        window.piexif = that;
     }
 
 })();
+
+/* ================================================================== */
+/*  ES module export – used by offscreen.js                           */
+/* ================================================================== */
+
+/**
+ * Stamp EXIF metadata onto a JPEG Blob and return a new Blob.
+ *
+ * @param {Blob}        blob        Source JPEG blob
+ * @param {Date|null}   date        Capture date (null → no timestamp)
+ * @param {string}      description ImageDescription text (ASCII-filtered)
+ * @param {{lat:number, lng:number}|null} gpsCoords  Optional GPS coordinates
+ * @returns {Promise<Blob>}
+ */
+export async function applyExif(blob, date, description, gpsCoords) {
+  const piexif = window.piexif;
+
+  // Convert Blob → binary string required by piexifjs
+  const buffer = await blob.arrayBuffer();
+  const bytes  = new Uint8Array(buffer);
+  let jpegStr  = '';
+  for (let i = 0; i < bytes.length; i++) {
+    jpegStr += String.fromCharCode(bytes[i]);
+  }
+
+  const zeroth  = {};
+  const exifIfd = {};
+
+  // ImageDescription – strip non-ASCII characters (no length limit)
+  if (description) {
+    zeroth[piexif.ImageIFD.ImageDescription] =
+      description.replace(/[^\x00-\x7F]/g, '');
+  }
+
+  // DateTime / DateTimeOriginal – format: "YYYY:MM:DD HH:MM:SS"
+  // Midnight (00:xx:xx) is recorded as 12:00:00 to avoid downstream issues.
+  let dateTimeStr = '0000:00:00 12:00:00';
+  if (date instanceof Date && !isNaN(date.getTime())) {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const y  = date.getFullYear();
+    const mo = pad2(date.getMonth() + 1);
+    const d  = pad2(date.getDate());
+    const hRaw = date.getHours();
+    // Preserve 24-hour format; substitute 12 only for midnight (hour 0)
+    const h  = pad2(hRaw === 0 ? 12 : hRaw);
+    const mi = pad2(date.getMinutes());
+    const s  = pad2(date.getSeconds());
+    dateTimeStr = `${y}:${mo}:${d} ${h}:${mi}:${s}`;
+  }
+  zeroth[piexif.ImageIFD.DateTime]         = dateTimeStr;
+  exifIfd[piexif.ExifIFD.DateTimeOriginal] = dateTimeStr;
+
+  const exifObj = { '0th': zeroth, 'Exif': exifIfd };
+
+  // GPS (optional)
+  if (gpsCoords && gpsCoords.lat != null && gpsCoords.lng != null) {
+    const { lat, lng } = gpsCoords;
+    const gps = {};
+    gps[piexif.GPSIFD.GPSLatitudeRef]  = lat >= 0 ? 'N' : 'S';
+    gps[piexif.GPSIFD.GPSLatitude]     = piexif.GPSHelper.degToDmsRational(Math.abs(lat));
+    gps[piexif.GPSIFD.GPSLongitudeRef] = lng >= 0 ? 'E' : 'W';
+    gps[piexif.GPSIFD.GPSLongitude]    = piexif.GPSHelper.degToDmsRational(Math.abs(lng));
+    exifObj['GPS'] = gps;
+  }
+
+  const exifBytes  = piexif.dump(exifObj);
+  const newJpegStr = piexif.insert(exifBytes, jpegStr);
+
+  // Convert binary string back to Blob
+  const outBytes = new Uint8Array(newJpegStr.length);
+  for (let i = 0; i < newJpegStr.length; i++) {
+    outBytes[i] = newJpegStr.charCodeAt(i);
+  }
+  return new Blob([outBytes], { type: 'image/jpeg' });
+}
