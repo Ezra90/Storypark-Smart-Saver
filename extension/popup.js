@@ -4,6 +4,7 @@
  * Tab 1 (Extract): child selector, Extract Latest / Deep Rescan buttons,
  *                  status indicator, live progress log.
  * Tab 2 (Pending Matches): HITL review queue from IndexedDB.
+ * Tab 3 (Activity Log): scrollable terminal showing the persistent log.
  */
 
 /* ================================================================== */
@@ -24,6 +25,9 @@ const logBox           = document.getElementById("logBox");
 const reviewBadge      = document.getElementById("reviewBadge");
 const reviewItems      = document.getElementById("reviewItems");
 const reviewEmpty      = document.getElementById("reviewEmpty");
+
+const activityLogBox   = document.getElementById("activityLogBox");
+const btnClearLog      = document.getElementById("btnClearLog");
 
 const openOptions      = document.getElementById("openOptions");
 
@@ -59,6 +63,58 @@ function appendLog(message) {
 function clearLog() {
   logBox.innerHTML = "";
 }
+
+/* ================================================================== */
+/*  Activity Log (persistent, terminal-style)                         */
+/* ================================================================== */
+
+const LEVEL_COLORS = { INFO: "level-INFO", SUCCESS: "level-SUCCESS", WARNING: "level-WARNING", ERROR: "level-ERROR" };
+
+/**
+ * Render a single log entry object into the activity log terminal.
+ * @param {{timestamp: string, level: string, message: string}} entry
+ */
+function appendActivityEntry(entry) {
+  // Remove placeholder on first real entry
+  if (
+    activityLogBox.children.length === 1 &&
+    activityLogBox.firstElementChild?.textContent === "No activity yet."
+  ) {
+    activityLogBox.innerHTML = "";
+  }
+  const p = document.createElement("p");
+  const ts = new Date(entry.timestamp).toLocaleTimeString(undefined, { hour12: false });
+  p.className   = LEVEL_COLORS[entry.level] || "level-INFO";
+  p.textContent = `[${ts}] [${entry.level}] ${entry.message}`;
+  activityLogBox.appendChild(p);
+  activityLogBox.scrollTop = activityLogBox.scrollHeight;
+}
+
+function renderActivityLog(entries) {
+  activityLogBox.innerHTML = "";
+  if (!entries || entries.length === 0) {
+    const p = document.createElement("p");
+    p.className   = "level-INFO";
+    p.textContent = "No activity yet.";
+    activityLogBox.appendChild(p);
+    return;
+  }
+  for (const entry of entries) {
+    appendActivityEntry(entry);
+  }
+}
+
+function loadActivityLog() {
+  chrome.runtime.sendMessage({ type: "GET_ACTIVITY_LOG" }, (res) => {
+    if (res?.ok) renderActivityLog(res.activityLog);
+  });
+}
+
+btnClearLog.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "CLEAR_ACTIVITY_LOG" }, () => {
+    renderActivityLog([]);
+  });
+});
 
 /* ================================================================== */
 /*  Status indicator                                                   */
@@ -175,6 +231,7 @@ btnDeepRescan.addEventListener("click",    () => triggerExtraction("DEEP_RESCAN"
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "LOG")                appendLog(msg.message);
+  if (msg.type === "LOG_ENTRY")          appendActivityEntry(msg.entry);
   if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
 });
 
@@ -334,3 +391,4 @@ openOptions.addEventListener("click", (e) => {
 
 loadChildren();
 loadReviewQueue();
+loadActivityLog();

@@ -17,7 +17,7 @@
     "downloads"
   ],
   "host_permissions": [
-    "https://app.storypark.com/*"
+    "*://app.storypark.com/*"
   ],
   "background": {
     "service_worker": "background.js",
