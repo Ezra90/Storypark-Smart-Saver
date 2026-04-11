@@ -2480,3 +2480,57 @@ SOFTWARE.
     }
 
 })();
+
+async function applyExif(blob, date, description, gpsCoords) {
+    if (!blob || blob.type !== 'image/jpeg') {
+        return blob;
+    }
+    try {
+        const piexif = window.piexif;
+
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        let dateStr = '0000:00:00 00:00:00';
+        if (date instanceof Date && !isNaN(date)) {
+            const pad = n => String(n).padStart(2, '0');
+            dateStr = `${date.getFullYear()}:${pad(date.getMonth() + 1)}:${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+        }
+
+        const asciiDesc = (description || '').replace(/[^\x20-\x7E]/g, '').slice(0, 1000);
+
+        const exifDict = { '0th': {}, 'Exif': {}, 'GPS': {} };
+        exifDict['0th'][piexif.ImageIFD.ImageDescription] = asciiDesc;
+        exifDict['0th'][piexif.ImageIFD.Software] = 'Storypark Smart Saver';
+        exifDict['Exif'][piexif.ExifIFD.DateTimeOriginal] = dateStr;
+        exifDict['Exif'][piexif.ExifIFD.DateTimeDigitized] = dateStr;
+
+        if (gpsCoords && gpsCoords.lat != null && gpsCoords.lng != null) {
+            const { lat, lng } = gpsCoords;
+            exifDict['GPS'][piexif.GPSIFD.GPSLatitudeRef] = lat >= 0 ? 'N' : 'S';
+            exifDict['GPS'][piexif.GPSIFD.GPSLatitude] = piexif.GPSHelper.degToDmsRational(Math.abs(lat));
+            exifDict['GPS'][piexif.GPSIFD.GPSLongitudeRef] = lng >= 0 ? 'E' : 'W';
+            exifDict['GPS'][piexif.GPSIFD.GPSLongitude] = piexif.GPSHelper.degToDmsRational(Math.abs(lng));
+        }
+
+        const exifBytes = piexif.dump(exifDict);
+        const newDataUrl = piexif.insert(exifBytes, dataUrl);
+
+        const base64 = newDataUrl.split(',')[1];
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: 'image/jpeg' });
+    } catch (e) {
+        console.error('applyExif: failed to stamp EXIF metadata:', e);
+        return blob;
+    }
+}
+
+export { applyExif };
