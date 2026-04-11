@@ -68,7 +68,7 @@ export async function loadModels() {
   human = new Human.Human(HUMAN_CONFIG);
   await human.load();
   modelsLoaded = true;
-  console.log("[face] Human models loaded.");
+  console.debug("[face] Human models loaded.");
 }
 
 /* ------------------------------------------------------------------ */

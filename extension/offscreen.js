@@ -77,7 +77,7 @@ async function ensureModels() {
     human        = new Human.Human(HUMAN_CONFIG);
     await human.load();
     modelsLoaded = true;
-    console.log("[offscreen] Human models loaded.");
+    console.debug("[offscreen] Human models loaded.");
   } catch (err) {
     // Model loading failed (e.g. missing .bin/.json files in extension/models/).
     // Fall back to "approve every image" mode rather than crashing the pipeline.
@@ -189,6 +189,10 @@ function cosineSimilarity(a, b) {
  * Return the best match percentage (0–100) between an embedding and a
  * set of stored descriptors.
  *
+ * Prefers `human.match.similarity()` (same metric used by face.js) for
+ * consistency; falls back to the local `cosineSimilarity()` when the
+ * Human instance is not yet available.
+ *
  * @param {number[]|Float32Array} embedding
  * @param {number[][]}            descriptors
  * @returns {number}
@@ -198,7 +202,10 @@ function bestMatchPercent(embedding, descriptors) {
   const embArr = Array.from(embedding);
   let best = 0;
   for (const desc of descriptors) {
-    const sim = cosineSimilarity(embArr, Array.isArray(desc) ? desc : Array.from(desc));
+    const descArr = Array.isArray(desc) ? desc : Array.from(desc);
+    const sim = (human && human.match)
+      ? human.match.similarity(embArr, descArr)
+      : cosineSimilarity(embArr, descArr);
     const pct = Math.max(0, Math.round(sim * 100));
     if (pct > best) best = pct;
   }
@@ -401,15 +408,28 @@ async function processImage(msg) {
   const box              = bestFace.box ?? null; // [x, y, width, height]
   const croppedFaceDataUrl = box ? cropFaceToDataUrl(img, box) : null;
 
+  // Build allFaces array for the multi-face selector in the popup UI.
+  // Include every detected face that has an embedding so the user can
+  // pick the correct face when more than one person appears in the photo.
+  const allFacesDescriptors = effectiveEncodings.flatMap((e) => e.descriptors);
+  const allFacesData = faces
+    .filter((f) => f.embedding)
+    .map((f) => ({
+      descriptor:     Array.from(f.embedding),
+      croppedDataUrl: f.box ? cropFaceToDataUrl(img, f.box) : null,
+      matchPct:       bestMatchPercent(f.embedding, allFacesDescriptors),
+    }));
+
   await addToReviewQueue({
     croppedFaceDataUrl,
-    descriptor:     bestDescriptor,
+    descriptor:      bestDescriptor,
+    allFaces:        allFacesData.length > 1 ? allFacesData : undefined,
     storyData,
     description,
-    childId:        bestChildId || childId,
-    childName:      matchedNames.size > 0 ? [...matchedNames][0] : childName,
+    childId:         bestChildId || childId,
+    childName:       bestChildName || childName,
     savePath,
-    matchPct:       bestPct,
+    matchPct:        bestPct,
     matchedChildren: [...matchedNames].sort(),
   });
 

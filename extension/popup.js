@@ -26,7 +26,6 @@ const logBox           = document.getElementById("logBox");
 const progressBar      = document.getElementById("progressBar");
 const progressText     = document.getElementById("progressText");
 const btnOpenStorypark = document.getElementById("btnOpenStorypark");
-const scanProgress     = document.getElementById("scanProgress");
 
 const reviewBadge      = document.getElementById("reviewBadge");
 const reviewItems      = document.getElementById("reviewItems");
@@ -272,7 +271,6 @@ function setRunning(running) {
 
   if (!running) {
     progressBar.style.display    = "none";
-    scanProgress.style.display   = "none";
     progressText.style.display   = "none";
   }
 }
@@ -293,9 +291,6 @@ function triggerExtraction(type) {
   progressBar.value           = 0;
   progressBar.max             = 100;
   progressBar.style.display   = "block";
-  scanProgress.value          = 0;
-  scanProgress.max            = 100;
-  scanProgress.style.display  = "block";
   progressText.style.display  = "block";
   progressText.textContent    = "Starting…";
   setStatus(
@@ -353,12 +348,9 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   if (msg.type === "PROGRESS") {
     progressBar.style.display    = "block";
-    scanProgress.style.display   = "block";
     progressText.style.display   = "block";
     progressBar.value  = msg.current;
     progressBar.max    = msg.total;
-    scanProgress.value = msg.current;
-    scanProgress.max   = msg.total;
     progressText.textContent =
       `Processing story ${msg.current} of ${msg.total}` +
       (msg.date ? ` (${msg.date})` : "");
@@ -586,7 +578,6 @@ chrome.runtime.sendMessage({ type: "GET_SCAN_STATUS" }, (res) => {
   if (res.isScanning) {
     setRunning(true);
     progressBar.style.display   = "block";
-    scanProgress.style.display  = "block";
     progressText.style.display  = "block";
     if (res.cancelRequested) {
       progressText.textContent  = "Cancelling…";
