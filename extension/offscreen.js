@@ -304,7 +304,7 @@ async function processImage(msg) {
   // ---- 3. Load image for face detection ----
   const { img, blobUrl } = await arrayBufferToImage(buffer);
 
-  let detectionResult;
+  let detectionResult = null;
   let useFallback = false;
   try {
     await ensureModels();

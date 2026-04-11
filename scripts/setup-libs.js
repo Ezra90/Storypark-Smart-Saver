@@ -9,8 +9,8 @@ const LIB_DIR = path.join(__dirname, '..', 'extension', 'lib');
 const MODELS_DIR = path.join(__dirname, '..', 'extension', 'models');
 
 const downloads = [
-  // NOTE: lib/exif.js is already committed to the repository and is the
-  // source of truth for EXIF writing. Do NOT add piexif.js here — it
+  // NOTE: extension/lib/exif.js is already committed to the repository and is
+  // the source of truth for EXIF writing. Do NOT add piexif.js here — it
   // must not be downloaded or overwritten by this script.
   {
     url: 'https://raw.githubusercontent.com/vladmandic/human/main/dist/human.js',
