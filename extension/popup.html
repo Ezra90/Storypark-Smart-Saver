@@ -141,6 +141,19 @@
       padding: 8px 10px;
       font-size: 12px;
     }
+    #btnTestConnection {
+      background: var(--surface);
+      color: var(--muted);
+      padding: 8px 10px;
+      font-size: 12px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      width: 100%;
+    }
+    #btnTestConnection:hover { opacity: 0.85; }
 
     .helper-text {
       font-size: 10px;
@@ -351,6 +364,26 @@
     }
     .footer a:hover { text-decoration: underline; }
 
+    /* ---- Toast notification ---- */
+    #toast {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 7px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      z-index: 999;
+      white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
+    #toast.success { background: var(--success); color: #000; }
+    #toast.error   { background: var(--accent);  color: #fff; }
+
     /* ---- Onboarding overlay ---- */
     .onboarding-overlay {
       position: fixed;
@@ -423,6 +456,7 @@
     <div class="action-btns">
       <button class="btn-action" id="btnExtractLatest" disabled>⬇ Download Latest</button>
       <button class="btn-action" id="btnDeepRescan"    disabled>🔁 Full History Scan</button>
+      <button id="btnTestConnection">🔌 Test Connection</button>
     </div>
     <div class="helper-text">
       <strong>Download Latest:</strong> Use daily/weekly to get new photos.<br>
@@ -470,6 +504,9 @@
   <div class="footer">
     <a href="#" id="openOptions">⚙ Settings</a>
   </div>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
 
   <!-- First-run onboarding overlay -->
   <div class="onboarding-overlay" id="onboardingOverlay" style="display:none;">

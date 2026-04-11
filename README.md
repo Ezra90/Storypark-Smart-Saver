@@ -6,6 +6,27 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 
 ---
 
+## First-time setup after `git clone`
+
+> ⚠️ **New contributors — read this first!**
+
+After cloning the repo you must download the optional AI models and the `@vladmandic/human` library before loading the extension:
+
+```bash
+npm run setup
+```
+
+This script:
+- Downloads `human.js` into `extension/lib/`
+- Downloads the `blazeface` and `faceres` model weights into `extension/models/`
+
+**Important notes:**
+- The `extension/models/` folder is intentionally not committed to git (the weights are large binary files).
+- If you see a **"human.js not found"** warning in the browser console, you must run `npm run setup`.
+- Without `human.js` and the model files, the extension still works — all photos are downloaded automatically without face filtering.
+
+---
+
 ## Key Features
 
 | Feature | Details |
@@ -125,8 +146,7 @@ extension/
 ├── lib/
 │   ├── db.js              # IndexedDB helper — processed-story ledger + face descriptors
 │   ├── exif.js            # Pure-JS EXIF writer (DateTimeOriginal + ImageDescription)
-│   ├── face.js            # Face detection helpers (options page live preview)
-│   └── utils.js           # Shared helpers
+│   └── face.js            # Face detection helpers (options page live preview)
 ├── models/                # @vladmandic/human model weights — blazeface + faceres (.bin + .json, user-supplied — see models/README.md)
 └── icons/                 # Extension icons (16 px, 48 px, 128 px)
 ```

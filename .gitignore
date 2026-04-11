@@ -17,3 +17,9 @@ dist/
 
 # OS
 Thumbs.db
+
+# Face recognition model weights (large binary files – downloaded via `npm run setup`)
+# The models/ folder structure is tracked via extension/models/.gitkeep
+extension/models/*.bin
+extension/models/*.json
+extension/lib/human.js

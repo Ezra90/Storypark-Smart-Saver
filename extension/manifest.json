@@ -13,7 +13,6 @@
     "storage",
     "unlimitedStorage",
     "offscreen",
-    "alarms",
     "downloads"
   ],
   "host_permissions": [

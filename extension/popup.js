@@ -18,6 +18,7 @@ const childSelect      = document.getElementById("childSelect");
 const btnRefresh       = document.getElementById("btnRefresh");
 const btnExtractLatest = document.getElementById("btnExtractLatest");
 const btnDeepRescan    = document.getElementById("btnDeepRescan");
+const btnTestConnection= document.getElementById("btnTestConnection");
 const btnStopScan      = document.getElementById("btnStopScan");
 const statusDot        = document.getElementById("statusDot");
 const statusText       = document.getElementById("statusText");
@@ -43,6 +44,44 @@ const btnDismissOnboarding  = document.getElementById("btnDismissOnboarding");
 /* ================================================================== */
 /*  Open Storypark – handled natively via <a href> in the HTML       */
 /* ================================================================== */
+
+/* ================================================================== */
+/*  Toast helper                                                       */
+/* ================================================================== */
+
+const toastEl = document.getElementById("toast");
+let toastTimer = null;
+
+function showToast(message, type /* "success" | "error" */, durationMs = 3000) {
+  clearTimeout(toastTimer);
+  toastEl.textContent = message;
+  toastEl.className   = `show ${type}`;
+  toastTimer = setTimeout(() => {
+    toastEl.className = type; // remove "show" to fade out
+  }, durationMs);
+}
+
+/* ================================================================== */
+/*  Test Connection button                                             */
+/* ================================================================== */
+
+btnTestConnection.addEventListener("click", () => {
+  btnTestConnection.disabled = true;
+  btnTestConnection.textContent = "⏳ Testing…";
+  chrome.runtime.sendMessage({ type: "TEST_CONNECTION" }, (res) => {
+    btnTestConnection.disabled = false;
+    btnTestConnection.textContent = "🔌 Test Connection";
+    if (chrome.runtime.lastError) {
+      showToast("⚠ Extension error: " + chrome.runtime.lastError.message, "error");
+      return;
+    }
+    if (res?.ok) {
+      showToast("✅ Connected", "success");
+    } else {
+      showToast("❌ Please log in to Storypark", "error");
+    }
+  });
+});
 
 /* ================================================================== */
 /*  First-run onboarding                                               */
