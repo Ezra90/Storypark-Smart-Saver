@@ -99,7 +99,7 @@ function downloadFile(url, dest) {
   // NOTE: extension/lib/exif.js is already committed to the repository and is
   // the source of truth for EXIF writing. Do NOT add piexif.js here — it
   // must not be downloaded or overwritten by this script.
-  const BASE = `https://raw.githubusercontent.com/vladmandic/human/v${latestVersion}`;
+  const BASE = `https://cdn.jsdelivr.net/npm/@vladmandic/human@${latestVersion}`;
 
   const downloads = [
     { url: `${BASE}/dist/human.js`, dest: path.join(LIB_DIR, 'human.js') },
