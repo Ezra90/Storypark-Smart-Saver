@@ -10,10 +10,10 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 
 > ⚠️ **New contributors — read this first!**
 
-After cloning the repo you must download the optional AI models and the `@vladmandic/human` library before loading the extension:
+After cloning the repo you must install dependencies and download the optional AI models and the `@vladmandic/human` library before loading the extension:
 
 ```bash
-npm run setup
+npm install && npm run setup
 ```
 
 This script:
@@ -107,7 +107,7 @@ Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct co
 ### Install (Developer Mode)
 
 1. Download or clone this repository.
-2. Run `npm run setup` to download the required AI models and libraries into `extension/lib/` and `extension/models/`.
+2. Run `npm install && npm run setup` to download the required AI models and libraries into `extension/lib/` and `extension/models/`.
 3. Open `chrome://extensions` in Chrome.
 4. Enable **Developer mode** (top-right toggle).
 5. Click **Load unpacked** and select the `extension/` folder.

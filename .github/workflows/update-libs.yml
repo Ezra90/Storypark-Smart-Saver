@@ -1,11 +1,8 @@
 name: Update External Libraries and ML Models
 
 on:
-  push:
-    branches:
-      - main
   schedule:
-    - cron: '0 0 * * 0'  # Every Sunday at midnight UTC
+    - cron: '0 0 * * 0'
   workflow_dispatch:
 
 jobs:
@@ -23,17 +20,43 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Compute pre-update checksums
+        id: pre
+        run: |
+          if [ -f extension/lib/human.js ]; then
+            echo "checksum=$(find extension/lib/human.js extension/models/ -type f 2>/dev/null | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "checksum=none" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: npm install
 
       - name: Run setup script
         run: npm run setup
 
+      - name: Compute post-update checksums
+        id: post
+        run: |
+          echo "checksum=$(find extension/lib/human.js extension/models/ -type f 2>/dev/null | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if [ "${{ steps.pre.outputs.checksum }}" = "${{ steps.post.outputs.checksum }}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No updates found — checksums match."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Updates detected — checksums differ."
+          fi
+
       - name: Commit updated libraries and models
+        if: steps.diff.outputs.changed == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: auto-update external ML models and libraries'
-          file_pattern: 'extension/lib/** extension/models/**'
+          file_pattern: 'extension/lib/human.js extension/models/**'
           commit_user_name: 'github-actions[bot]'
           commit_user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_author: 'github-actions[bot] <github-actions[bot]@users.noreply.github.com>'

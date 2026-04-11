@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "description": "A private, automated tool to save your child's photos and stories from Storypark.",
   "scripts": {
-    "build": "node build.js",
     "setup": "node scripts/setup-libs.js"
   },
-  "dependencies": {
+  "devDependencies": {
     "@vladmandic/human": "^3.3.6"
   }
 }
