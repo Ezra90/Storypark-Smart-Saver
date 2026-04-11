@@ -59,15 +59,35 @@ let modelsLoaded = false;
 
 async function ensureModels() {
   if (modelsLoaded) return;
+
+  // Graceful fallback: if human.js was not bundled (optional dependency),
+  // log a warning and continue in "approve every image" mode — exactly as
+  // described in the README: "Without these files, all photos pass through
+  // without face filtering (every image is downloaded automatically)."
   if (typeof Human === "undefined") {
-    throw new Error(
-      "human.js not found. Run `npm run build` to copy it into extension/lib/."
+    console.warn(
+      "[offscreen] human.js not found — face recognition disabled. " +
+      "Run `npm run setup` to enable it. All photos will be downloaded automatically."
     );
+    modelsLoaded = false; // remains false so callers can detect the fallback
+    return;               // do NOT throw — continue without detection
   }
-  human        = new Human.Human(HUMAN_CONFIG);
-  await human.load();
-  modelsLoaded = true;
-  console.log("[offscreen] Human models loaded.");
+
+  try {
+    human        = new Human.Human(HUMAN_CONFIG);
+    await human.load();
+    modelsLoaded = true;
+    console.log("[offscreen] Human models loaded.");
+  } catch (err) {
+    // Model loading failed (e.g. missing .bin/.json files in extension/models/).
+    // Fall back to "approve every image" mode rather than crashing the pipeline.
+    console.warn(
+      "[offscreen] Failed to load face recognition models — falling back to " +
+      "'approve all' mode. All photos will be downloaded automatically.", err
+    );
+    human        = null;
+    modelsLoaded = false; // remains false; callers use this to skip detection
+  }
 }
 
 /* ================================================================== */
@@ -284,13 +304,31 @@ async function processImage(msg) {
   // ---- 3. Load image for face detection ----
   const { img, blobUrl } = await arrayBufferToImage(buffer);
 
-  let detectionResult;
+  let detectionResult = null;
+  let useFallback = false;
   try {
     await ensureModels();
-    detectionResult = await human.detect(img);
+
+    // If models are unavailable (human.js missing or failed to load), fall back
+    // to "approve every image" mode — same behaviour as when no encodings are
+    // configured.  This matches the README promise: "Without these files, all
+    // photos pass through without face filtering."
+    if (!modelsLoaded || !human) {
+      useFallback = true;
+    } else {
+      detectionResult = await human.detect(img);
+    }
   } finally {
     // Revoke the object URL; we still hold `img` and `buffer` refs for now
     URL.revokeObjectURL(blobUrl);
+  }
+
+  if (useFallback) {
+    const srcBlob     = new Blob([buffer], { type: "image/jpeg" });
+    const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
+    await downloadBlob(stampedBlob, savePath);
+    return { ok: true, result: "approve" };
   }
 
   const faces = detectionResult?.face ?? [];
@@ -448,6 +486,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 async function buildDescriptorFromDataUrl(imageDataUrl, faceIndex = 0) {
   await ensureModels();
+  if (!modelsLoaded || !human) {
+    throw new Error(
+      "human.js or face models are not available. Run `npm run setup` first."
+    );
+  }
   const img    = await dataUrlToImage(imageDataUrl);
   const result = await human.detect(img);
   const embed  = result.face?.[faceIndex]?.embedding;

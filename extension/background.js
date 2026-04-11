@@ -34,6 +34,10 @@ import {
 /*  Scan state                                                         */
 /* ================================================================== */
 
+// Declare ALL volatile scan-state variables here, BEFORE any chrome.storage
+// calls, to avoid a Temporal Dead Zone (TDZ) ReferenceError when the service
+// worker restarts and the restore .then() runs before the declarations below.
+
 let isScanning      = false;
 let cancelRequested = false;
 
@@ -43,15 +47,31 @@ let cancelRequested = false;
  */
 let lastReviewAction = null;
 
+/** Global request counter for coffee-break logic. */
+let _requestCount = 0;
+
+/** Number of requests before the next Coffee Break. Re-randomised after each break. */
+let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
+
 // Restore volatile scan state from session storage in case the service worker
 // was suspended and re-activated (e.g. during a Coffee Break idle period).
+// This must run after all variable declarations above to avoid TDZ errors.
 chrome.storage.session
   .get(["isScanning", "cancelRequested", "_requestCount", "_coffeeBreakAt"])
   .then((data) => {
     isScanning      = data.isScanning      ?? false;
     cancelRequested = data.cancelRequested ?? false;
     _requestCount   = data._requestCount   ?? 0;
-    _coffeeBreakAt  = data._coffeeBreakAt  ?? _coffeeBreakAt;
+
+    // Safety check: if the restored _coffeeBreakAt is stale (already exceeded
+    // by the restored counter, or not set), reset it to a fresh random value
+    // so the next Coffee Break fires at the correct time.
+    const restored = data._coffeeBreakAt ?? null;
+    if (restored !== null && restored > _requestCount) {
+      _coffeeBreakAt = restored;
+    } else {
+      _coffeeBreakAt = Math.floor(Math.random() * 11) + 15;
+    }
   })
   .catch(() => {});
 
@@ -100,12 +120,6 @@ const DELAY_PROFILES = {
   READ_STORY:     [2500, 6000],
   DOWNLOAD_IMAGE: [1000, 2000],
 };
-
-/** Global request counter for coffee-break logic. */
-let _requestCount = 0;
-
-/** Number of requests before the next Coffee Break. Re-randomised after each break. */
-let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
 
 /**
  * Smart human-paced delay that replaces the old sleep().
@@ -808,6 +822,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case "GET_SCAN_STATUS": {
       sendResponse({ ok: true, isScanning, cancelRequested });
       return false;
+    }
+
+    case "TEST_CONNECTION": {
+      apiFetch(`${STORYPARK_BASE}/api/v3/profile`)
+        .then(()    => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
     }
 
     case "GET_REVIEW_QUEUE": {

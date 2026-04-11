@@ -9,13 +9,12 @@ const LIB_DIR = path.join(__dirname, '..', 'extension', 'lib');
 const MODELS_DIR = path.join(__dirname, '..', 'extension', 'models');
 
 const downloads = [
+  // NOTE: extension/lib/exif.js is already committed to the repository and is
+  // the source of truth for EXIF writing. Do NOT add piexif.js here — it
+  // must not be downloaded or overwritten by this script.
   {
     url: 'https://raw.githubusercontent.com/vladmandic/human/main/dist/human.js',
     dest: path.join(LIB_DIR, 'human.js'),
-  },
-  {
-    url: 'https://raw.githubusercontent.com/hMatoba/piexifjs/master/piexif.js',
-    dest: path.join(LIB_DIR, 'exif.js'),
   },
   {
     url: 'https://raw.githubusercontent.com/vladmandic/human/main/models/blazeface.json',
