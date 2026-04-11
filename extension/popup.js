@@ -539,3 +539,23 @@ openOptions.addEventListener("click", (e) => {
 loadChildren();
 loadReviewQueue();
 loadActivityLog();
+
+// Restore scan UI state in case the popup was closed and re-opened while a
+// scan is running in the background.
+chrome.runtime.sendMessage({ type: "GET_SCAN_STATUS" }, (res) => {
+  if (chrome.runtime.lastError || !res?.ok) return;
+  if (res.isScanning) {
+    setRunning(true);
+    progressBar.style.display   = "block";
+    scanProgress.style.display  = "block";
+    progressText.style.display  = "block";
+    if (res.cancelRequested) {
+      progressText.textContent  = "Cancelling…";
+      btnStopScan.style.display = "none";
+      setStatus("yellow", "Cancelling scan…");
+    } else {
+      progressText.textContent = "Scan in progress…";
+      setStatus("yellow", "Scan in progress…");
+    }
+  }
+});

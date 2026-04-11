@@ -43,6 +43,18 @@ let cancelRequested = false;
  */
 let lastReviewAction = null;
 
+// Restore volatile scan state from session storage in case the service worker
+// was suspended and re-activated (e.g. during a Coffee Break idle period).
+chrome.storage.session
+  .get(["isScanning", "cancelRequested", "_requestCount", "_coffeeBreakAt"])
+  .then((data) => {
+    isScanning      = data.isScanning      ?? false;
+    cancelRequested = data.cancelRequested ?? false;
+    _requestCount   = data._requestCount   ?? 0;
+    _coffeeBreakAt  = data._coffeeBreakAt  ?? _coffeeBreakAt;
+  })
+  .catch(() => {});
+
 /* ================================================================== */
 /*  Activity Log                                                       */
 /* ================================================================== */
@@ -104,6 +116,8 @@ let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
 async function smartDelay(actionType) {
   if (cancelRequested) return;
   _requestCount++;
+  // Persist the updated counter so it survives service worker suspension.
+  chrome.storage.session.set({ _requestCount }).catch(() => {});
 
   // Coffee Break when the counter reaches the threshold
   if (_requestCount >= _coffeeBreakAt) {
@@ -115,6 +129,7 @@ async function smartDelay(actionType) {
     // Reset for next break
     _requestCount = 0;
     _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
+    chrome.storage.session.set({ _requestCount: 0, _coffeeBreakAt }).catch(() => {});
     await new Promise((r) => {
       const handle = setTimeout(() => { clearInterval(poll); r(); }, breakMs);
       const poll   = setInterval(() => {
@@ -482,6 +497,11 @@ async function runExtraction(childId, childName, mode) {
   const { autoThreshold = 85, minThreshold = 50, activeCentreName = "" } =
     await chrome.storage.local.get(["autoThreshold", "minThreshold", "activeCentreName"]);
 
+  // Ensure the offscreen document's in-memory face descriptors are fully synced
+  // with IndexedDB before the first image fetch begins, preventing any race
+  // condition where stale descriptors are used for the initial images.
+  await sendToOffscreen({ type: "REFRESH_PROFILES" });
+
   // Load known face descriptors for all children
   const allDescriptors  = await getAllDescriptors();
   const childEncodings  = allDescriptors.map((d) => ({
@@ -659,6 +679,13 @@ async function runExtraction(childId, childName, mode) {
     routineCache.clear();
     isScanning      = false;
     cancelRequested = false;
+    // Persist cleared state so the popup sees accurate status if it re-opens.
+    chrome.storage.session
+      .set({ isScanning: false, cancelRequested: false, _requestCount: 0 })
+      .catch(() => {});
+    // Release the heavy Human AI models immediately to prevent memory leaks.
+    await chrome.offscreen.closeDocument().catch(() => {});
+    offscreenReady = false;
     chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
   }
 
@@ -756,9 +783,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: false, error: "A scan is already in progress." });
         return false;
       }
-      // Set scanning flag synchronously to prevent race conditions
+      // Set scanning flag synchronously to prevent race conditions.
       isScanning      = true;
       cancelRequested = false;
+      // Persist to session storage so the popup can restore state if re-opened
+      // while the service worker is still running.
+      chrome.storage.session
+        .set({ isScanning: true, cancelRequested: false, _requestCount: 0 })
+        .catch(() => {});
       runExtraction(childId, childName || childId, msg.type)
         .then((stats) => sendResponse({ ok: true, stats }))
         .catch((err)  => sendResponse({ ok: false, error: err.message }));
@@ -767,7 +799,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     case "CANCEL_SCAN": {
       cancelRequested = true;
+      // Persist so the popup sees the cancellation state even after SW suspend.
+      chrome.storage.session.set({ cancelRequested: true }).catch(() => {});
       sendResponse({ ok: true });
+      return false;
+    }
+
+    case "GET_SCAN_STATUS": {
+      sendResponse({ ok: true, isScanning, cancelRequested });
       return false;
     }
 

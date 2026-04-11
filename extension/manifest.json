@@ -12,7 +12,6 @@
   "permissions": [
     "storage",
     "unlimitedStorage",
-    "activeTab",
     "offscreen",
     "alarms",
     "downloads"
