@@ -58,6 +58,7 @@ function openDB() {
 
 /**
  * Return all processed URLs as a Set.
+ * @deprecated Not currently consumed by any module. Retained for potential future use.
  * @returns {Promise<Set<string>>}
  */
 export async function getAllProcessedUrls() {
@@ -72,6 +73,7 @@ export async function getAllProcessedUrls() {
 
 /**
  * Mark one or more URLs as processed (idempotent).
+ * @deprecated Not currently consumed by any module. Retained for potential future use.
  * @param {string[]} urls
  */
 export async function markProcessedInDB(urls) {
@@ -239,6 +241,11 @@ export async function saveDescriptor(childId, childName, descriptor) {
   const existing    = await getDescriptors(childId);
   const descriptors = existing?.descriptors ?? [];
   descriptors.push(Array.from(descriptor));
+
+  // Cap at MAX_DESCRIPTORS_PER_CHILD, dropping oldest first (same as appendDescriptor)
+  if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
+    descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
+  }
 
   const db = await openDB();
   return new Promise((resolve, reject) => {

@@ -236,7 +236,7 @@ btnSaveLocations.addEventListener("click", async () => {
 let faceApiAvailable = false;
 
 (async () => {
-  if (window._humanMissing || typeof Human === "undefined") {
+  if (typeof Human === "undefined") {
     humanWarning.style.display = "block";
     return;
   }
@@ -608,6 +608,13 @@ btnSave.addEventListener("click", async () => {
 
   const autoThreshold = parseInt(autoThresholdNumber.value, 10) || 85;
   const minThreshold  = parseInt(minThresholdNumber.value, 10) || 50;
+
+  if (minThreshold >= autoThreshold) {
+    showToast("⚠ Review threshold must be lower than Auto-Approve threshold.");
+    btnSave.disabled    = false;
+    btnSave.textContent = "💾 Save Settings";
+    return;
+  }
 
   await chrome.storage.local.set({
     autoThreshold,

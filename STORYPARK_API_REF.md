@@ -26,9 +26,11 @@ fetch(url, { credentials: "include" })
 | Header | Value | Notes |
 |---|---|---|
 | `Cookie` | _(browser session)_ | Injected automatically by `credentials: "include"` |
-| `X-CSRF-Token` | _(session token)_ | Required for state-changing requests |
-| `X-Spa-Session-Id` | _(session ID)_ | Identifies the SPA session |
 | `Accept` | `application/json` | Ensures JSON responses |
+
+> **Note:** `X-CSRF-Token` and `X-Spa-Session-Id` are required by Storypark for
+> state-changing (POST/PUT/DELETE) requests. This extension only performs GET
+> requests via `apiFetch()`, so these headers are **not sent**.
 
 ### Error Handling
 
