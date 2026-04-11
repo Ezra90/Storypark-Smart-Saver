@@ -8,21 +8,16 @@ No server, no Python, no command-line. Install the extension, log in to Storypar
 
 ## First-time setup after `git clone`
 
-> ⚠️ **New contributors — read this first!**
+The AI models (`human.js`, `blazeface`, `faceres`) are **automatically kept up-to-date** by a GitHub Actions workflow that runs after every merged PR and on a weekly schedule.  After cloning, simply load the extension — no `npm install` or `npm run setup` needed.
 
-After cloning the repo you must install dependencies and download the optional AI models and the `@vladmandic/human` library before loading the extension:
+> **For local development only:** If you need to re-download the model files manually (e.g. after a fresh clone where the CI has not yet run), you can run:
+> ```bash
+> npm install && npm run setup
+> ```
+> This queries the npm registry for the latest `@vladmandic/human` version, downloads all required files into `extension/lib/` and `extension/models/`, and records the version in `.human-version`.
 
-```bash
-npm install && npm run setup
-```
-
-This script:
-- Downloads `human.js` into `extension/lib/`
-- Downloads the `blazeface` and `faceres` model weights into `extension/models/`
-
-**Important notes:**
-- The `extension/models/` folder is intentionally not committed to git (the weights are large binary files).
-- If you see a **"human.js not found"** warning in the browser console, you must run `npm run setup`.
+**Notes:**
+- `extension/models/` binary files are committed to git by the CI workflow — they will be present after cloning.
 - Without `human.js` and the model files, the extension still works — all photos are downloaded automatically without face filtering.
 
 ---
@@ -107,21 +102,20 @@ Levels: `INFO`, `SUCCESS`, `WARNING`, `ERROR` — each rendered in a distinct co
 ### Install (Developer Mode)
 
 1. Download or clone this repository.
-2. Run `npm install && npm run setup` to download the required AI models and libraries into `extension/lib/` and `extension/models/`.
-3. Open `chrome://extensions` in Chrome.
-4. Enable **Developer mode** (top-right toggle).
-5. Click **Load unpacked** and select the `extension/` folder.
-6. The 📸 Storypark Smart Saver icon will appear in your toolbar.
+2. Open `chrome://extensions` in Chrome.
+3. Enable **Developer mode** (top-right toggle).
+4. Click **Load unpacked** and select the `extension/` folder.
+5. The 📸 Storypark Smart Saver icon will appear in your toolbar.
 
 ### Face Recognition Setup (Optional)
 
-Face recognition requires additional files that are not bundled in this repository:
+Face recognition is powered by `@vladmandic/human` (`human.js`) and the `blazeface`/`faceres` model files, which are **automatically downloaded and committed to the repository** by the CI workflow — no manual file placement needed.
 
-1. Place `human.js` (from `@vladmandic/human`) at `extension/lib/human.js`.
-2. Place the `blazeface` and `faceres` model files (`.bin` and `.json`) in `extension/models/` — see `extension/models/README.md` for the full list.
-3. Open **⚙ Settings** → **Face Training Data** and upload 5–10 clear reference photos for each child.
+To enable face recognition:
 
-Without these files, all photos pass through without face filtering (every image is downloaded automatically).
+1. Open **⚙ Settings** → **Face Training Data** and upload 5–10 clear reference photos for each child.
+
+Without face training data, all photos pass through without face filtering (every image is downloaded automatically).
 
 ### Usage
 
@@ -147,7 +141,7 @@ extension/
 │   ├── db.js              # IndexedDB helper — processed-story ledger + face descriptors
 │   ├── exif.js            # Pure-JS EXIF writer (DateTimeOriginal + ImageDescription)
 │   └── face.js            # Face detection helpers (options page live preview)
-├── models/                # @vladmandic/human model weights — blazeface + faceres (.bin + .json, user-supplied — see models/README.md)
+├── models/                # @vladmandic/human model weights — blazeface + faceres (.bin + .json, auto-managed by CI — see models/README.md)
 └── icons/                 # Extension icons (16 px, 48 px, 128 px)
 ```
 
@@ -183,7 +177,7 @@ extension/
 | No children in dropdown | Click **↻** while logged in to Storypark; check the Activity Log for errors |
 | No photos downloaded | Check the Activity Log for errors; confirm your child has photo posts on Storypark |
 | All photos going to Review Queue | Lower thresholds in Settings or add more face training photos |
-| Face recognition not working | Ensure `lib/human.js` is present and the `blazeface` + `faceres` model files (`.bin` + `.json`) are in `extension/models/` |
+| Face recognition not working | `human.js` or model files may be missing — run `git pull` to get the latest CI-committed files, or run `npm run setup` to re-download manually |
 | Want to reprocess everything | Use **🔁 Deep Rescan** — or clear `processedStories` in Chrome DevTools → IndexedDB → `storyparkSyncDB` |
 
 ---
