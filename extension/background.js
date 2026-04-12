@@ -1038,7 +1038,9 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
 
   // Persist the confirmed face descriptor for continuous learning
   if (descriptor && item.childId) {
-    await appendDescriptor(item.childId, item.childName, descriptor);
+    const reviewDate = item.storyData?.createdAt ? new Date(item.storyData.createdAt) : null;
+    const reviewYear = reviewDate ? reviewDate.getFullYear().toString() : "unknown";
+    await appendDescriptor(item.childId, item.childName, descriptor, reviewYear);
     // Refresh the offscreen document's in-memory profile cache so the next
     // batch of processed photos uses the expanded descriptor set.
     sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
@@ -1397,7 +1399,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           }
 
           if (descriptor && item.childId) {
-            await appendDescriptor(item.childId, item.childName, descriptor);
+            const trainDate = item.storyData?.createdAt ? new Date(item.storyData.createdAt) : null;
+            const trainYear = trainDate ? trainDate.getFullYear().toString() : "unknown";
+            await appendDescriptor(item.childId, item.childName, descriptor, trainYear);
             sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
           }
 

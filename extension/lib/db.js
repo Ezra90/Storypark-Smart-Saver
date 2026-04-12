@@ -15,8 +15,11 @@
 const DB_NAME    = "storyparkSyncDB";
 const DB_VERSION = 2;
 
-/** Maximum number of face descriptors kept per child (oldest are dropped first). */
-export const MAX_DESCRIPTORS_PER_CHILD = 30;
+/** Maximum number of face descriptors kept per child (global fallback). */
+export const MAX_DESCRIPTORS_PER_CHILD = 1000;
+
+/** Maximum number of face descriptors kept per year per child. */
+const MAX_DESCRIPTORS_PER_YEAR = 100;
 
 const STORE_PROCESSED_URLS    = "processedUrls";
 const STORE_PROCESSED_STORIES = "processedStories";
@@ -201,30 +204,50 @@ export async function getAllDescriptors() {
 }
 
 /**
- * Append a single face descriptor to a child's stored set, capping at
- * MAX_DESCRIPTORS_PER_CHILD by dropping the oldest entries first.
- * Use this for continuous learning (auto-approved and manually approved photos).
+ * Append a single face descriptor to a child's stored set, bucketed by year.
+ * Each year's bucket is capped at 100 descriptors (oldest are dropped first).
+ * The flat `descriptors` array (all years combined) is maintained for the
+ * existing matching logic that expects a single array.
  *
  * @param {string}                childId
  * @param {string}                childName
  * @param {number[]|Float32Array} descriptor  Plain array or typed array –
  *                                            both are normalised to number[].
+ * @param {string}                [year]      Four-digit year string (e.g. "2024")
+ *                                            or "unknown". Defaults to "unknown".
  */
-export async function appendDescriptor(childId, childName, descriptor) {
+export async function appendDescriptor(childId, childName, descriptor, year = "unknown") {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx    = db.transaction(STORE_KNOWN_DESCRIPTORS, "readwrite");
     const store = tx.objectStore(STORE_KNOWN_DESCRIPTORS);
     const req   = store.get(childId);
     req.onsuccess = () => {
-      const existing    = req.result ?? null;
-      const descriptors = existing?.descriptors ?? [];
-      descriptors.push(Array.from(descriptor));
-      if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
-        descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
+      const existing = req.result ?? null;
+
+      // Migrate legacy flat-array records into the year-bucket structure.
+      let descriptorsByYear = existing?.descriptorsByYear || {};
+      if (existing && existing.descriptors && !existing.descriptorsByYear) {
+        descriptorsByYear["unknown"] = existing.descriptors;
       }
-      const putReq      = store.put({ childId, childName, descriptors });
-      putReq.onerror    = () => reject(putReq.error);
+
+      // Ensure the bucket for this year exists.
+      if (!descriptorsByYear[year]) {
+        descriptorsByYear[year] = [];
+      }
+
+      // Append to this year's bucket and cap at MAX_DESCRIPTORS_PER_YEAR.
+      descriptorsByYear[year].push(Array.from(descriptor));
+      if (descriptorsByYear[year].length > MAX_DESCRIPTORS_PER_YEAR) {
+        descriptorsByYear[year].splice(0, descriptorsByYear[year].length - MAX_DESCRIPTORS_PER_YEAR);
+      }
+
+      // Flatten all year buckets so the existing matching logic (which reads
+      // the flat `descriptors` array) continues to work without modification.
+      const flatDescriptors = Object.values(descriptorsByYear).flat();
+
+      const putReq = store.put({ childId, childName, descriptorsByYear, descriptors: flatDescriptors });
+      putReq.onerror = () => reject(putReq.error);
     };
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror    = () => { db.close(); reject(tx.error); };

@@ -98,7 +98,7 @@ async function ensureModels() {
 /* ================================================================== */
 
 /** Maximum descriptors per child – must match db.js. */
-const MAX_DESCRIPTORS_PER_CHILD = 30;
+const MAX_DESCRIPTORS_PER_CHILD = 1000;
 
 /**
  * In-memory map of childId → {childId, childName, descriptors: number[][]}.
@@ -498,7 +498,9 @@ async function processImage(msg) {
     // for safety.
     if (bestDescriptor && bestChildId) {
       const learnName = bestChildName ?? childName;
-      await appendDescriptor(bestChildId, learnName, bestDescriptor)
+      const date = storyData.createdAt ? new Date(storyData.createdAt) : null;
+      const year = date ? date.getFullYear().toString() : "unknown";
+      await appendDescriptor(bestChildId, learnName, bestDescriptor, year)
         .catch((err) => console.warn("[offscreen] appendDescriptor failed:", err));
       const cached = _localProfiles.get(bestChildId);
       const descs  = cached ? [...cached.descriptors, bestDescriptor] : [bestDescriptor];
