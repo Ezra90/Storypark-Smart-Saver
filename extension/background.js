@@ -276,7 +276,7 @@ const JSON_CONTENT_TYPES = ["application/json", "text/javascript", "text/plain"]
  * @throws {RateLimitError} on HTTP 403, or on HTTP 429 after one retry
  */
 async function apiFetch(url, _isRetry = false) {
-  const res = await fetch(url, { credentials: "include" });
+  const res = await fetch(url, { credentials: "include", cache: "no-cache" });
 
   if (res.status === 401) {
     throw new AuthError(url);
@@ -898,7 +898,7 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
     }).catch(() => {});
 
     await smartDelay("READ_STORY");
-    await logger("INFO", `Processing story ${si + 1} of ${totalStories} for ${childName}…`, storyDateStr);
+    await logger("INFO", `Processing story ${si + 1} of ${totalStories} for ${childName}…`, dateStr);
 
     // Fetch full story detail
     let story;
