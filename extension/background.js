@@ -240,6 +240,12 @@ class RateLimitError extends Error {
   }
 }
 
+/** Maximum number of milliseconds to wait before a 429-retry (2 minutes). */
+const MAX_RETRY_WAIT_MS = 120_000;
+
+/** Content-Type substrings that indicate a JSON API response. */
+const JSON_CONTENT_TYPES = ["application/json", "text/javascript", "text/plain"];
+
 /**
  * Fetch a Storypark API URL using the browser's active session cookies.
  * Never call this inside Promise.all – always await sequentially.
@@ -270,7 +276,7 @@ async function apiFetch(url, _isRetry = false) {
     if (!_isRetry) {
       // Honour the server's Retry-After hint (seconds); fall back to 30 s.
       const retryAfterSec = parseInt(res.headers.get("Retry-After") || "30", 10);
-      const waitMs = Math.min(retryAfterSec * 1000, 120_000); // cap at 2 min
+      const waitMs = Math.min(retryAfterSec * 1000, MAX_RETRY_WAIT_MS);
       logger("WARNING",
         `⏳ Rate limited (429) — waiting ${(waitMs / 1000).toFixed(0)}s before retry…`
       );
@@ -293,7 +299,7 @@ async function apiFetch(url, _isRetry = false) {
 
   // Guard against Cloudflare HTML challenge pages that arrive with 200 OK.
   const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json") && !ct.includes("text/javascript") && !ct.includes("text/plain")) {
+  if (!JSON_CONTENT_TYPES.some((t) => ct.includes(t))) {
     const text = await res.text();
     if (text.trimStart().startsWith("<")) {
       throw new Error(

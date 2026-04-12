@@ -246,6 +246,12 @@ function cropFaceToDataUrl(img, box) {
 /* ================================================================== */
 
 /**
+ * Fallback timeout (ms) for blob URL revocation when the chrome.downloads
+ * onChanged event is not delivered (e.g. offscreen document is restarted).
+ */
+const REVOCATION_FALLBACK_MS = 300_000; // 5 minutes
+
+/**
  * Map of downloadId → object URL for deferred revocation.
  * Blob URLs are revoked only once the download reaches a terminal state
  * (complete or interrupted), rather than on a fixed timer, to avoid
@@ -267,7 +273,8 @@ chrome.downloads.onChanged.addListener((delta) => {
 /**
  * Create an object URL from a Blob, trigger a download via
  * chrome.downloads.download(), and revoke the URL once the download
- * reaches a terminal state (or after 5 minutes as a safety fallback).
+ * reaches a terminal state (or after REVOCATION_FALLBACK_MS as a safety
+ * fallback).
  *
  * @param {Blob}   blob
  * @param {string} savePath   e.g. "Storypark_Smart_Saver/Alice/photo.jpg"
@@ -282,14 +289,14 @@ function downloadBlob(blob, savePath) {
           URL.revokeObjectURL(url);
           reject(new Error(chrome.runtime.lastError.message));
         } else {
-          // Track for event-driven revocation; fall back to a 5-minute timer
+          // Track for event-driven revocation; fall back to a timer
           // in case the onChanged event is not delivered.
           _pendingRevocations.set(downloadId, url);
           setTimeout(() => {
             if (_pendingRevocations.delete(downloadId)) {
               URL.revokeObjectURL(url);
             }
-          }, 300_000);
+          }, REVOCATION_FALLBACK_MS);
           resolve(downloadId);
         }
       }
