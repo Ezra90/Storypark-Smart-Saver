@@ -59,11 +59,12 @@ let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
 // was suspended and re-activated (e.g. during a Coffee Break idle period).
 // This must run after all variable declarations above to avoid TDZ errors.
 chrome.storage.session
-  .get(["isScanning", "cancelRequested", "_requestCount", "_coffeeBreakAt"])
+  .get(["isScanning", "cancelRequested", "_requestCount", "_coffeeBreakAt", "lastReviewAction"])
   .then((data) => {
-    isScanning      = data.isScanning      ?? false;
-    cancelRequested = data.cancelRequested ?? false;
-    _requestCount   = data._requestCount   ?? 0;
+    isScanning        = data.isScanning      ?? false;
+    cancelRequested   = data.cancelRequested ?? false;
+    _requestCount     = data._requestCount   ?? 0;
+    lastReviewAction  = data.lastReviewAction ?? null;
 
     // Safety check: if the restored _coffeeBreakAt is stale (already exceeded
     // by the restored counter, or not set), reset it to a fresh random value
@@ -84,30 +85,61 @@ chrome.storage.session
 const LOG_MAX_ENTRIES = 200;
 
 /**
+ * In-memory buffer for log entries pending a storage flush.
+ * Entries accumulate here and are flushed to chrome.storage.local in a
+ * single batched write every LOG_FLUSH_INTERVAL_MS, reducing the number
+ * of sequential read–write round-trips during large scans from one per
+ * log line to roughly one per flush interval.
+ */
+const _logBuffer   = [];
+let   _logFlushTimer = null;
+const LOG_FLUSH_INTERVAL_MS = 500;
+
+function _scheduleLogFlush() {
+  if (_logFlushTimer !== null) return;
+  _logFlushTimer = setTimeout(async () => {
+    _logFlushTimer = null;
+    if (_logBuffer.length === 0) return;
+    const batch = _logBuffer.splice(0);
+    try {
+      const { activityLog = [] } = await chrome.storage.local.get("activityLog");
+      activityLog.push(...batch);
+      if (activityLog.length > LOG_MAX_ENTRIES) {
+        activityLog.splice(0, activityLog.length - LOG_MAX_ENTRIES);
+      }
+      await chrome.storage.local.set({ activityLog });
+    } catch {
+      // Non-fatal: entries were already broadcast to the popup in real-time.
+    }
+  }, LOG_FLUSH_INTERVAL_MS);
+}
+
+/**
  * Log a message at the given severity level.
- * Saves to chrome.storage.local (rolling 200-entry array) and
- * broadcasts to the popup in real-time.
+ * Buffers entries and flushes to chrome.storage.local every 500 ms to
+ * avoid a storage write-storm during large scans, while still broadcasting
+ * each entry to the popup in real-time.
  *
  * @param {"INFO"|"SUCCESS"|"WARNING"|"ERROR"} level
  * @param {string} message
  */
-async function logger(level, message) {
+function logger(level, message) {
   const entry = {
     timestamp: new Date().toISOString(),
     level,
     message,
   };
 
-  // Persist to storage (rolling window)
-  const { activityLog = [] } = await chrome.storage.local.get("activityLog");
-  activityLog.push(entry);
-  if (activityLog.length > LOG_MAX_ENTRIES) {
-    activityLog.splice(0, activityLog.length - LOG_MAX_ENTRIES);
-  }
-  await chrome.storage.local.set({ activityLog });
+  // Buffer for batched storage write
+  _logBuffer.push(entry);
+  _scheduleLogFlush();
 
   // Broadcast to popup (fire-and-forget)
   chrome.runtime.sendMessage({ type: "LOG_ENTRY", entry }).catch(() => {});
+
+  // Return a resolved promise so existing `await logger(…)` call-sites
+  // continue to work without changes.
+  return Promise.resolve();
 }
 
 /* ================================================================== */
@@ -208,28 +240,76 @@ class RateLimitError extends Error {
   }
 }
 
+/** Maximum number of milliseconds to wait before a 429-retry (2 minutes). */
+const MAX_RETRY_WAIT_MS = 120_000;
+
+/** Content-Type substrings that indicate a JSON API response. */
+const JSON_CONTENT_TYPES = ["application/json", "text/javascript", "text/plain"];
+
 /**
  * Fetch a Storypark API URL using the browser's active session cookies.
  * Never call this inside Promise.all – always await sequentially.
  *
- * @param {string} url
+ * Behaviour by HTTP status:
+ *   401 → AuthError (session expired)
+ *   429 → wait for Retry-After (default 30 s), then retry once; if the
+ *          retry also returns 429, throw RateLimitError so the caller can
+ *          abort gracefully.
+ *   403 → RateLimitError (Cloudflare block / access denied — no retry)
+ *   2xx with non-JSON body → throw a descriptive error instead of a
+ *          cryptic SyntaxError (catches Cloudflare HTML challenge pages)
+ *
+ * @param {string}  url
+ * @param {boolean} [_isRetry=false]  Internal flag — do not pass externally.
  * @returns {Promise<Object>} Parsed JSON response body
  * @throws {AuthError}      on HTTP 401
- * @throws {RateLimitError} on HTTP 403 or 429
+ * @throws {RateLimitError} on HTTP 403, or on HTTP 429 after one retry
  */
-async function apiFetch(url) {
+async function apiFetch(url, _isRetry = false) {
   const res = await fetch(url, { credentials: "include" });
+
   if (res.status === 401) {
     throw new AuthError(url);
   }
-  if (res.status === 429 || res.status === 403) {
-    throw new RateLimitError(res.status, url);
+
+  if (res.status === 429) {
+    if (!_isRetry) {
+      // Honour the server's Retry-After hint (seconds); fall back to 30 s.
+      const retryAfterSec = parseInt(res.headers.get("Retry-After") || "30", 10);
+      const waitMs = Math.min(retryAfterSec * 1000, MAX_RETRY_WAIT_MS);
+      logger("WARNING",
+        `⏳ Rate limited (429) — waiting ${(waitMs / 1000).toFixed(0)}s before retry…`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+      return apiFetch(url, true);
+    }
+    throw new RateLimitError(429, url);
   }
+
+  // 403 = Cloudflare block / access denied — abort immediately, no retry.
+  if (res.status === 403) {
+    throw new RateLimitError(403, url);
+  }
+
   if (!res.ok) {
     throw new Error(
       `Storypark API ${res.status} ${res.statusText} — ${url}`
     );
   }
+
+  // Guard against Cloudflare HTML challenge pages that arrive with 200 OK.
+  const ct = res.headers.get("content-type") || "";
+  if (!JSON_CONTENT_TYPES.some((t) => ct.includes(t))) {
+    const text = await res.text();
+    if (text.trimStart().startsWith("<")) {
+      throw new Error(
+        `Storypark API returned an HTML page instead of JSON (possible Cloudflare challenge) — ${url}`
+      );
+    }
+    // Try parsing anyway — some endpoints omit a strict Content-Type header.
+    return JSON.parse(text);
+  }
+
   return res.json();
 }
 
@@ -265,13 +345,26 @@ async function ensureOffscreen() {
 
 /**
  * Send a message to the offscreen document and await its response.
+ * If the document has crashed (connection error), the ready flag is reset
+ * and the document is re-created for a single automatic retry.
+ *
+ * @param {Object}  message
+ * @param {boolean} [_isRetry=false]  Internal flag — do not pass externally.
  */
-async function sendToOffscreen(message) {
+async function sendToOffscreen(message, _isRetry = false) {
   await ensureOffscreen();
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+        const errMsg = chrome.runtime.lastError.message || "";
+        // Detect a crashed / closed offscreen document and retry once.
+        if (!_isRetry && (errMsg.includes("Could not establish connection") ||
+            errMsg.includes("The message port closed"))) {
+          offscreenReady = false;
+          sendToOffscreen(message, true).then(resolve).catch(reject);
+        } else {
+          reject(new Error(errMsg));
+        }
       } else if (!response || response.ok === false) {
         reject(new Error(response?.error || "Unknown offscreen error"));
       } else {
@@ -418,6 +511,10 @@ async function fetchStorySummaries(childId, mode) {
   let pageNum     = 0;
 
   while (true) {
+    // Honour cancellation requests during long pagination runs (e.g. a
+    // DEEP_RESCAN on an account with hundreds of story pages).
+    if (cancelRequested) break;
+
     const url = new URL(
       `${STORYPARK_BASE}/api/v3/children/${childId}/stories`
     );
@@ -581,10 +678,22 @@ function buildDescription(body, childFirstName, routineText, roomName, centreNam
  * @returns {Promise<{approved, queued, rejected}>}
  */
 async function runExtraction(childId, childName, mode) {
-  await logger(
+  logger(
     "INFO",
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
   );
+
+  // Declare result accumulators before the try so they are in scope for the
+  // return statement after the finally block.
+  let approved = 0;
+  let queued   = 0;
+  let rejected = 0;
+  let scanCancelled = false;
+
+  // Wrap the ENTIRE async body (including setup awaits) so the finally block —
+  // which resets isScanning — always runs, even if getAllDescriptors(),
+  // sendToOffscreen(), or fetchStorySummaries() throw unexpectedly.
+  try {
 
   const { autoThreshold = 85, minThreshold = 50, activeCentreName = "" } =
     await chrome.storage.local.get(["autoThreshold", "minThreshold", "activeCentreName"]);
@@ -624,12 +733,14 @@ async function runExtraction(childId, childName, mode) {
   const summaries = await fetchStorySummaries(childId, mode);
   const totalStories = summaries.length;
 
-  let approved = 0;
-  let queued   = 0;
-  let rejected = 0;
-  let scanCancelled = false;
+  // Pre-populate the discovered-centre cache with names already in storage so
+  // we can skip discoverCentres() for repeat occurrences of the same name
+  // within this scan and avoid a storage read+write for every story.
+  const { centreLocations: _initLocations = {} } =
+    await chrome.storage.local.get("centreLocations");
+  const discoveredInScan = new Set(Object.keys(_initLocations));
+  if (childCentreFallback) discoveredInScan.add(childCentreFallback);
 
-  try {
   for (let si = 0; si < summaries.length; si++) {
     if (cancelRequested) {
       scanCancelled = true;
@@ -680,12 +791,16 @@ async function runExtraction(childId, childName, mode) {
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 
-    // Auto-discover this centre name (registers it for GPS lookup in Options)
-    if (centreName) {
+    // Auto-discover this centre name (registers it for GPS lookup in Options).
+    // Only call discoverCentres() for names not already known to storage;
+    // this avoids a redundant read+write for every story at the same centre.
+    if (centreName && !discoveredInScan.has(centreName)) {
       await discoverCentres([centreName]);
+      discoveredInScan.add(centreName);
     }
 
-    // Look up GPS coordinates for this centre (user-configured)
+    // Look up GPS coordinates for this centre (user-configured).
+    // Re-read centreLocations only if we just added a new centre to storage.
     let gpsCoords = null;
     if (centreName) {
       const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
@@ -918,12 +1033,17 @@ async function handleReviewApprove(id, selectedFaceIndex = 0) {
 
   await removeFromReviewQueue(id);
 
-  // Store undo state
+  // Store undo state — persist to session storage so undo survives a service
+  // worker restart between the action and the user pressing Undo.
+  // Strip large base64 image fields to stay within session storage limits.
   lastReviewAction = {
     action: "approve",
-    item,
+    item: { ...item, croppedFaceDataUrl: null, allFaces: undefined },
     descriptor: descriptor ? Array.from(descriptor) : null,
   };
+  chrome.storage.session
+    .set({ lastReviewAction })
+    .catch(() => {});
 
   chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
 }
@@ -1092,7 +1212,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await removeFromReviewQueue(msg.id);
         // Store undo state
         if (item) {
-          lastReviewAction = { action: "reject", item };
+          lastReviewAction = {
+            action: "reject",
+            item: { ...item, croppedFaceDataUrl: null, allFaces: undefined },
+          };
+          chrome.storage.session
+            .set({ lastReviewAction })
+            .catch(() => {});
         }
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
         sendResponse({ ok: true });
@@ -1128,6 +1254,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // Put the item back in the review queue
         await addToReviewQueue(item);
         lastReviewAction = null;
+        chrome.storage.session.set({ lastReviewAction: null }).catch(() => {});
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
         sendResponse({ ok: true });
       })().catch((err) => sendResponse({ ok: false, error: err.message }));
