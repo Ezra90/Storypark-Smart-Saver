@@ -310,6 +310,33 @@ async function loadAndCacheProfile() {
       }
     }
 
+    // Also fetch each child's individual profile to extract companies[].name.
+    // Many accounts don't expose centre names at the /users/me level, but the
+    // child profile endpoint reliably includes them under child.companies[].
+    const childCentreNames = [];
+    await Promise.all(
+      children.map(async (child) => {
+        try {
+          const childData = await apiFetch(`${STORYPARK_BASE}/api/v3/children/${child.id}`);
+          const childObj  = childData.child || childData;
+          const companies = childObj.companies || childObj.services || [];
+          for (const co of companies) {
+            const n = co.name || co.display_name || "";
+            if (n) childCentreNames.push(n);
+          }
+        } catch {
+          // Non-fatal — skip this child if the fetch fails
+        }
+      })
+    );
+    if (childCentreNames.length > 0) {
+      await discoverCentres([...new Set(childCentreNames)]);
+      const { activeCentreName } = await chrome.storage.local.get("activeCentreName");
+      if (!activeCentreName) {
+        await chrome.storage.local.set({ activeCentreName: childCentreNames[0] });
+      }
+    }
+
     return children;
   } catch (err) {
     await logger("ERROR", `Profile fetch failed: ${err.message}`);

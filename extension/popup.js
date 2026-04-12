@@ -261,10 +261,20 @@ function updateCentreInfoDisplay() {
 }
 
 function loadChildren() {
+  // Show any cached data immediately so the UI is never blank.
   chrome.runtime.sendMessage({ type: "GET_CHILDREN" }, (res) => {
     if (res?.ok) populateChildren(res.children);
   });
   updateCentreInfoDisplay();
+  // Also refresh from the live API in case the cache is stale (e.g. first
+  // install or the service worker hadn't finished its startup fetch yet).
+  chrome.runtime.sendMessage({ type: "REFRESH_PROFILE" }, (res) => {
+    if (chrome.runtime.lastError) return;
+    if (res?.ok) {
+      populateChildren(res.children);
+      updateCentreInfoDisplay();
+    }
+  });
 }
 
 btnRefresh.addEventListener("click", () => {
