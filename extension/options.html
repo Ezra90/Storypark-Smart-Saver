@@ -401,7 +401,10 @@
       Paste a Google Maps URL or enter coordinates directly (e.g. <code>-27.741, 153.186</code>).
     </p>
     <div id="centreList"></div>
-    <button class="btn-add" id="btnAddCentre">＋ Add Centre</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+      <button class="btn-add" id="btnAddCentre">＋ Add Centre</button>
+      <button class="btn-add" id="btnDiscoverCentres">🔍 Discover from Storypark</button>
+    </div>
     <button class="btn-save" id="btnSaveLocations" style="margin-top:10px;">💾 Save Locations</button>
   </div>
 
@@ -436,6 +439,11 @@
     <button class="btn-add" id="btnSaveTraining" style="margin-top:4px;" disabled>
       💾 Save training photos
     </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+      <button class="btn-add" id="btnExportProfile">📤 Export Profile</button>
+      <button class="btn-add" id="btnImportProfile">📥 Import Profile</button>
+    </div>
+    <input type="file" id="importProfileInput" accept=".json,application/json" style="display:none;">
     <button class="btn-reset-face" id="btnResetFaceData">🗑 Reset Face Data</button>
   </div>
 

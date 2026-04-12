@@ -457,7 +457,9 @@ function buildReviewItemEl(item) {
 
   const pctEl = document.createElement("div");
   pctEl.className   = "match-pct";
-  pctEl.textContent = `Match: ${item.matchPct ?? 0}%`;
+  pctEl.textContent = item.noTrainingData
+    ? "📚 No profile yet — approving builds it"
+    : `Match: ${item.matchPct ?? 0}%`;
 
   const dateEl = document.createElement("div");
   dateEl.className   = "post-date";
@@ -500,19 +502,28 @@ function buildReviewItemEl(item) {
   btnApprove.title       = "Yes – download this photo";
   btnApprove.textContent = "✅";
 
+  const btnTrainOnly = document.createElement("button");
+  btnTrainOnly.className   = "btn-train-only";
+  btnTrainOnly.title       = "Train face model only — learn this face without downloading";
+  btnTrainOnly.textContent = "📚";
+
   const btnReject = document.createElement("button");
   btnReject.className   = "btn-reject";
   btnReject.title       = "No – discard this photo";
   btnReject.textContent = "❌";
 
   btnApprove.addEventListener("click", () =>
-    handleApprove(item, el, btnApprove, btnReject)
+    handleApprove(item, el, btnApprove, btnReject, btnTrainOnly)
+  );
+  btnTrainOnly.addEventListener("click", () =>
+    handleTrainOnly(item, el, btnApprove, btnReject, btnTrainOnly)
   );
   btnReject.addEventListener("click", () =>
-    handleReject(item, el, btnApprove, btnReject)
+    handleReject(item, el, btnApprove, btnReject, btnTrainOnly)
   );
 
   actions.appendChild(btnApprove);
+  actions.appendChild(btnTrainOnly);
   actions.appendChild(btnReject);
 
   el.appendChild(thumb);
@@ -556,9 +567,10 @@ function refreshBadge() {
   }
 }
 
-function handleApprove(item, rowEl, btnApprove, btnReject) {
-  btnApprove.disabled = true;
-  btnReject.disabled  = true;
+function handleApprove(item, rowEl, btnApprove, btnReject, btnTrainOnly) {
+  btnApprove.disabled    = true;
+  btnReject.disabled     = true;
+  btnTrainOnly.disabled  = true;
   btnApprove.textContent = "⏳";
 
   const selectedFaceIndex = item.selectedFaceIndex ?? 0;
@@ -573,15 +585,44 @@ function handleApprove(item, rowEl, btnApprove, btnReject) {
     } else {
       btnApprove.disabled    = false;
       btnReject.disabled     = false;
+      btnTrainOnly.disabled  = false;
       btnApprove.textContent = "✅";
       appendLog("✗ Approve failed: " + (res?.error || "Unknown error"));
     }
   });
 }
 
-function handleReject(item, rowEl, btnApprove, btnReject) {
-  btnApprove.disabled = true;
-  btnReject.disabled  = true;
+function handleTrainOnly(item, rowEl, btnApprove, btnReject, btnTrainOnly) {
+  btnApprove.disabled    = true;
+  btnReject.disabled     = true;
+  btnTrainOnly.disabled  = true;
+  btnTrainOnly.textContent = "⏳";
+
+  const selectedFaceIndex = item.selectedFaceIndex ?? 0;
+
+  chrome.runtime.sendMessage(
+    { type: "REVIEW_TRAIN_ONLY", id: item.id, selectedFaceIndex },
+    (res) => {
+      if (res?.ok) {
+        rowEl.remove();
+        refreshBadge();
+        appendLog("📚 Face learned — photo not downloaded.");
+        btnUndoMatch.style.display = "block";
+      } else {
+        btnApprove.disabled      = false;
+        btnReject.disabled       = false;
+        btnTrainOnly.disabled    = false;
+        btnTrainOnly.textContent = "📚";
+        appendLog("✗ Train-only failed: " + (res?.error || "Unknown error"));
+      }
+    }
+  );
+}
+
+function handleReject(item, rowEl, btnApprove, btnReject, btnTrainOnly) {
+  btnApprove.disabled    = true;
+  btnReject.disabled     = true;
+  btnTrainOnly.disabled  = true;
 
   chrome.runtime.sendMessage({ type: "REVIEW_REJECT", id: item.id }, (res) => {
     if (res?.ok) {
@@ -590,8 +631,9 @@ function handleReject(item, rowEl, btnApprove, btnReject) {
       // Show undo button
       btnUndoMatch.style.display = "block";
     } else {
-      btnApprove.disabled = false;
-      btnReject.disabled  = false;
+      btnApprove.disabled   = false;
+      btnReject.disabled    = false;
+      btnTrainOnly.disabled = false;
     }
   });
 }
