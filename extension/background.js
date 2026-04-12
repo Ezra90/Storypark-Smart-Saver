@@ -324,8 +324,9 @@ async function loadAndCacheProfile() {
             const n = co.name || co.display_name || "";
             if (n) childCentreNames.push(n);
           }
-        } catch {
+        } catch (err) {
           // Non-fatal — skip this child if the fetch fails
+          console.warn(`Failed to fetch profile for child ${child.id}:`, err.message);
         }
       })
     );
