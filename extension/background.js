@@ -19,6 +19,8 @@
  *   CLEAR_ACTIVITY_LOG   – Clear the persisted activity log
  *   DISCOVER_CENTRES     – Fetch /api/v3/centres and merge into centreLocations
  *   GET_DIAGNOSTIC_LOG   – Return recent raw API responses + centreLocations for debugging
+ *   CLEAR_DIAGNOSTIC_LOG – Empty the in-memory diagnostic log
+ *   SET_DEBUG_CAPTURE_MODE – Enable/disable verbose API response capture for debugging
  *   SAVE_TRAINING_DESCRIPTOR – Persist a pre-computed face descriptor (no re-detection)
  */
 
@@ -95,7 +97,26 @@ chrome.storage.session
  * Each entry: { url, timestamp, data }
  */
 const _diagnosticLog = [];
-const DIAG_LOG_MAX   = 50;
+
+/**
+ * Maximum number of entries kept in _diagnosticLog.  Raised to 500 when
+ * debugCaptureMode is active so a full scan can be captured without trimming.
+ * NOTE: This is a temporary debug feature — disable during normal use to save memory.
+ */
+const DIAG_LOG_MAX_NORMAL = 50;
+const DIAG_LOG_MAX_DEBUG  = 500;
+
+/**
+ * When true, every apiFetch() response is captured in _diagnosticLog.
+ * Loaded from chrome.storage.local and toggled via SET_DEBUG_CAPTURE_MODE.
+ * Disabled by default — only enable when actively debugging API structure.
+ */
+let debugCaptureMode = false;
+
+// Load persisted debugCaptureMode on startup.
+chrome.storage.local.get("debugCaptureMode", ({ debugCaptureMode: stored }) => {
+  if (stored === true) debugCaptureMode = true;
+});
 
 /**
  * Append a raw API response to the diagnostic log.
@@ -103,9 +124,10 @@ const DIAG_LOG_MAX   = 50;
  * @param {*} data      – the parsed JSON response body
  */
 function _diagLog(url, data) {
+  const max = debugCaptureMode ? DIAG_LOG_MAX_DEBUG : DIAG_LOG_MAX_NORMAL;
   _diagnosticLog.push({ url, timestamp: new Date().toISOString(), data });
-  if (_diagnosticLog.length > DIAG_LOG_MAX) {
-    _diagnosticLog.splice(0, _diagnosticLog.length - DIAG_LOG_MAX);
+  if (_diagnosticLog.length > max) {
+    _diagnosticLog.splice(0, _diagnosticLog.length - max);
   }
 }
 
@@ -345,10 +367,16 @@ async function apiFetch(url, _isRetry = false) {
       );
     }
     // Try parsing anyway — some endpoints omit a strict Content-Type header.
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    // DEBUG: capture every API response when debug capture mode is active.
+    if (debugCaptureMode) _diagLog(url, parsed);
+    return parsed;
   }
 
-  return res.json();
+  const json = await res.json();
+  // DEBUG: capture every API response when debug capture mode is active.
+  if (debugCaptureMode) _diagLog(url, json);
+  return json;
 }
 
 /* ================================================================== */
@@ -1596,14 +1624,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case "GET_DIAGNOSTIC_LOG": {
       // Return the in-memory diagnostic API log plus current centreLocations so
       // the options page can offer a "Download Diagnostic Logs" JSON file.
+      // Also returns the current debugCaptureMode state so the UI can sync.
       chrome.storage.local.get("centreLocations", ({ centreLocations = {} }) => {
         sendResponse({
           ok: true,
           log: _diagnosticLog.slice(),
           centreLocations,
           capturedAt: new Date().toISOString(),
+          debugCaptureMode,
         });
       });
+      return true; // async
+    }
+
+    case "CLEAR_DIAGNOSTIC_LOG": {
+      // Empty the in-memory diagnostic log (does not affect persisted data).
+      _diagnosticLog.length = 0;
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    case "SET_DEBUG_CAPTURE_MODE": {
+      // Enable or disable verbose API response capture.
+      // NOTE: Temporary debug feature — disable during normal use to save memory.
+      const enabled = msg.enabled === true;
+      debugCaptureMode = enabled;
+      chrome.storage.local.set({ debugCaptureMode: enabled })
+        .then(() => sendResponse({ ok: true, debugCaptureMode }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true; // async
     }
 

@@ -453,6 +453,35 @@
     <button class="btn-add" id="btnDownloadDiagLog">📋 Download Diagnostic Logs</button>
   </div>
 
+  <!-- Developer / Debug -->
+  <div class="card" id="debugCaptureCard" style="border-color:#fdba74;background:#fffbf0;">
+    <h2 style="color:#92400e;">🛠 Developer / Debug</h2>
+    <p class="help" style="margin-bottom:14px;color:#92400e;">
+      ⚠ <strong>Temporary debug feature.</strong>
+      Disable during normal use to save memory.
+    </p>
+
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;">
+      <input type="checkbox" id="chkDebugCaptureMode" style="width:auto;margin:3px 0 0;flex-shrink:0;">
+      <div>
+        <label for="chkDebugCaptureMode" style="color:var(--text);font-weight:600;font-size:13px;margin-bottom:2px;">
+          Enable Debug Capture Mode
+        </label>
+        <p class="help" style="margin:0;">
+          When enabled, <em>all</em> Storypark API responses are captured in memory.
+          Use "Download Debug Log" to export them as a JSON file you can share with AI
+          tools to analyse the API structure. Disable when done to free memory.
+        </p>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn-add" id="btnDownloadDebugLog">📥 Download Debug Log</button>
+      <button class="btn-add" id="btnClearDebugLog" style="border-color:var(--accent);color:var(--accent);">🗑 Clear Debug Log</button>
+    </div>
+    <p id="debugLogStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+  </div>
+
   <div id="toast">✓ Settings saved!</div>
 
   <!--

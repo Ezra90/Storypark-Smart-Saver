@@ -40,6 +40,10 @@ const btnResetFaceData     = document.getElementById("btnResetFaceData");
 const btnSave              = document.getElementById("btnSave");
 const toast                = document.getElementById("toast");
 const humanWarning         = document.getElementById("humanWarning");
+const chkDebugCaptureMode  = document.getElementById("chkDebugCaptureMode");
+const btnDownloadDebugLog  = document.getElementById("btnDownloadDebugLog");
+const btnClearDebugLog     = document.getElementById("btnClearDebugLog");
+const debugLogStatus       = document.getElementById("debugLogStatus");
 
 /* ================================================================== */
 /*  Threshold sync (slider ↔ number)                                   */
@@ -1032,12 +1036,13 @@ btnSave.addEventListener("click", async () => {
 /* ================================================================== */
 
 chrome.storage.local.get(
-  ["autoThreshold", "minThreshold"],
-  ({ autoThreshold = 85, minThreshold = 50 }) => {
+  ["autoThreshold", "minThreshold", "debugCaptureMode"],
+  ({ autoThreshold = 85, minThreshold = 50, debugCaptureMode = false }) => {
     autoThresholdRange.value  = autoThreshold;
     autoThresholdNumber.value = autoThreshold;
     minThresholdRange.value   = minThreshold;
     minThresholdNumber.value  = minThreshold;
+    chkDebugCaptureMode.checked = debugCaptureMode === true;
   }
 );
 
@@ -1077,3 +1082,62 @@ btnResetFaceData.addEventListener("click", () => {
 
 loadChildren();
 loadCentreLocations();
+
+/* ================================================================== */
+/*  Debug Capture Mode                                                 */
+/* ================================================================== */
+
+chkDebugCaptureMode.addEventListener("change", () => {
+  const enabled = chkDebugCaptureMode.checked;
+  chrome.runtime.sendMessage({ type: "SET_DEBUG_CAPTURE_MODE", enabled }, (res) => {
+    if (res?.ok) {
+      debugLogStatus.textContent = enabled
+        ? "✓ Debug Capture Mode enabled — run a scan to capture API responses."
+        : "✓ Debug Capture Mode disabled.";
+      setTimeout(() => { debugLogStatus.textContent = ""; }, 4000);
+    } else {
+      alert("Could not update Debug Capture Mode. Try refreshing the page.");
+      chkDebugCaptureMode.checked = !enabled; // revert
+    }
+  });
+});
+
+btnDownloadDebugLog.addEventListener("click", () => {
+  const orig = btnDownloadDebugLog.textContent;
+  btnDownloadDebugLog.disabled    = true;
+  btnDownloadDebugLog.textContent = "Collecting…";
+  chrome.runtime.sendMessage({ type: "GET_DIAGNOSTIC_LOG" }, (res) => {
+    btnDownloadDebugLog.disabled    = false;
+    btnDownloadDebugLog.textContent = orig;
+    if (!res?.ok) {
+      alert("Could not retrieve debug log. Try refreshing the page.");
+      return;
+    }
+    const payload = {
+      capturedAt:       res.capturedAt,
+      debugCaptureMode: res.debugCaptureMode,
+      centreLocations:  res.centreLocations,
+      apiResponses:     res.log,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `storypark_debug_capture_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    debugLogStatus.textContent = `✓ Downloaded ${res.log.length} API response(s).`;
+    setTimeout(() => { debugLogStatus.textContent = ""; }, 4000);
+  });
+});
+
+btnClearDebugLog.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "CLEAR_DIAGNOSTIC_LOG" }, (res) => {
+    if (res?.ok) {
+      debugLogStatus.textContent = "✓ Debug log cleared.";
+      setTimeout(() => { debugLogStatus.textContent = ""; }, 3000);
+    } else {
+      alert("Could not clear the debug log. Try refreshing the page.");
+    }
+  });
+});
