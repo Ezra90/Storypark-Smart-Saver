@@ -176,16 +176,60 @@ function buildCentreRow(name, loc) {
     btnLookup.textContent = "Searching…";
     btnLookup.disabled    = true;
     try {
+      // Append childcare/daycare keyword if the name doesn't already include
+      // similar terms, to help Nominatim find the actual childcare business.
+      const lowerQuery = query.toLowerCase();
+      const hasKeyword = /childcare|daycare|kindergarten|preschool|nursery|early learning|child care|day care/.test(lowerQuery);
+      const searchQuery = hasKeyword ? query : `${query} childcare`;
+
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=5&addressdetails=1`,
         { headers: { "User-Agent": "StoryparkSmartSaver/2.0" } }
       );
       const results = await resp.json();
-      if (results.length > 0) {
+      if (results.length === 0) {
+        alert("No results found for that name. Try adding the suburb or city (e.g. \"Sunshine Childcare Brisbane\"), or use the \"Search on Google Maps\" link to find exact coordinates.");
+      } else if (results.length === 1) {
         mapsInput.value = `${results[0].lat}, ${results[0].lon}`;
         updateCache();
       } else {
-        alert("No results found for that name. Try adding the suburb or city (e.g. \"Sunshine Childcare Brisbane\").");
+        // Show a picker so the user can choose the most accurate result
+        const existing = row.querySelector(".nominatim-picker");
+        if (existing) existing.remove();
+
+        const picker = document.createElement("div");
+        picker.className = "nominatim-picker";
+        picker.style.cssText = "grid-column:1/-1;display:flex;flex-direction:column;gap:4px;margin-top:4px;background:var(--bg2,#f5f5f5);border:1px solid var(--border,#ddd);border-radius:6px;padding:8px;";
+
+        const label = document.createElement("p");
+        label.style.cssText = "margin:0 0 6px;font-size:12px;color:var(--muted,#666);";
+        label.textContent = "Multiple results found — select the correct location:";
+        picker.appendChild(label);
+
+        for (const result of results) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-add";
+          btn.style.cssText = "width:auto;text-align:left;padding:5px 10px;font-size:12px;white-space:normal;height:auto;";
+          const displayName = result.display_name || `${result.lat}, ${result.lon}`;
+          btn.textContent = displayName;
+          btn.addEventListener("click", () => {
+            mapsInput.value = `${result.lat}, ${result.lon}`;
+            updateCache();
+            picker.remove();
+          });
+          picker.appendChild(btn);
+        }
+
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "btn-remove-centre";
+        dismiss.style.cssText = "margin-top:4px;width:auto;align-self:flex-start;";
+        dismiss.textContent = "✕ Cancel";
+        dismiss.addEventListener("click", () => picker.remove());
+        picker.appendChild(dismiss);
+
+        row.appendChild(picker);
       }
     } catch (e) {
       alert("Auto-lookup failed: " + e.message);
