@@ -30,6 +30,9 @@
 
 const HUMAN_CONFIG = {
   modelBasePath: chrome.runtime.getURL("models/"),
+  // Force WebGL backend to avoid WebGPU initialisation errors in extension
+  // pages (same setting used in offscreen.js).
+  backend: "webgl",
   face: {
     enabled: true,
     detector: { enabled: true, modelPath: "blazeface.json", rotation: false },

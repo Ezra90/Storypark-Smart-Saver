@@ -24,6 +24,7 @@ const minThresholdNumber  = document.getElementById("minThresholdNumber");
 const centreList           = document.getElementById("centreList");
 const btnAddCentre         = document.getElementById("btnAddCentre");
 const btnDiscoverCentres   = document.getElementById("btnDiscoverCentres");
+const btnDownloadDiagLog   = document.getElementById("btnDownloadDiagLog");
 const btnSaveLocations     = document.getElementById("btnSaveLocations");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
@@ -376,11 +377,55 @@ btnSaveLocations.addEventListener("click", async () => {
   showToast("✓ Locations saved!");
 });
 
+btnDownloadDiagLog.addEventListener("click", () => {
+  const orig = btnDownloadDiagLog.textContent;
+  btnDownloadDiagLog.disabled    = true;
+  btnDownloadDiagLog.textContent = "Collecting…";
+  chrome.runtime.sendMessage({ type: "GET_DIAGNOSTIC_LOG" }, (res) => {
+    btnDownloadDiagLog.disabled    = false;
+    btnDownloadDiagLog.textContent = orig;
+    if (!res?.ok) {
+      alert("Could not retrieve diagnostic log. Try refreshing the page.");
+      return;
+    }
+    const payload = {
+      capturedAt:      res.capturedAt,
+      centreLocations: res.centreLocations,
+      apiLog:          res.log,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `storypark-diag-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+
 /* ================================================================== */
 /*  Human library availability check                                   */
 /* ================================================================== */
 
 let faceApiAvailable = false;
+
+// Catch any promise rejections from the Human.js library that escape the
+// try/catch below (e.g. internal TF.js async backend errors).  Without
+// this handler Chrome records them as extension errors in the error tab.
+window.addEventListener("unhandledrejection", (event) => {
+  const stack = event.reason?.stack || "";
+  const msg   = event.reason?.message || String(event.reason);
+  // Only suppress errors that originate from human.js itself.
+  if (stack.includes("human.js") || msg.includes("human.js")) {
+    console.warn("[options] Unhandled Human.js rejection caught:", event.reason);
+    event.preventDefault(); // suppress the extension error tab entry
+    faceApiAvailable = false;
+    humanWarning.style.display = "block";
+    if (!humanWarning.textContent.includes("unavailable")) {
+      humanWarning.textContent = `⚠ Face recognition unavailable: ${msg}`;
+    }
+  }
+});
 
 (async () => {
   if (typeof Human === "undefined") {

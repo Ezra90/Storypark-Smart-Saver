@@ -18,6 +18,7 @@
  *   GET_ACTIVITY_LOG     – Return the persisted activity log array
  *   CLEAR_ACTIVITY_LOG   – Clear the persisted activity log
  *   DISCOVER_CENTRES     – Fetch /api/v3/centres and merge into centreLocations
+ *   GET_DIAGNOSTIC_LOG   – Return recent raw API responses + centreLocations for debugging
  *   SAVE_TRAINING_DESCRIPTOR – Persist a pre-computed face descriptor (no re-detection)
  */
 
@@ -80,6 +81,33 @@ chrome.storage.session
     }
   })
   .catch(() => {});
+
+/* ================================================================== */
+/*  Diagnostic API Log                                                 */
+/* ================================================================== */
+
+/**
+ * In-memory store for raw API responses captured during profile/centre
+ * discovery.  Kept in memory only (not persisted) so it is fresh on each
+ * service-worker activation.  Consumers can retrieve it via the
+ * GET_DIAGNOSTIC_LOG message handler.
+ *
+ * Each entry: { url, timestamp, data }
+ */
+const _diagnosticLog = [];
+const DIAG_LOG_MAX   = 50;
+
+/**
+ * Append a raw API response to the diagnostic log.
+ * @param {string} url  – the API endpoint that was called
+ * @param {*} data      – the parsed JSON response body
+ */
+function _diagLog(url, data) {
+  _diagnosticLog.push({ url, timestamp: new Date().toISOString(), data });
+  if (_diagnosticLog.length > DIAG_LOG_MAX) {
+    _diagnosticLog.splice(0, _diagnosticLog.length - DIAG_LOG_MAX);
+  }
+}
 
 /* ================================================================== */
 /*  Activity Log                                                       */
@@ -403,7 +431,10 @@ async function sendToOffscreen(message, _retryCount = 0) {
  */
 async function loadAndCacheProfile() {
   try {
-    const data = await apiFetch(`${STORYPARK_BASE}/api/v3/users/me`);
+    const meUrl = `${STORYPARK_BASE}/api/v3/users/me`;
+    const data = await apiFetch(meUrl);
+    _diagLog(meUrl, data);
+
     const rawChildren = data.user?.children || data.children || [];
     const children = rawChildren.map((c) => ({
       id: String(c.id),
@@ -447,6 +478,14 @@ async function loadAndCacheProfile() {
       }
     }
 
+    // Fetch institutions from the user profile if present, and try the
+    // dedicated /api/v3/institutions/{id} endpoint for each one.
+    const userInstitutions =
+      data.user?.institutions ||
+      data.institutions       ||
+      [];
+    await _fetchAndDiscoverInstitutions(userInstitutions);
+
     // Also fetch each child's individual profile to extract companies[].name.
     // Many accounts don't expose centre names at the /users/me level, but the
     // child profile endpoint reliably includes them under child.companies[].
@@ -455,12 +494,23 @@ async function loadAndCacheProfile() {
     const childCentreNames = [];
     for (const child of children) {
       try {
-        const childData = await apiFetch(`${STORYPARK_BASE}/api/v3/children/${child.id}`);
+        const childUrl  = `${STORYPARK_BASE}/api/v3/children/${child.id}`;
+        const childData = await apiFetch(childUrl);
+        _diagLog(childUrl, childData);
+
         const childObj  = childData.child || childData;
         const companies = childObj.companies || childObj.services || [];
         for (const co of companies) {
           const n = co.name || co.display_name || "";
           if (n) childCentreNames.push(n);
+        }
+
+        // Also look for institutions on the child profile.
+        const childInstitutions = childObj.institutions || childObj.institution;
+        if (childInstitutions) {
+          await _fetchAndDiscoverInstitutions(
+            Array.isArray(childInstitutions) ? childInstitutions : [childInstitutions]
+          );
         }
       } catch (err) {
         // Non-fatal — skip this child if the fetch fails
@@ -496,7 +546,10 @@ async function loadAndCacheProfile() {
  */
 async function fetchAndDiscoverCentresFromApi() {
   try {
-    const data = await apiFetch(`${STORYPARK_BASE}/api/v3/centres`);
+    const centresUrl = `${STORYPARK_BASE}/api/v3/centres`;
+    const data = await apiFetch(centresUrl);
+    _diagLog(centresUrl, data);
+
     const centres = data.centres || data.services || [];
     if (!centres.length) return;
 
@@ -517,6 +570,40 @@ async function fetchAndDiscoverCentresFromApi() {
   } catch (err) {
     // Non-fatal — /api/v3/centres may not be accessible for all account types
     console.warn("[centres] /api/v3/centres fetch failed:", err.message);
+  }
+}
+
+/**
+ * Given an array of institution objects (each expected to have at least an
+ * `id` field), fetch `/api/v3/institutions/{id}` for each one and merge the
+ * resulting name+address into centreLocations.  Non-fatal — errors are
+ * logged to the console and skipped.
+ *
+ * @param {Array<{id: string|number, name?: string}>} institutions
+ */
+async function _fetchAndDiscoverInstitutions(institutions) {
+  if (!Array.isArray(institutions) || institutions.length === 0) return;
+  const entries = [];
+  for (const inst of institutions) {
+    const id = inst?.id;
+    if (!id) continue;
+    try {
+      const instUrl  = `${STORYPARK_BASE}/api/v3/institutions/${id}`;
+      const instData = await apiFetch(instUrl);
+      _diagLog(instUrl, instData);
+
+      const obj  = instData.institution || instData;
+      const name = (obj.name || obj.display_name || "").trim();
+      if (!name) continue;
+      const addrParts = [obj.address, obj.suburb, obj.state, obj.postcode].filter(Boolean);
+      const address   = addrParts.length > 0 ? addrParts.join(", ") : null;
+      entries.push({ name, address });
+    } catch (err) {
+      console.warn(`[institutions] fetch failed for id ${id}:`, err.message);
+    }
+  }
+  if (entries.length > 0) {
+    await discoverCentres(entries);
   }
 }
 
@@ -1503,6 +1590,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then(() => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
+    }
+
+    case "GET_DIAGNOSTIC_LOG": {
+      // Return the in-memory diagnostic API log plus current centreLocations so
+      // the options page can offer a "Download Diagnostic Logs" JSON file.
+      chrome.storage.local.get("centreLocations", ({ centreLocations = {} }) => {
+        sendResponse({
+          ok: true,
+          log: _diagnosticLog.slice(),
+          centreLocations,
+          capturedAt: new Date().toISOString(),
+        });
+      });
+      return true; // async
     }
 
     case "REVIEW_TRAIN_ONLY": {
