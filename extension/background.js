@@ -462,15 +462,14 @@ function stripHtml(html) {
  * following the structured template format.
  *
  * @param {string} body           Raw story body (may contain HTML)
- * @param {string} childFirstName Child's first name (unused in current format)
+ * @param {string} childFirstName Child's first name (included in Routine line)
  * @param {string} routineText    Comma-separated routine events (may be empty)
  * @param {string} roomName       Room / group name (may be empty)
  * @param {string} centreName     Centre / service name (may be empty)
  * @returns {string}
  */
 function buildDescription(body, childFirstName, routineText, roomName, centreName) {
-  const DIVIDER = "------------------------------";
-  const parts   = [];
+  const parts = [];
 
   // 1. Full story text, stripped of HTML
   const plainBody = stripHtml(body);
@@ -478,18 +477,16 @@ function buildDescription(body, childFirstName, routineText, roomName, centreNam
 
   // 2. Routine section (only if routine data exists)
   if (routineText) {
-    parts.push(DIVIDER);
-    parts.push(`Routine: ${routineText}`);
+    const routineLabel = childFirstName
+      ? `${childFirstName}'s Routine: ${routineText}`
+      : `Routine: ${routineText}`;
+    parts.push(routineLabel);
   }
 
   // 3. Location / attribution section
-  const locationLines = [];
-  if (roomName)   locationLines.push(roomName);
-  if (centreName) locationLines.push(centreName);
-  locationLines.push("Storypark");
-
-  parts.push(DIVIDER);
-  parts.push(locationLines.join("\n"));
+  if (roomName) parts.push(roomName);
+  if (centreName) parts.push(centreName);
+  parts.push("Storypark");
 
   return parts.join("\n");
 }
@@ -510,6 +507,25 @@ async function runExtraction(childId, childName, mode) {
 
   const { autoThreshold = 85, minThreshold = 50, activeCentreName = "" } =
     await chrome.storage.local.get(["autoThreshold", "minThreshold", "activeCentreName"]);
+
+  // Attempt to fetch the child's own centre name from their profile,
+  // so that multi-centre parents get per-child GPS coordinates rather than
+  // the global first-discovered centre name stored in activeCentreName.
+  let childCentreFallback = activeCentreName;
+  try {
+    const childProfile = await apiFetch(`${STORYPARK_BASE}/api/v3/children/${childId}`);
+    const child = childProfile.child || childProfile;
+    const companies = child.companies || child.services || [];
+    if (companies.length > 0) {
+      const name = companies[0].name || companies[0].display_name || "";
+      if (name) {
+        childCentreFallback = name;
+        await discoverCentres([name]);
+      }
+    }
+  } catch {
+    // Fall back to activeCentreName if child profile fetch fails
+  }
 
   // Ensure the offscreen document's in-memory face descriptors are fully synced
   // with IndexedDB before the first image fetch begins, preventing any race
@@ -576,7 +592,7 @@ async function runExtraction(childId, childName, mode) {
     const createdAt    = story.created_at || summary.created_at || "";
     const body         = story.body       || "";
     const roomName     = story.group_name     || "";
-    const centreName   = story.community_name || story.centre_name || story.service_name || activeCentreName || "";
+    const centreName   = story.community_name || story.centre_name || story.service_name || childCentreFallback || "";
     const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
     const childFirstName = (childName || "").split(/\s+/)[0];
 

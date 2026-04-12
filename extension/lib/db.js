@@ -55,38 +55,9 @@ function openDB() {
 /* ================================================================== */
 /*  processedUrls                                                      */
 /* ================================================================== */
-
-/**
- * Return all processed URLs as a Set.
- * @deprecated Not currently consumed by any module. Retained for potential future use.
- * @returns {Promise<Set<string>>}
- */
-export async function getAllProcessedUrls() {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx  = db.transaction(STORE_PROCESSED_URLS, "readonly");
-    const req = tx.objectStore(STORE_PROCESSED_URLS).getAllKeys();
-    req.onsuccess = () => { db.close(); resolve(new Set(req.result)); };
-    req.onerror   = () => { db.close(); reject(req.error); };
-  });
-}
-
-/**
- * Mark one or more URLs as processed (idempotent).
- * @deprecated Not currently consumed by any module. Retained for potential future use.
- * @param {string[]} urls
- */
-export async function markProcessedInDB(urls) {
-  if (!urls || urls.length === 0) return;
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx    = db.transaction(STORE_PROCESSED_URLS, "readwrite");
-    const store = tx.objectStore(STORE_PROCESSED_URLS);
-    for (const url of urls) store.put(1, url);
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror    = () => { db.close(); reject(tx.error); };
-  });
-}
+// Note: The processedUrls object store is retained in the DB upgrade handler
+// for compatibility with existing installations (DB version 2). The functions
+// were unused and have been removed.
 
 /* ================================================================== */
 /*  processedStories                                                   */
@@ -230,33 +201,6 @@ export async function getAllDescriptors() {
 }
 
 /**
- * Append a single face descriptor to a child's stored set.
- * Creates the record if it does not exist.
- *
- * @param {string}                childId
- * @param {string}                childName
- * @param {number[]|Float32Array} descriptor
- */
-export async function saveDescriptor(childId, childName, descriptor) {
-  const existing    = await getDescriptors(childId);
-  const descriptors = existing?.descriptors ?? [];
-  descriptors.push(Array.from(descriptor));
-
-  // Cap at MAX_DESCRIPTORS_PER_CHILD, dropping oldest first (same as appendDescriptor)
-  if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
-    descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
-  }
-
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_KNOWN_DESCRIPTORS, "readwrite");
-    tx.objectStore(STORE_KNOWN_DESCRIPTORS).put({ childId, childName, descriptors });
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror    = () => { db.close(); reject(tx.error); };
-  });
-}
-
-/**
  * Append a single face descriptor to a child's stored set, capping at
  * MAX_DESCRIPTORS_PER_CHILD by dropping the oldest entries first.
  * Use this for continuous learning (auto-approved and manually approved photos).
@@ -282,6 +226,16 @@ export async function appendDescriptor(childId, childName, descriptor) {
     tx.onerror    = () => { db.close(); reject(tx.error); };
   });
 }
+
+/**
+ * Append a single face descriptor to a child's stored set.
+ * Alias for {@link appendDescriptor} — kept for backwards compatibility.
+ *
+ * @param {string}                childId
+ * @param {string}                childName
+ * @param {number[]|Float32Array} descriptor
+ */
+export const saveDescriptor = appendDescriptor;
 
 /**
  * Replace all face descriptors for a child with a new set.

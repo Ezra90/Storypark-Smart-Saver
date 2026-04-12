@@ -418,7 +418,7 @@ My Daycare Centre
 Storypark
 ```
 
-`DateTimeOriginal` (tag `0x0132`) is set from `story.created_at` (falls back to `12:00:00` for date-only values).
+`DateTimeOriginal` (Exif IFD tag `0x9003`) and `DateTime` (IFD0 tag `0x0132`) are set from `story.created_at` (falls back to `12:00:00` for date-only values).
 
 ---
 

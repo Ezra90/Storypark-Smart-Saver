@@ -2501,7 +2501,28 @@ async function applyExif(blob, date, description, gpsCoords) {
             dateStr = `${date.getFullYear()}:${pad(date.getMonth() + 1)}:${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
         }
 
-        const asciiDesc = (description || '').replace(/[^\x20-\x7E]/g, '').slice(0, 1000);
+        // Sanitise for EXIF ASCII: replace common Unicode with ASCII equivalents,
+        // collapse newlines into pipe separators (Google Photos strips \n anyway),
+        // then strip any remaining non-printable / non-ASCII characters.
+        // Note: Date is converted to browser-local timezone. For users in a different
+        // timezone than their centre, the EXIF timestamp may differ from the centre's
+        // wall-clock time. This is acceptable for most use cases.
+        let desc = (description || '');
+        // Unicode → ASCII equivalents
+        desc = desc.replace(/[\u2018\u2019\u201A]/g, "'");   // curly single quotes
+        desc = desc.replace(/[\u201C\u201D\u201E]/g, '"');    // curly double quotes
+        desc = desc.replace(/[\u2013\u2014]/g, '--');          // en-dash, em-dash
+        desc = desc.replace(/\u2026/g, '...');                 // ellipsis
+        desc = desc.replace(/[\u00A0]/g, ' ');                 // non-breaking space
+        // Collapse the divider lines + newlines into pipe separators
+        desc = desc.replace(/\n-{2,}\n/g, ' | ');              // divider lines
+        desc = desc.replace(/\n+/g, ' | ');                    // remaining newlines
+        // Strip any remaining non-printable / non-ASCII
+        desc = desc.replace(/[^\x20-\x7E]/g, '');
+        // Collapse multiple spaces/pipes
+        desc = desc.replace(/(\s*\|\s*)+/g, ' | ');
+        desc = desc.trim();
+        const asciiDesc = desc.slice(0, 2000);
 
         const exifDict = { '0th': {}, 'Exif': {}, 'GPS': {} };
         exifDict['0th'][piexif.ImageIFD.ImageDescription] = asciiDesc;
