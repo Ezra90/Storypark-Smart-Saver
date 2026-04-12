@@ -114,6 +114,7 @@ function buildCentreRow(name, loc) {
   mapsLabel.textContent = "Google Maps Link or Coordinates";
   const mapsInput = document.createElement("input");
   mapsInput.type        = "text";
+  mapsInput.dataset.role = "mapsCoords";
   mapsInput.placeholder = "Paste a Maps URL or -27.741, 153.186";
   // Pre-fill with existing coordinates if present
   if (loc.lat != null && loc.lng != null) {
@@ -403,7 +404,7 @@ btnSaveLocations.addEventListener("click", async () => {
   const freshCache = {};
   for (const row of centreList.querySelectorAll(".centre-row")) {
     const nameEl  = row.querySelector("input[type=text]");
-    const mapsEl  = row.querySelectorAll("input[type=text]")[1];
+    const mapsEl  = row.querySelector("input[data-role=mapsCoords]");
     if (!nameEl) continue;
     const key    = nameEl.value.trim();
     if (!key) continue;
