@@ -17,25 +17,6 @@
 const fs = require("fs");
 const path = require("path");
 
-// ---------------------------------------------------------------------------
-// Pre-generated base64-encoded PNG files
-//
-// These PNGs were created with a Storypark-green (#00C853) rounded-square
-// background and a white "S" letter. Each string contains the complete PNG
-// binary encoded as base64.
-// ---------------------------------------------------------------------------
-
-// 16×16 icon — green rounded square with white "S"
-const ICON_16_B64 =
-  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAA2ElEQVQ4T2NkoBAwUqifgWED" +
-  "AwMDAwMDIwMDA8P///9hGMMwgYFxAwMDIwMDA8P///9h2MMwgYFxAwMDIwMDA8P///9h" +
-  "GMwwgYFxAwMDIwMDA8P///9hGEAygYFxAwMDIwMDA8P///9hGEQygYFxAwMD";
-
-// ---------------------------------------------------------------------------
-// Instead of embedding pre-encoded data, write minimal valid PNGs directly
-// by constructing the binary format from scratch.
-// ---------------------------------------------------------------------------
-
 const zlib = require("zlib");
 
 /**
@@ -70,19 +51,7 @@ function buildIconPng(size) {
 
   function inRoundedRect(px, py, rr) {
     if (px < 0 || py < 0 || px >= size || py >= size) return false;
-    // four corner circles
-    const corners = [
-      [rr, rr],
-      [size - 1 - rr, rr],
-      [rr, size - 1 - rr],
-      [size - 1 - rr, size - 1 - rr],
-    ];
-    for (const [cx, cy] of corners) {
-      if (px < Math.min(cx, size - 1 - cx) || py < Math.min(cy, size - 1 - cy)) {
-        // We're in the corner zone — check distance
-      }
-    }
-    // Simpler: exclude pixels outside corner arcs
+    // Exclude pixels outside corner arcs
     if (px < rr && py < rr) return dist(px, py, rr - 1, rr - 1) <= rr - 0.5;
     if (px >= size - rr && py < rr) return dist(px, py, size - rr, rr - 1) <= rr - 0.5;
     if (px < rr && py >= size - rr) return dist(px, py, rr - 1, size - rr) <= rr - 0.5;
