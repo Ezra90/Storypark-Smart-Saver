@@ -345,12 +345,76 @@ async function processImage(msg) {
     return isJpeg ? applyExif(srcBlob, date, description, gpsCoords) : srcBlob;
   };
 
-  // ---- 2. If no encodings configured, auto-approve everything ----
+  // ---- 2. No training encodings: bootstrap mode ----
+  // When no face descriptors are stored for this child yet, attempt face
+  // detection (if models are available).  Photos with no detected face are
+  // downloaded immediately.  Photos that do contain a face are queued for
+  // the parent to review — each approval both downloads the photo AND adds
+  // the face embedding as the first training data for this child, letting
+  // the parent build the facial profile organically through the review queue
+  // instead of requiring a manual photo-upload step first.
   if (childEncodings.length === 0) {
-    const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await makeStampedBlob(date);
-    await downloadBlob(stampedBlob, savePath);
-    return { ok: true, result: "approve" };
+    await ensureModels();
+
+    // If face recognition models are unavailable, preserve the existing
+    // "download everything" fallback behaviour.
+    if (!modelsLoaded || !human) {
+      const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+      const stampedBlob = await makeStampedBlob(date);
+      await downloadBlob(stampedBlob, savePath);
+      return { ok: true, result: "approve" };
+    }
+
+    // Run face detection on a temporary image element.
+    const { img: bImg, blobUrl: bBlobUrl } = await arrayBufferToImage(buffer);
+    let bootstrapFaces = [];
+    try {
+      const detected = await human.detect(bImg);
+      bootstrapFaces = detected?.face ?? [];
+    } finally {
+      URL.revokeObjectURL(bBlobUrl);
+    }
+
+    // No face in this photo → download it automatically (safe regardless of child).
+    if (bootstrapFaces.length === 0) {
+      const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+      const stampedBlob = await makeStampedBlob(date);
+      await downloadBlob(stampedBlob, savePath);
+      return { ok: true, result: "approve" };
+    }
+
+    // One or more faces detected → queue for parent confirmation.
+    // The parent's first approval also writes the descriptor to IndexedDB,
+    // bootstrapping the facial profile for future scans.
+    const bestBFace       = bootstrapFaces[0];
+    const bestBDescriptor = bestBFace.embedding ? Array.from(bestBFace.embedding) : null;
+    const croppedBUrl     = bestBFace.box
+      ? cropFaceToDataUrl(bImg, bestBFace.box)
+      : null;
+
+    const allBFaces = bootstrapFaces
+      .filter((f) => f.embedding)
+      .map((f) => ({
+        descriptor:     Array.from(f.embedding),
+        croppedDataUrl: f.box ? cropFaceToDataUrl(bImg, f.box) : null,
+        matchPct:       null,
+      }));
+
+    await addToReviewQueue({
+      croppedFaceDataUrl: croppedBUrl,
+      descriptor:         bestBDescriptor,
+      allFaces:           allBFaces.length > 1 ? allBFaces : undefined,
+      storyData,
+      description,
+      childId,
+      childName,
+      savePath,
+      matchPct:        0,
+      matchedChildren: [childName],
+      noTrainingData:  true,
+    });
+
+    return { ok: true, result: "review", matchPct: 0, noTrainingData: true };
   }
 
   // ---- 3. Load image for face detection ----

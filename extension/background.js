@@ -935,10 +935,11 @@ async function runExtraction(childId, childName, mode) {
         await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${forChild}${dateSuffix}`);
       } else if (result?.result === "review") {
         queued++;
-        await logger(
-          "INFO",
-          `  👀 Queued for review: ${img.filename}${forChild}${dateSuffix} (${result.matchPct ?? "?"}% match)`
-        );
+        const baseReview = `${img.filename}${forChild}${dateSuffix}`;
+        const reviewMsg  = result.noTrainingData
+          ? `  📚 Queued for profile building: ${baseReview} (no training data yet)`
+          : `  👀 Queued for review: ${baseReview} (${result.matchPct ?? "?"}% match)`;
+        await logger("INFO", reviewMsg);
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
         // "reject" result: below minThreshold (normal) or processImage threw.

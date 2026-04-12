@@ -16,7 +16,7 @@ const DB_NAME    = "storyparkSyncDB";
 const DB_VERSION = 2;
 
 /** Maximum number of face descriptors kept per child (oldest are dropped first). */
-const MAX_DESCRIPTORS_PER_CHILD = 30;
+export const MAX_DESCRIPTORS_PER_CHILD = 30;
 
 const STORE_PROCESSED_URLS    = "processedUrls";
 const STORE_PROCESSED_STORIES = "processedStories";

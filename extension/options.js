@@ -9,7 +9,7 @@
  */
 
 import { loadModels, detectFaces, matchEmbedding } from "./lib/face.js";
-import { getDescriptors, setDescriptors } from "./lib/db.js";
+import { getDescriptors, setDescriptors, MAX_DESCRIPTORS_PER_CHILD } from "./lib/db.js";
 
 /* ================================================================== */
 /*  Element refs                                                       */
@@ -770,9 +770,6 @@ function showToast(msg = "✓ Settings saved!") {
 /*  Facial profile export / import                                     */
 /* ================================================================== */
 
-/** Maximum descriptors kept per child – must match db.js constant. */
-const MAX_DESCRIPTORS_PER_CHILD = 30;
-
 btnExportProfile.addEventListener("click", async () => {
   const childId = trainingChildSelect.value;
   if (!childId) {
@@ -864,6 +861,10 @@ importProfileInput.addEventListener("change", async () => {
     );
     if (doMerge) {
       // Merge: combine existing + imported, keep the most recent up to the cap.
+      // Descriptors are stored in chronological order (oldest → newest), so
+      // existing descriptors are older and imported ones are appended at the
+      // end. slice(-MAX_DESCRIPTORS_PER_CHILD) therefore preserves the most
+      // recent entries from both sets.
       const combined = [...existing.descriptors, ...parsed.descriptors];
       mergedDescriptors = combined.slice(-MAX_DESCRIPTORS_PER_CHILD);
     } else {
