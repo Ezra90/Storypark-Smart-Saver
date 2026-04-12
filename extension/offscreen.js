@@ -497,7 +497,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "PROCESS_IMAGE") {
     processImage(msg)
       .then((result) => sendResponse(result))
-      .catch((err)   => sendResponse({ result: "reject", error: err.message }));
+      .catch((err)   => sendResponse({ ok: true, result: "reject", error: err.message }));
     return true;
   }
 

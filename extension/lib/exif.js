@@ -2528,6 +2528,7 @@ async function applyExif(blob, date, description, gpsCoords) {
 
         const exifDict = { '0th': {}, 'Exif': {}, 'GPS': {} };
         exifDict['0th'][piexif.ImageIFD.ImageDescription] = asciiDesc;
+        exifDict['0th'][piexif.ImageIFD.DateTime] = dateStr;
         exifDict['0th'][piexif.ImageIFD.Software] = 'Storypark Smart Saver';
         exifDict['Exif'][piexif.ExifIFD.DateTimeOriginal] = dateStr;
         exifDict['Exif'][piexif.ExifIFD.DateTimeDigitized] = dateStr;
