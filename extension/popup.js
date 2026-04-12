@@ -410,9 +410,10 @@ chrome.runtime.onMessage.addListener((msg) => {
     progressText.style.display   = "block";
     progressBar.value  = msg.current;
     progressBar.max    = msg.total;
+    const childPart = msg.childName ? `Scanning ${msg.childName} — ` : "";
+    const datePart  = msg.date ? ` (${msg.date})` : "";
     progressText.textContent =
-      `Processing story ${msg.current} of ${msg.total}` +
-      (msg.date ? ` (${msg.date})` : "");
+      `${childPart}story ${msg.current} of ${msg.total}${datePart}`;
   }
 
   if (msg.type === "SCAN_COMPLETE") {
