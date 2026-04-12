@@ -111,6 +111,27 @@ async function logger(level, message) {
 }
 
 /* ================================================================== */
+/*  Date formatting                                                    */
+/* ================================================================== */
+
+/**
+ * Convert a YYYY-MM-DD or ISO 8601 date string to DD/MM/YYYY format.
+ * Returns the original string unchanged if it cannot be parsed.
+ *
+ * @param {string} isoOrYMD - e.g. "2024-03-15" or "2024-03-15T10:30:00Z"
+ * @returns {string} e.g. "15/03/2024"
+ */
+function formatDateDMY(isoOrYMD) {
+  if (!isoOrYMD) return "";
+  const ymd = isoOrYMD.split("T")[0]; // strip time component if present
+  const [year, month, day] = ymd.split("-");
+  if (!year || !month || !day) return isoOrYMD;
+  // Validate that all three parts are numeric before reformatting
+  if (!/^\d+$/.test(year) || !/^\d+$/.test(month) || !/^\d+$/.test(day)) return isoOrYMD;
+  return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${year}`;
+}
+
+/* ================================================================== */
 /*  Anti-bot jitter — Human Pacing Algorithm ("Coffee Break")         */
 /* ================================================================== */
 
@@ -278,7 +299,13 @@ async function loadAndCacheProfile() {
       id: String(c.id),
       name: c.name || c.display_name || `Child ${c.id}`,
     }));
-    await chrome.storage.local.set({ children });
+    const totalStoryCount =
+      data.user?.administered_family_children_teacher_stories ??
+      data.administered_family_children_teacher_stories ??
+      null;
+    const storageUpdate = { children };
+    if (totalStoryCount !== null) storageUpdate.totalStoryCount = totalStoryCount;
+    await chrome.storage.local.set(storageUpdate);
 
     // Auto-discover centres/communities from the profile response.
     // The API may include them under various keys; we merge whatever we find.
@@ -593,11 +620,12 @@ async function runExtraction(childId, childName, mode) {
       type: "PROGRESS",
       current: si + 1,
       total: totalStories,
-      date: dateStr || "",
+      date: formatDateDMY(dateStr),
+      childName,
     }).catch(() => {});
 
     await smartDelay("READ_STORY");
-    await logger("INFO", `Processing story ${summary.id}${dateStr ? ` (${dateStr})` : ""}…`);
+    await logger("INFO", `Processing story ${si + 1} of ${totalStories} for ${childName}${dateStr ? ` (${formatDateDMY(dateStr)})` : ""}…`);
 
     // Fetch full story detail
     let story;
@@ -715,15 +743,16 @@ async function runExtraction(childId, childName, mode) {
         continue;
       }
 
-      const dateSuffix = storyDateStr ? ` [${storyDateStr}]` : "";
+      const dateSuffix = storyDateStr ? ` [${formatDateDMY(storyDateStr)}]` : "";
+      const forChild   = ` for ${childName}`;
       if (result?.result === "approve") {
         approved++;
-        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${dateSuffix}`);
+        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${forChild}${dateSuffix}`);
       } else if (result?.result === "review") {
         queued++;
         await logger(
           "INFO",
-          `  👀 Queued for review: ${img.filename}${dateSuffix} (${result.matchPct ?? "?"}% match)`
+          `  👀 Queued for review: ${img.filename}${forChild}${dateSuffix} (${result.matchPct ?? "?"}% match)`
         );
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
