@@ -340,8 +340,7 @@
   <!-- human.js warning -->
   <div id="humanWarning">
     ⚠ <strong>human.js not found.</strong>
-    Face recognition is disabled. Run <code>npm run build</code> from the repository root
-    to copy the library into <code>extension/lib/</code>, then reload the extension.
+    Face recognition is disabled. Please reinstall the extension from the latest download, then reload.
   </div>
 
   <!-- Children (read-only, fetched from Storypark API) -->
@@ -449,7 +448,7 @@
 
   <!--
     human.js is required for live face-encoding in the training preview.
-    Copied into extension/lib/ by running `npm run build`.
+    Copied into extension/lib/ by the CI workflow or `npm run setup`.
   -->
   <script src="lib/human.js"></script>
   <script type="module" src="options.js"></script>
