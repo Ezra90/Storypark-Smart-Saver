@@ -18,8 +18,23 @@ https://app.storypark.com
 All requests are made with the browser's active session cookies — **no API key or OAuth token is required**.
 
 ```ts
-fetch(url, { credentials: "include" })
+fetch(url, { credentials: "include", cache: "no-cache" })
 ```
+
+The `cache: "no-cache"` option forces the browser to revalidate with the server on every request, guaranteeing a fresh JSON response body.
+
+Without it the browser may send an `If-None-Match` conditional request and receive a **304 Not Modified** response with an **empty body**. This silently breaks centre name discovery (and other fields) because the Fetch API returns no content to parse when it serves the cached response for a 304. Using `no-cache` still sends ETags, so the server can short-circuit the response at its end — it is not abusive.
+
+The existing `smartDelay()` anti-bot pacing (800 ms – 6 000 ms delays plus coffee breaks every 15–25 requests) already prevents rate-limiting, so actual API call volume is unchanged.
+
+### `apiFetch()` behaviour
+
+`apiFetch(url)` in `background.js` wraps every Storypark API call with:
+
+1. `cache: "no-cache"` — prevents 304 empty-body responses (see above).
+2. Sequential-only usage — **never** call inside `Promise.all`; always `await` to respect anti-bot pacing.
+3. Automatic 429 retry — honours `Retry-After` header (default 30 s), retries once, then throws `RateLimitError`.
+4. Cloudflare detection — a 200 OK that returns HTML instead of JSON throws a descriptive error rather than a cryptic `SyntaxError`.
 
 ### Required Headers
 
@@ -27,6 +42,7 @@ fetch(url, { credentials: "include" })
 |---|---|---|
 | `Cookie` | _(browser session)_ | Injected automatically by `credentials: "include"` |
 | `Accept` | `application/json` | Ensures JSON responses |
+| `Cache-Control` | `no-cache` | Set automatically by `cache: "no-cache"` — prevents 304 empty-body responses |
 
 > **Note:** `X-CSRF-Token` and `X-Spa-Session-Id` are required by Storypark for
 > state-changing (POST/PUT/DELETE) requests. This extension only performs GET
@@ -427,7 +443,7 @@ Storypark
 | Key | Type | Description |
 |---|---|---|
 | `children` | `Array<{id, name}>` | Cached children list from profile |
-| `activityLog` | `Array<{timestamp, level, message}>` | Rolling 200-entry activity log |
+| `activityLog` | `Array<{timestamp, level, message, storyDate?}>` | Rolling 200-entry activity log; `storyDate` is `DD/MM/YYYY` when a story date is known |
 | `centreLocations` | `Record<string, {lat, lng}>` | GPS coords keyed by centre name |
 | `activeCentreName` | `string` | First discovered centre name (fallback) |
 | `autoThreshold` | `number` (default 85) | Face match % for auto-approve |
