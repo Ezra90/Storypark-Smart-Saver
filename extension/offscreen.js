@@ -40,6 +40,9 @@ import { addToReviewQueue, appendDescriptor,
 
 const HUMAN_CONFIG = {
   modelBasePath: chrome.runtime.getURL("models/"),
+  // Force WebGL backend to avoid WebGPU initialisation errors in extension
+  // offscreen documents (WebGPU may not be fully available in that context).
+  backend: "webgl",
   face: {
     enabled:     true,
     detector:    { enabled: true, modelPath: "blazeface.json", rotation: false },
@@ -259,7 +262,7 @@ const REVOCATION_FALLBACK_MS = 300_000; // 5 minutes
  */
 const _pendingRevocations = new Map();
 
-chrome.downloads.onChanged.addListener((delta) => {
+chrome.downloads?.onChanged?.addListener((delta) => {
   const terminal = delta.state?.current === "complete" ||
                    delta.state?.current === "interrupted";
   if (!terminal) return;

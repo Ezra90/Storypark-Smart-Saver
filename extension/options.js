@@ -93,6 +93,19 @@ function buildCentreRow(name, loc) {
   nameField.appendChild(nameLabel);
   nameField.appendChild(nameInput);
 
+  // Show discovered address (read-only) if available from the Storypark API.
+  // This helps the user confirm the correct centre and use the address for
+  // the Google Maps search link.
+  const address = loc.address || null;
+  if (address) {
+    const addressEl = document.createElement("div");
+    addressEl.style.cssText =
+      "grid-column:1/-1;font-size:11px;color:var(--muted,#9a9aaf);" +
+      "margin:-4px 0 6px;padding-left:2px;";
+    addressEl.textContent = `📍 ${address}`;
+    nameField.appendChild(addressEl);
+  }
+
   // Combined Google Maps URL / coordinates field
   const mapsField = document.createElement("div");
   mapsField.className = "centre-field centre-maps-field";
@@ -146,15 +159,21 @@ function buildCentreRow(name, loc) {
   };
   updateMapsLink();
 
-  // "Search on Google Maps" link — lets the user open a pre-filled Maps search
-  // for this centre name so they can copy the URL and paste it back (Bug 1).
+  // "Search on Google Maps" link — when an address was discovered from the API
+  // it is used as the search query (more precise than the centre name alone);
+  // otherwise fall back to the centre name.  Lets the user copy the Maps URL
+  // and paste it back into the Coordinates field, or click to confirm visually.
   const searchMapsLink = document.createElement("a");
   searchMapsLink.style.cssText  = "font-size:12px; white-space:nowrap; align-self:flex-end; padding-bottom:8px;";
   searchMapsLink.target         = "_blank";
   searchMapsLink.rel            = "noopener";
   searchMapsLink.textContent    = "🔍 Search on Google Maps";
   const updateSearchMapsLink = () => {
-    const q = nameInput.value.trim();
+    // Prefer the full address (name + address) for a more accurate Maps result.
+    const centreName = nameInput.value.trim();
+    const q = address
+      ? `${centreName}, ${address}`
+      : centreName;
     searchMapsLink.href = q
       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
       : "#";
@@ -180,11 +199,16 @@ function buildCentreRow(name, loc) {
     btnLookup.textContent = "Searching…";
     btnLookup.disabled    = true;
     try {
-      // Append childcare/daycare keyword if the name doesn't already include
-      // similar terms, to help Nominatim find the actual childcare business.
-      const lowerQuery = query.toLowerCase();
-      const hasKeyword = /childcare|daycare|kindergarten|preschool|nursery|early learning|child care|day care/.test(lowerQuery);
-      const searchQuery = hasKeyword ? query : `${query} childcare`;
+      // If the API provided an address, combine name + address for accuracy.
+      // Otherwise append a childcare keyword to help Nominatim find the business.
+      let searchQuery;
+      if (address) {
+        searchQuery = `${query}, ${address}`;
+      } else {
+        const lowerQuery = query.toLowerCase();
+        const hasKeyword = /childcare|daycare|kindergarten|preschool|nursery|early learning|child care|day care/.test(lowerQuery);
+        searchQuery = hasKeyword ? query : `${query} childcare`;
+      }
 
       const resp = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=5&addressdetails=1`,
@@ -280,6 +304,7 @@ function buildCentreRow(name, loc) {
       centreLocationsCache[newKey] = {
         lat: coords ? coords.lat : null,
         lng: coords ? coords.lng : null,
+        address: address || centreLocationsCache[newKey]?.address || null,
       };
     }
     updateMapsLink();
