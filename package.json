@@ -1,6 +1,6 @@
 {
   "name": "storypark-smart-saver",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A private, automated tool to save your child's photos and stories from Storypark.",
   "scripts": {
     "setup": "node scripts/setup-libs.js"

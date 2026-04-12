@@ -3,7 +3,7 @@
  *
  * Human runs entirely in the browser via TensorFlow.js, so no server
  * round-trips are needed. Model weights must be placed in extension/models/
- * (populated automatically by running `npm run build`).
+ * (populated automatically by the CI workflow, or manually via `npm run setup`).
  *
  * Workflow:
  *   1. loadModels()              – one-time model init.
@@ -14,7 +14,7 @@
  * also has DOM/Canvas access). This module is used by the Options page for
  * live training-photo quality feedback.
  *
- * Required models (copied to extension/models/ by `npm run build`):
+ * Required models (copied to extension/models/ by the CI workflow or `npm run setup`):
  *   - blazeface  (face detector)
  *   - faceres    (face embedding / descriptor)
  */
@@ -62,7 +62,7 @@ export async function loadModels() {
   if (modelsLoaded) return;
   if (typeof Human === "undefined") {
     throw new Error(
-      "human.js not found. Run `npm run build` to copy it into extension/lib/."
+      "Face recognition models not found. Please reinstall the extension from the latest download."
     );
   }
   human = new Human.Human(HUMAN_CONFIG);
