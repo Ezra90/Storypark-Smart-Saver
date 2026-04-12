@@ -272,7 +272,7 @@ async function sendToOffscreen(message) {
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
-      } else if (!response || response.error || response.ok === false) {
+      } else if (!response || response.ok === false) {
         reject(new Error(response?.error || "Unknown offscreen error"));
       } else {
         resolve(response);
@@ -340,23 +340,23 @@ async function loadAndCacheProfile() {
     // Also fetch each child's individual profile to extract companies[].name.
     // Many accounts don't expose centre names at the /users/me level, but the
     // child profile endpoint reliably includes them under child.companies[].
+    // Fetched sequentially to avoid concurrent requests that could trigger
+    // rate-limit (429/403) responses.
     const childCentreNames = [];
-    await Promise.all(
-      children.map(async (child) => {
-        try {
-          const childData = await apiFetch(`${STORYPARK_BASE}/api/v3/children/${child.id}`);
-          const childObj  = childData.child || childData;
-          const companies = childObj.companies || childObj.services || [];
-          for (const co of companies) {
-            const n = co.name || co.display_name || "";
-            if (n) childCentreNames.push(n);
-          }
-        } catch (err) {
-          // Non-fatal — skip this child if the fetch fails
-          console.warn(`Failed to fetch profile for child ${child.id}:`, err.message);
+    for (const child of children) {
+      try {
+        const childData = await apiFetch(`${STORYPARK_BASE}/api/v3/children/${child.id}`);
+        const childObj  = childData.child || childData;
+        const companies = childObj.companies || childObj.services || [];
+        for (const co of companies) {
+          const n = co.name || co.display_name || "";
+          if (n) childCentreNames.push(n);
         }
-      })
-    );
+      } catch (err) {
+        // Non-fatal — skip this child if the fetch fails
+        console.warn(`Failed to fetch profile for child ${child.id}:`, err.message);
+      }
+    }
     if (childCentreNames.length > 0) {
       await discoverCentres([...new Set(childCentreNames)]);
       const { activeCentreName } = await chrome.storage.local.get("activeCentreName");
@@ -459,14 +459,15 @@ async function fetchStorySummaries(childId, mode) {
 const routineCache = new Map();
 
 async function fetchRoutineSummary(childId, dateStr) {
-  if (routineCache.has(dateStr)) return routineCache.get(dateStr);
+  const cacheKey = `${childId}:${dateStr}`;
+  if (routineCache.has(cacheKey)) return routineCache.get(cacheKey);
 
   try {
     await smartDelay("FEED_SCROLL");
     const url  = `${STORYPARK_BASE}/children/${childId}/routines.json?date=${dateStr}`;
     const data = await apiFetch(url);
     const summary = buildRoutineSummary(data);
-    routineCache.set(dateStr, summary);
+    routineCache.set(cacheKey, summary);
     return summary;
   } catch {
     return "";
@@ -626,10 +627,12 @@ async function runExtraction(childId, childName, mode) {
   let approved = 0;
   let queued   = 0;
   let rejected = 0;
+  let scanCancelled = false;
 
   try {
   for (let si = 0; si < summaries.length; si++) {
     if (cancelRequested) {
+      scanCancelled = true;
       await logger("WARNING", "Scan cancelled by user.");
       chrome.runtime.sendMessage({ type: "LOG", message: "⏹ Scan cancelled." }).catch(() => {});
       break;
@@ -729,7 +732,7 @@ async function runExtraction(childId, childName, mode) {
     // Process each image sequentially
     let aborted = false;
     for (const img of images) {
-      if (cancelRequested) { aborted = true; break; }
+      if (cancelRequested) { scanCancelled = true; aborted = true; break; }
       await smartDelay("DOWNLOAD_MEDIA");
 
       // Compile metadata string to embed in EXIF ImageDescription
@@ -790,7 +793,13 @@ async function runExtraction(childId, childName, mode) {
         );
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
+        // "reject" result: below minThreshold (normal) or processImage threw.
+        // Only log when there is an attached error message to avoid spamming
+        // the log with every below-threshold rejection.
         rejected++;
+        if (result?.error) {
+          await logger("WARNING", `  ✗ Processing error: ${result.error}`);
+        }
       }
     }
 
@@ -798,7 +807,7 @@ async function runExtraction(childId, childName, mode) {
 
     // Process videos — download directly, no face matching
     for (const vid of videos) {
-      if (cancelRequested) { aborted = true; break; }
+      if (cancelRequested) { scanCancelled = true; aborted = true; break; }
       await smartDelay("DOWNLOAD_MEDIA");
 
       // Build a descriptive filename so Google Photos can read the date from it.
@@ -857,12 +866,11 @@ async function runExtraction(childId, childName, mode) {
     // Release the heavy Human AI models immediately to prevent memory leaks.
     await chrome.offscreen.closeDocument().catch(() => {});
     offscreenReady = false;
-    chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
   }
 
   const msg = `Scan complete — Downloaded: ${approved}, Review: ${queued}, Rejected: ${rejected}`;
   await logger("SUCCESS", msg);
-  return { approved, queued, rejected };
+  return { approved, queued, rejected, cancelled: scanCancelled };
 }
 
 /* ================================================================== */
@@ -964,7 +972,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .catch(() => {});
       runExtraction(childId, childName || childId, msg.type)
         .then((stats) => sendResponse({ ok: true, stats }))
-        .catch((err)  => sendResponse({ ok: false, error: err.message }));
+        .catch((err)  => sendResponse({ ok: false, error: err.message }))
+        .finally(() => chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {}));
       return true;
     }
 
@@ -1007,12 +1016,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               totalApproved  += stats.approved;
               totalQueued    += stats.queued;
               totalRejected  += stats.rejected;
+              // Use the cancelled flag returned by runExtraction. Its finally
+              // block resets cancelRequested before we can read it here, so
+              // stats.cancelled is the only reliable indicator.
+              if (stats.cancelled) wasCancelled = true;
+              // Re-assert isScanning so the guard in the message handler
+              // keeps blocking new scan requests between child iterations.
+              // runExtraction's finally sets isScanning=false, so without
+              // this, a new scan could sneak in at the next await point.
+              else isScanning = true;
             } catch (err) {
               await logger("ERROR", `Error scanning ${child.name}: ${err.message}`);
+              // Re-assert isScanning for the same reason as above: the
+              // failed child's finally already cleared it, but the outer
+              // loop should continue to the next child.
+              isScanning = true;
             }
-            // Snapshot cancellation state before runExtraction's finally resets it,
-            // then re-assert isScanning so the outer loop stays active.
-            if (cancelRequested) { wasCancelled = true; } else { isScanning = true; }
           }
         } finally {
           isScanning      = false;

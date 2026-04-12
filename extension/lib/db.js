@@ -211,17 +211,21 @@ export async function getAllDescriptors() {
  *                                            both are normalised to number[].
  */
 export async function appendDescriptor(childId, childName, descriptor) {
-  const existing    = await getDescriptors(childId);
-  const descriptors = existing?.descriptors ?? [];
-  descriptors.push(Array.from(descriptor));
-  if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
-    descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
-  }
-
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_KNOWN_DESCRIPTORS, "readwrite");
-    tx.objectStore(STORE_KNOWN_DESCRIPTORS).put({ childId, childName, descriptors });
+    const tx    = db.transaction(STORE_KNOWN_DESCRIPTORS, "readwrite");
+    const store = tx.objectStore(STORE_KNOWN_DESCRIPTORS);
+    const req   = store.get(childId);
+    req.onsuccess = () => {
+      const existing    = req.result ?? null;
+      const descriptors = existing?.descriptors ?? [];
+      descriptors.push(Array.from(descriptor));
+      if (descriptors.length > MAX_DESCRIPTORS_PER_CHILD) {
+        descriptors.splice(0, descriptors.length - MAX_DESCRIPTORS_PER_CHILD);
+      }
+      const putReq      = store.put({ childId, childName, descriptors });
+      putReq.onerror    = () => reject(putReq.error);
+    };
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror    = () => { db.close(); reject(tx.error); };
   });
