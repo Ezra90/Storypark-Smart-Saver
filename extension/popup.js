@@ -225,16 +225,18 @@ childSelect.addEventListener("change", () => {
   }
 });
 
+function updateCentreInfoDisplay() {
+  chrome.storage.local.get("activeCentreName", ({ activeCentreName }) => {
+    const el = document.getElementById("centreInfo");
+    if (el) el.textContent = activeCentreName ? `📍 ${activeCentreName}` : "";
+  });
+}
+
 function loadChildren() {
   chrome.runtime.sendMessage({ type: "GET_CHILDREN" }, (res) => {
     if (res?.ok) populateChildren(res.children);
   });
-  chrome.storage.local.get("activeCentreName", ({ activeCentreName }) => {
-    const el = document.getElementById("centreInfo");
-    if (el && activeCentreName) {
-      el.textContent = `📍 ${activeCentreName}`;
-    }
-  });
+  updateCentreInfoDisplay();
 }
 
 btnRefresh.addEventListener("click", () => {
@@ -250,10 +252,7 @@ btnRefresh.addEventListener("click", () => {
     }
     if (res?.ok) {
       populateChildren(res.children);
-      chrome.storage.local.get("activeCentreName", ({ activeCentreName }) => {
-        const el = document.getElementById("centreInfo");
-        if (el) el.textContent = activeCentreName ? `📍 ${activeCentreName}` : "";
-      });
+      updateCentreInfoDisplay();
     } else {
       childSelect.innerHTML =
         '<option value="">Failed — open Storypark in a tab and try again</option>';

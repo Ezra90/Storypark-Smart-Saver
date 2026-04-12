@@ -2521,6 +2521,8 @@ async function applyExif(blob, date, description, gpsCoords) {
         desc = desc.replace(/[^\x20-\x7E]/g, '');
         // Collapse multiple spaces/pipes
         desc = desc.replace(/(\s*\|\s*)+/g, ' | ');
+        // Remove any leading or trailing pipe separators
+        desc = desc.replace(/^\s*\|\s*|\s*\|\s*$/g, '');
         desc = desc.trim();
         const asciiDesc = desc.slice(0, 2000);
 
