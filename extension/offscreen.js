@@ -16,6 +16,9 @@
  *         childName, savePath }
  *   OUT { ok: true } | { ok: false, error: string }
  *
+ *   IN  { type: "DOWNLOAD_VIDEO", videoUrl, savePath }
+ *   OUT { ok: true } | { ok: false, error: string }
+ *
  *   IN  { type: "BUILD_ENCODING", imageDataUrl }
  *   OUT { ok: true, descriptor: number[] }
  *   OUT { ok: false, error: string }
@@ -458,6 +461,34 @@ async function downloadApproved(msg) {
 }
 
 /* ================================================================== */
+/*  Download video directly (no face detection, no EXIF)              */
+/* ================================================================== */
+
+/**
+ * Fetch a video URL and save it to disk via chrome.downloads.
+ * Does NOT apply EXIF (EXIF is a JPEG-only standard) and does NOT
+ * run face detection.
+ *
+ * Message protocol:
+ *   IN  { type: "DOWNLOAD_VIDEO", videoUrl, savePath }
+ *   OUT { ok: true } | { ok: false, error: string }
+ *
+ * @param {{ videoUrl: string, savePath: string }} msg
+ */
+async function downloadVideo(msg) {
+  const { videoUrl, savePath } = msg;
+
+  const res = await fetch(videoUrl, { credentials: "include" });
+  if (!res.ok) throw new Error(`Video fetch ${res.status}: ${videoUrl}`);
+
+  const buffer = await res.arrayBuffer();
+  const contentType = res.headers.get("content-type") || "video/mp4";
+  const blob = new Blob([buffer], { type: contentType });
+
+  await downloadBlob(blob, savePath);
+}
+
+/* ================================================================== */
 /*  Message router                                                     */
 /* ================================================================== */
 
@@ -472,6 +503,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === "DOWNLOAD_APPROVED") {
     downloadApproved(msg)
+      .then(()    => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === "DOWNLOAD_VIDEO") {
+    downloadVideo(msg)
       .then(()    => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;

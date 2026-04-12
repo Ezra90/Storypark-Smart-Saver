@@ -139,16 +139,16 @@ function formatDateDMY(isoOrYMD) {
  * Delay profiles (ms ranges) keyed by action type.
  */
 const DELAY_PROFILES = {
-  FEED_SCROLL:    [800,  1500],
-  READ_STORY:     [2500, 6000],
-  DOWNLOAD_IMAGE: [1000, 2000],
+  FEED_SCROLL:     [800,  1500],
+  READ_STORY:      [2500, 6000],
+  DOWNLOAD_MEDIA:  [1000, 2000],
 };
 
 /**
  * Smart human-paced delay that replaces the old sleep().
  * Every 15–25 requests forces an extended "Coffee Break" pause.
  *
- * @param {"FEED_SCROLL"|"READ_STORY"|"DOWNLOAD_IMAGE"} actionType
+ * @param {"FEED_SCROLL"|"READ_STORY"|"DOWNLOAD_MEDIA"} actionType
  */
 async function smartDelay(actionType) {
   if (cancelRequested) return;
@@ -501,6 +501,29 @@ function buildRoutineSummary(data) {
 /** Characters forbidden in filesystem filenames across Windows/macOS/Linux. */
 const INVALID_FILENAME_CHARS = /[/\\:*?"<>|]/g;
 
+/** File extensions that indicate a video media item. */
+const VIDEO_EXTENSIONS = /\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+
+/**
+ * Return true if a Storypark media item is a video rather than an image.
+ * Checks content_type first, then falls back to file extension heuristics.
+ *
+ * @param {{ content_type?: string, type?: string, filename?: string, original_url?: string }} mediaItem
+ * @returns {boolean}
+ */
+function isVideoMedia(mediaItem) {
+  const ct = (mediaItem.content_type || mediaItem.type || "").toLowerCase();
+  if (ct.startsWith("video/")) return true;
+  const url = mediaItem.original_url || "";
+  const filename = mediaItem.filename || extractFilenameFromUrl(url);
+  return VIDEO_EXTENSIONS.test(filename);
+}
+
+/** Extract the filename portion from a URL, stripping query parameters. */
+function extractFilenameFromUrl(url) {
+  return (url.split("/").pop() || "").split("?")[0];
+}
+
 function sanitizeName(name) {
   return (name || "Unknown").replace(INVALID_FILENAME_CHARS, "_").trim() || "Unknown";
 }
@@ -669,20 +692,31 @@ async function runExtraction(childId, childName, mode) {
       }
     }
 
-    // Collect images with original_url
+    // Collect media items with original_url, split into images and videos
     const mediaItems = story.media_items || story.assets || story.media || [];
-    const images = mediaItems
-      .filter((m) => m.original_url)
+    const itemsWithUrl = mediaItems.filter((m) => m.original_url);
+    const images = itemsWithUrl
+      .filter((m) => !isVideoMedia(m))
       .map((m) => ({
         originalUrl: m.original_url,
         filename: sanitizeName(
           m.filename ||
-          m.original_url.split("/").pop().split("?")[0] ||
+          extractFilenameFromUrl(m.original_url) ||
           `${summary.id}.jpg`
         ),
       }));
+    const videos = itemsWithUrl
+      .filter((m) => isVideoMedia(m))
+      .map((m) => ({
+        originalUrl: m.original_url,
+        filename: sanitizeName(
+          m.filename ||
+          extractFilenameFromUrl(m.original_url) ||
+          `${summary.id}.mp4`
+        ),
+      }));
 
-    if (images.length === 0) {
+    if (images.length === 0 && videos.length === 0) {
       await markStoryProcessed(summary.id, createdAt, childId);
       continue;
     }
@@ -696,7 +730,7 @@ async function runExtraction(childId, childName, mode) {
     let aborted = false;
     for (const img of images) {
       if (cancelRequested) { aborted = true; break; }
-      await smartDelay("DOWNLOAD_IMAGE");
+      await smartDelay("DOWNLOAD_MEDIA");
 
       // Compile metadata string to embed in EXIF ImageDescription
       const description = buildDescription(
@@ -757,6 +791,54 @@ async function runExtraction(childId, childName, mode) {
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
         rejected++;
+      }
+    }
+
+    if (aborted) break;
+
+    // Process videos — download directly, no face matching
+    for (const vid of videos) {
+      if (cancelRequested) { aborted = true; break; }
+      await smartDelay("DOWNLOAD_MEDIA");
+
+      // Build a descriptive filename so Google Photos can read the date from it.
+      // Google Photos recognises YYYY-MM-DD at the start of a filename and uses
+      // it to place the video on the correct date in the timeline (MP4 containers
+      // cannot carry EXIF, so the filename date is the only reliable signal).
+      // Format: YYYY-MM-DD_ChildName[_RoomName]_originalname.ext
+      const dotIdx     = vid.filename.lastIndexOf(".");
+      const baseName   = dotIdx >= 0 ? vid.filename.slice(0, dotIdx) : vid.filename;
+      const ext        = dotIdx >= 0 ? vid.filename.slice(dotIdx + 1) : "mp4";
+      const nameParts  = [
+        storyDateStr,
+        sanitizeName(childName),
+        roomName ? sanitizeName(roomName) : null,
+        baseName,
+      ].filter(Boolean);
+      const videoFilename = sanitizeName(`${nameParts.join("_")}.${ext}`);
+      const savePath = `Storypark_Smart_Saver/${sanitizeName(childName)}/${videoFilename}`;
+
+      try {
+        await sendToOffscreen({
+          type: "DOWNLOAD_VIDEO",
+          videoUrl: vid.originalUrl,
+          savePath,
+        });
+        approved++;
+        const dateSuffix = storyDateStr ? ` [${formatDateDMY(storyDateStr)}]` : "";
+        await logger("SUCCESS", `  🎬 Downloaded video: ${videoFilename} for ${childName}${dateSuffix}`);
+      } catch (err) {
+        if (err.name === "AuthError" || err.message.includes("401")) {
+          await logger("ERROR", `🛑 ${err.message} — stopping scan.`);
+          aborted = true;
+          break;
+        }
+        if (err.name === "RateLimitError" || err.message.includes("429") || err.message.includes("403")) {
+          await logger("ERROR", `🛑 ${err.message} — stopping scan.`);
+          aborted = true;
+          break;
+        }
+        await logger("WARNING", `  ✗ Video download error: ${err.message}`);
       }
     }
 
