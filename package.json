@@ -6,6 +6,7 @@
     "setup": "node scripts/setup-libs.js"
   },
   "devDependencies": {
-    "@vladmandic/human": "^3.3.6"
+    "@vladmandic/human": "^3.3.6",
+    "acorn": "^8.16.0"
   }
 }
