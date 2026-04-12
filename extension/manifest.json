@@ -17,7 +17,8 @@
   ],
   "host_permissions": [
     "*://app.storypark.com/*",
-    "*://assets.storypark.com/*"
+    "*://assets.storypark.com/*",
+    "*://nominatim.openstreetmap.org/*"
   ],
   "background": {
     "service_worker": "background.js",

@@ -142,6 +142,58 @@ function buildCentreRow(name, loc) {
   };
   updateMapsLink();
 
+  // "Search on Google Maps" link — lets the user open a pre-filled Maps search
+  // for this centre name so they can copy the URL and paste it back (Bug 1).
+  const searchMapsLink = document.createElement("a");
+  searchMapsLink.style.cssText  = "font-size:12px; white-space:nowrap; align-self:flex-end; padding-bottom:8px;";
+  searchMapsLink.target         = "_blank";
+  searchMapsLink.rel            = "noopener";
+  searchMapsLink.textContent    = "🔍 Search on Google Maps";
+  const updateSearchMapsLink = () => {
+    const q = nameInput.value.trim();
+    searchMapsLink.href = q
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
+      : "#";
+    searchMapsLink.style.display = q ? "" : "none";
+  };
+  updateSearchMapsLink();
+  nameInput.addEventListener("input", updateSearchMapsLink);
+
+  // "Auto-Lookup" button — uses Nominatim OSM to geocode the centre name (Bug 1).
+  const btnLookup = document.createElement("button");
+  btnLookup.className   = "btn-add";
+  btnLookup.textContent = "🔍 Auto-Lookup";
+  btnLookup.type        = "button";
+  btnLookup.style.cssText = "width:auto;padding:6px 12px;margin:0;font-size:12px;align-self:flex-end;";
+  btnLookup.title = "Automatically look up GPS coordinates from the centre name using OpenStreetMap";
+  btnLookup.addEventListener("click", async () => {
+    const query = nameInput.value.trim();
+    if (!query) {
+      alert("Enter a centre name first.");
+      return;
+    }
+    const origText    = btnLookup.textContent;
+    btnLookup.textContent = "Searching…";
+    btnLookup.disabled    = true;
+    try {
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+        { headers: { "User-Agent": "StoryparkSmartSaver/2.0" } }
+      );
+      const results = await resp.json();
+      if (results.length > 0) {
+        mapsInput.value = `${results[0].lat}, ${results[0].lon}`;
+        updateCache();
+      } else {
+        alert("No results found for that name. Try adding the suburb or city (e.g. \"Sunshine Childcare Brisbane\").");
+      }
+    } catch (e) {
+      alert("Auto-lookup failed: " + e.message);
+    }
+    btnLookup.textContent = origText;
+    btnLookup.disabled    = false;
+  });
+
   // Remove button
   const btnRemove = document.createElement("button");
   btnRemove.className   = "btn-remove-centre";
@@ -156,7 +208,9 @@ function buildCentreRow(name, loc) {
 
   row.appendChild(nameField);
   row.appendChild(mapsField);
+  row.appendChild(searchMapsLink);
   row.appendChild(mapsLink);
+  row.appendChild(btnLookup);
   row.appendChild(btnRemove);
 
   // Keep cache in sync on input changes
@@ -440,10 +494,37 @@ function renderTrainingPreviews() {
   btnSaveTraining.disabled = pendingTrainingFiles.length === 0;
 }
 
-trainingChildSelect.addEventListener("change", () => {
+/**
+ * Refresh the training status indicator for a given child (Bug 2).
+ * Reads descriptor count from IndexedDB and displays a quality indicator.
+ *
+ * @param {string} childId
+ */
+async function refreshTrainingStatus(childId) {
+  const statusEl = document.getElementById("trainingStatus");
+  if (!statusEl) return;
+  if (!childId) { statusEl.innerHTML = ""; return; }
+  try {
+    const data  = await getDescriptors(childId).catch(() => null);
+    const count = data?.descriptors?.length ?? 0;
+    const max   = 30;
+    if (count === 0) {
+      statusEl.innerHTML = `<span style="color:var(--warning);">⚠ No training data yet. Upload at least 10 photos for best results.</span>`;
+    } else if (count < 10) {
+      statusEl.innerHTML = `<span style="color:var(--warning);">🟡 ${count}/${max} face descriptors stored — needs more photos to improve accuracy.</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--success);">✅ ${count}/${max} face descriptors stored — model is well-trained.</span>`;
+    }
+  } catch {
+    statusEl.innerHTML = "";
+  }
+}
+
+trainingChildSelect.addEventListener("change", async () => {
   pendingTrainingFiles = [];
   trainingFileInput.value = "";
   renderTrainingPreviews();
+  await refreshTrainingStatus(trainingChildSelect.value);
 });
 
 trainingFileInput.addEventListener("change", async () => {
@@ -582,6 +663,8 @@ btnSaveTraining.addEventListener("click", async () => {
     showToast(`✓ Saved ${saved} training photo(s) for ${childName}`);
     pendingTrainingFiles = [];
     renderTrainingPreviews();
+    // Refresh training status to reflect newly-saved descriptors (Bug 2)
+    await refreshTrainingStatus(childId);
   } else {
     alert("No faces could be detected. Please try again with clearer, well-lit photos.");
   }
@@ -667,6 +750,8 @@ btnResetFaceData.addEventListener("click", () => {
       showToast(`✓ Face data reset for ${childName}`);
       pendingTrainingFiles = [];
       renderTrainingPreviews();
+      // Refresh training status after reset (Bug 2)
+      refreshTrainingStatus(childId);
     } else {
       alert("Reset failed: " + (res?.error || "Unknown error"));
     }

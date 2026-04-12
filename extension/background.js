@@ -7,8 +7,10 @@
  * Message handlers exposed to popup / options:
  *   GET_CHILDREN      – Return cached children list
  *   REFRESH_PROFILE   – Re-fetch profile from API and update cache
- *   EXTRACT_LATEST    – Incremental fetch (stops at known stories)
- *   DEEP_RESCAN       – Full paginated fetch ignoring history
+ *   EXTRACT_LATEST       – Incremental fetch (stops at known stories)
+ *   DEEP_RESCAN          – Full paginated fetch ignoring history
+ *   EXTRACT_ALL_LATEST   – Incremental fetch for every cached child sequentially
+ *   DEEP_RESCAN_ALL      – Full paginated fetch for every cached child sequentially
  *   GET_REVIEW_QUEUE  – Return the IndexedDB HITL queue
  *   REVIEW_APPROVE    – Confirm face, update descriptor, download photo
  *   REVIEW_REJECT     – Discard review queue item
@@ -827,6 +829,68 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
     }
 
+    case "EXTRACT_ALL_LATEST":
+    case "DEEP_RESCAN_ALL": {
+      if (isScanning) {
+        sendResponse({ ok: false, error: "A scan is already in progress." });
+        return false;
+      }
+      isScanning      = true;
+      cancelRequested = false;
+      chrome.storage.session
+        .set({ isScanning: true, cancelRequested: false, _requestCount: 0 })
+        .catch(() => {});
+      (async () => {
+        const { children = [] } = await chrome.storage.local.get("children");
+        if (children.length === 0) {
+          isScanning = false;
+          chrome.storage.session.set({ isScanning: false }).catch(() => {});
+          sendResponse({ ok: false, error: "No children cached. Refresh your profile first." });
+          return;
+        }
+        const mode = msg.type === "EXTRACT_ALL_LATEST" ? "EXTRACT_LATEST" : "DEEP_RESCAN";
+        let totalApproved = 0, totalQueued = 0, totalRejected = 0;
+        let wasCancelled  = false;
+        try {
+          for (let i = 0; i < children.length; i++) {
+            // Stop before the next child if a cancel was requested.
+            // wasCancelled snapshots the state because runExtraction's finally
+            // block resets cancelRequested to false after each child.
+            if (wasCancelled) break;
+            const child = children[i];
+            await logger("INFO", `Scanning ${child.name} (${i + 1}/${children.length})…`);
+            chrome.runtime.sendMessage({
+              type: "LOG",
+              message: `📋 Scanning ${child.name} (${i + 1}/${children.length})…`,
+            }).catch(() => {});
+            try {
+              const stats = await runExtraction(child.id, child.name, mode);
+              totalApproved  += stats.approved;
+              totalQueued    += stats.queued;
+              totalRejected  += stats.rejected;
+            } catch (err) {
+              await logger("ERROR", `Error scanning ${child.name}: ${err.message}`);
+            }
+            // Snapshot cancellation state before runExtraction's finally resets it,
+            // then re-assert isScanning so the outer loop stays active.
+            if (cancelRequested) { wasCancelled = true; } else { isScanning = true; }
+          }
+        } finally {
+          isScanning      = false;
+          cancelRequested = false;
+          chrome.storage.session
+            .set({ isScanning: false, cancelRequested: false })
+            .catch(() => {});
+          chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
+        }
+        sendResponse({
+          ok: true,
+          stats: { approved: totalApproved, queued: totalQueued, rejected: totalRejected },
+        });
+      })().catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
     case "CANCEL_SCAN": {
       cancelRequested = true;
       // Persist so the popup sees the cancellation state even after SW suspend.
@@ -841,9 +905,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     case "TEST_CONNECTION": {
-      apiFetch(`${STORYPARK_BASE}/api/v3/profile`)
-        .then(()    => sendResponse({ ok: true }))
-        .catch(() => sendResponse({ ok: false }));
+      apiFetch(`${STORYPARK_BASE}/api/v3/users/me`)
+        .then((data) => {
+          const email = data?.user?.email || data?.email || "";
+          sendResponse({ ok: true, email });
+        })
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }
 

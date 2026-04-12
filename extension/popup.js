@@ -75,9 +75,11 @@ btnTestConnection.addEventListener("click", () => {
       return;
     }
     if (res?.ok) {
-      showToast("✅ Connected", "success");
+      const detail = res.email ? ` (${res.email})` : "";
+      showToast(`✅ Connected${detail}`, "success");
     } else {
-      showToast("❌ Please log in to Storypark", "error");
+      const detail = res?.error ? `: ${res.error}` : "";
+      showToast(`❌ Not connected${detail} — open Storypark in a tab and try again`, "error");
     }
   });
 });
@@ -195,8 +197,11 @@ function setStatus(color, text) {
 /*  Children dropdown                                                  */
 /* ================================================================== */
 
+const ALL_CHILDREN_VALUE = "__ALL__";
+
 function populateChildren(children) {
   childSelect.innerHTML = "";
+
   if (!children || children.length === 0) {
     const opt = document.createElement("option");
     opt.value = "";
@@ -208,20 +213,43 @@ function populateChildren(children) {
     btnDeepRescan.disabled    = true;
     return;
   }
+
+  // "All Children" option at the top (Feature 1)
+  const allOpt = document.createElement("option");
+  allOpt.value       = ALL_CHILDREN_VALUE;
+  allOpt.textContent = "👨‍👩‍👧‍👦 All Children";
+  childSelect.appendChild(allOpt);
+
   for (const child of children) {
     const opt = document.createElement("option");
     opt.value = child.id;
     opt.textContent = child.name;
     childSelect.appendChild(opt);
   }
-  setRunning(false);
+
+  // Restore previously-selected child (Bug 5), then enable buttons (Bug 4)
+  chrome.storage.local.get("lastSelectedChildId", ({ lastSelectedChildId }) => {
+    if (lastSelectedChildId) {
+      const exists = [...childSelect.options].some((o) => o.value === lastSelectedChildId);
+      if (exists) childSelect.value = lastSelectedChildId;
+    }
+    if (!isRunning && childSelect.value) {
+      btnExtractLatest.disabled = false;
+      btnDeepRescan.disabled    = false;
+    }
+  });
 }
 
-// Re-enable scan buttons when the user selects a valid child.
+// Re-enable scan buttons when the user selects a valid child (Bug 4).
+// Also persist the selection across popup opens (Bug 5).
 childSelect.addEventListener("change", () => {
+  chrome.storage.local.set({ lastSelectedChildId: childSelect.value });
   if (!isRunning && childSelect.value) {
     btnExtractLatest.disabled = false;
     btnDeepRescan.disabled    = false;
+  } else if (!childSelect.value) {
+    btnExtractLatest.disabled = true;
+    btnDeepRescan.disabled    = true;
   }
 });
 
@@ -295,6 +323,12 @@ function triggerExtraction(type) {
     return;
   }
 
+  // "All Children" mode — send a different message type (Feature 1)
+  const isAll = childId === ALL_CHILDREN_VALUE;
+  const msgType = isAll
+    ? (type === "EXTRACT_LATEST" ? "EXTRACT_ALL_LATEST" : "DEEP_RESCAN_ALL")
+    : type;
+
   setRunning(true);
   clearLog();
   progressBar.value           = 0;
@@ -308,11 +342,11 @@ function triggerExtraction(type) {
   );
   appendLog(
     type === "EXTRACT_LATEST"
-      ? "Starting incremental download…"
-      : "Starting full history scan…"
+      ? (isAll ? "Starting incremental download for all children…" : "Starting incremental download…")
+      : (isAll ? "Starting full history scan for all children…" : "Starting full history scan…")
   );
 
-  chrome.runtime.sendMessage({ type, childId, childName }, (res) => {
+  chrome.runtime.sendMessage({ type: msgType, childId, childName }, (res) => {
     setRunning(false);
     if (chrome.runtime.lastError) {
       setStatus("red", "Error");
@@ -351,8 +385,14 @@ btnStopScan.addEventListener("click", () => {
 /* ================================================================== */
 
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "LOG")                appendLog(msg.message);
-  if (msg.type === "LOG_ENTRY")          appendActivityEntry(msg.entry);
+  if (msg.type === "LOG")       appendLog(msg.message);
+  if (msg.type === "LOG_ENTRY") {
+    // Update the Activity Log tab
+    appendActivityEntry(msg.entry);
+    // Also mirror into the inline log box on the Save Photos tab (Bug 6)
+    const ts = new Date(msg.entry.timestamp).toLocaleTimeString(undefined, { hour12: false });
+    appendLog(`[${ts}] [${msg.entry.level}] ${msg.entry.message}`);
+  }
   if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
 
   if (msg.type === "PROGRESS") {
