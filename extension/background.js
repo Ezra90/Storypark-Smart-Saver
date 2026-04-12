@@ -715,9 +715,10 @@ async function discoverCentres(centres) {
  *
  * @param {string} childId
  * @param {"EXTRACT_LATEST"|"DEEP_RESCAN"} mode
+ * @param {string} [childName]
  * @returns {Promise<Array<{id, created_at}>>}
  */
-async function fetchStorySummaries(childId, mode) {
+async function fetchStorySummaries(childId, mode, childName) {
   const knownIds =
     mode === "EXTRACT_LATEST"
       ? new Set((await getProcessedStories()).map((s) => s.storyId))
@@ -739,7 +740,7 @@ async function fetchStorySummaries(childId, mode) {
     url.searchParams.set("story_type", "all");
     if (pageToken) url.searchParams.set("next_page_token", pageToken);
 
-    await logger("INFO", `Fetching story page ${pageNum + 1}…`);
+    await logger("INFO", `Fetching story page ${pageNum + 1}${childName ? ` for ${childName}` : ""}…`);
     const data   = await apiFetch(url.toString());
     const stories = data.stories || data.items || [];
 
@@ -761,7 +762,7 @@ async function fetchStorySummaries(childId, mode) {
     await smartDelay("FEED_SCROLL");
   }
 
-  await logger("INFO", `Found ${summaries.length} stories to process.`);
+  await logger("INFO", `Found ${summaries.length} stories to process${childName ? ` for ${childName}` : ""}.`);
   return summaries;
 }
 
@@ -953,7 +954,7 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
     descriptors: d.descriptors,
   }));
 
-  const summaries = await fetchStorySummaries(childId, mode);
+  const summaries = await fetchStorySummaries(childId, mode, childName);
   const totalStories = summaries.length;
 
   // Pre-populate the discovered-centre cache with names already in storage so

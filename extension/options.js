@@ -297,8 +297,8 @@ function buildCentreRow(name, loc) {
       mapsInput.value = `${coords.lat}, ${coords.lng}`;
     }
 
-    if (oldKey && oldKey !== newKey) {
-      delete centreLocationsCache[oldKey];
+    if (oldKey !== newKey) {
+      if (oldKey) delete centreLocationsCache[oldKey];
       nameInput.dataset.originalName = newKey;
     }
     if (newKey) {
@@ -310,7 +310,14 @@ function buildCentreRow(name, loc) {
     }
     updateMapsLink();
   };
-  nameInput.addEventListener("input", updateCache);
+
+  // Debounce the name-field handler so intermediate keystrokes don't create
+  // partial-name keys in centreLocationsCache (e.g. "B", "Ba", "Bah"…).
+  let nameDebounceTimer = null;
+  nameInput.addEventListener("input", () => {
+    clearTimeout(nameDebounceTimer);
+    nameDebounceTimer = setTimeout(updateCache, 500);
+  });
   mapsInput.addEventListener("input",  updateCache);
   mapsInput.addEventListener("paste",  () => setTimeout(updateCache, 0));
 
@@ -334,7 +341,26 @@ function renderCentreList(locations) {
 
 function loadCentreLocations() {
   chrome.storage.local.get("centreLocations", ({ centreLocations = {} }) => {
-    centreLocationsCache = centreLocations;
+    // Prune partial-prefix junk entries left by the old keystroke-per-save bug.
+    // A key is considered junk if it has no coordinates AND there is another
+    // key that starts with it followed by more characters (i.e. it is a strict
+    // prefix of a longer, more-complete name).
+    const allKeys = Object.keys(centreLocations);
+    const cleaned = { ...centreLocations };
+    for (const key of allKeys) {
+      const loc = centreLocations[key];
+      if (loc.lat == null && loc.lng == null) {
+        const isPrefix = allKeys.some(
+          (other) => other !== key && other.startsWith(key)
+        );
+        if (isPrefix) delete cleaned[key];
+      }
+    }
+    centreLocationsCache = cleaned;
+    // Persist the cleaned copy so junk doesn't reappear on next load.
+    if (Object.keys(cleaned).length !== allKeys.length) {
+      chrome.storage.local.set({ centreLocations: cleaned });
+    }
     renderCentreList(centreLocationsCache);
   });
 }
@@ -371,6 +397,26 @@ btnDiscoverCentres.addEventListener("click", () => {
 btnSaveLocations.addEventListener("click", async () => {
   btnSaveLocations.disabled    = true;
   btnSaveLocations.textContent = "Saving…";
+
+  // Rebuild from the actual DOM rows to ensure any pending debounced name
+  // changes are captured and no stale partial-key entries are saved.
+  const freshCache = {};
+  for (const row of centreList.querySelectorAll(".centre-row")) {
+    const nameEl  = row.querySelector("input[type=text]");
+    const mapsEl  = row.querySelectorAll("input[type=text]")[1];
+    if (!nameEl) continue;
+    const key    = nameEl.value.trim();
+    if (!key) continue;
+    const coords = mapsEl ? parseCoords(mapsEl.value) : null;
+    const cached = centreLocationsCache[key] || {};
+    freshCache[key] = {
+      lat:     coords ? coords.lat : cached.lat  ?? null,
+      lng:     coords ? coords.lng : cached.lng  ?? null,
+      address: cached.address ?? null,
+    };
+  }
+  centreLocationsCache = freshCache;
+
   await chrome.storage.local.set({ centreLocations: centreLocationsCache });
   btnSaveLocations.disabled    = false;
   btnSaveLocations.textContent = "💾 Save Locations";
