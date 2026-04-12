@@ -9,7 +9,7 @@
  */
 
 import { loadModels, detectFaces, matchEmbedding } from "./lib/face.js";
-import { getDescriptors } from "./lib/db.js";
+import { getDescriptors, setDescriptors } from "./lib/db.js";
 
 /* ================================================================== */
 /*  Element refs                                                       */
@@ -23,6 +23,7 @@ const minThresholdRange   = document.getElementById("minThresholdRange");
 const minThresholdNumber  = document.getElementById("minThresholdNumber");
 const centreList           = document.getElementById("centreList");
 const btnAddCentre         = document.getElementById("btnAddCentre");
+const btnDiscoverCentres   = document.getElementById("btnDiscoverCentres");
 const btnSaveLocations     = document.getElementById("btnSaveLocations");
 const trainingChildSelect  = document.getElementById("trainingChildSelect");
 const trainingFileInput    = document.getElementById("trainingFileInput");
@@ -31,6 +32,9 @@ const trainingProgress     = document.getElementById("trainingProgress");
 const trainingLoading      = document.getElementById("trainingLoading");
 const trainingLoadingBar   = document.getElementById("trainingLoadingBar");
 const btnSaveTraining      = document.getElementById("btnSaveTraining");
+const btnExportProfile     = document.getElementById("btnExportProfile");
+const btnImportProfile     = document.getElementById("btnImportProfile");
+const importProfileInput   = document.getElementById("importProfileInput");
 const btnResetFaceData     = document.getElementById("btnResetFaceData");
 const btnSave              = document.getElementById("btnSave");
 const toast                = document.getElementById("toast");
@@ -316,6 +320,26 @@ btnAddCentre.addEventListener("click", () => {
   const name = `New Centre ${idx}`;
   centreLocationsCache[name] = { lat: null, lng: null };
   centreList.appendChild(buildCentreRow(name, { lat: null, lng: null }));
+});
+
+btnDiscoverCentres.addEventListener("click", () => {
+  const orig = btnDiscoverCentres.textContent;
+  btnDiscoverCentres.disabled    = true;
+  btnDiscoverCentres.textContent = "Discovering…";
+  chrome.runtime.sendMessage({ type: "DISCOVER_CENTRES" }, (res) => {
+    btnDiscoverCentres.disabled    = false;
+    btnDiscoverCentres.textContent = orig;
+    if (res?.ok) {
+      // Reload the centre list to reflect any newly-added centres.
+      loadCentreLocations();
+      showToast("✓ Centre list refreshed from Storypark");
+    } else {
+      alert(
+        "Could not discover centres: " +
+          (res?.error || "Make sure Storypark is open in a tab and you are logged in.")
+      );
+    }
+  });
 });
 
 btnSaveLocations.addEventListener("click", async () => {
@@ -674,25 +698,38 @@ btnSaveTraining.addEventListener("click", async () => {
   for (let i = 0; i < pendingTrainingFiles.length; i++) {
     const entry = pendingTrainingFiles[i];
     try {
-      await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          {
+      // Prefer sending the descriptor that the live preview already computed
+      // (from lib/face.js running in the options page).  This avoids a second
+      // round-trip to the offscreen document and prevents failures caused by
+      // the offscreen Human instance not being initialised at training time.
+      // Fall back to PROCESS_TRAINING_IMAGE (offscreen re-detection) only when
+      // no descriptor was produced by the live preview (face API unavailable or
+      // the user skipped the preview by loading the page without human.js).
+      const msgPayload = entry.descriptor
+        ? {
+            type:       "SAVE_TRAINING_DESCRIPTOR",
+            childId,
+            childName,
+            descriptor: Array.from(entry.descriptor),
+          }
+        : {
             type:         "PROCESS_TRAINING_IMAGE",
             childId,
             childName,
             imageDataUri: entry.dataUrl,
             faceIndex:    entry.selectedFaceIndex ?? 0,
-          },
-          (res) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (!res?.ok) {
-              reject(new Error(res?.error || "Unknown error"));
-            } else {
-              resolve();
-            }
+          };
+
+      await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(msgPayload, (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (!res?.ok) {
+            reject(new Error(res?.error || "Unknown error"));
+          } else {
+            resolve();
           }
-        );
+        });
       });
       saved++;
     } catch (err) {
@@ -728,6 +765,124 @@ function showToast(msg = "✓ Settings saved!") {
   toast.style.display    = "block";
   setTimeout(() => { toast.style.display = "none"; }, 2500);
 }
+
+/* ================================================================== */
+/*  Facial profile export / import                                     */
+/* ================================================================== */
+
+/** Maximum descriptors kept per child – must match db.js constant. */
+const MAX_DESCRIPTORS_PER_CHILD = 30;
+
+btnExportProfile.addEventListener("click", async () => {
+  const childId = trainingChildSelect.value;
+  if (!childId) {
+    alert("Please select a child first.");
+    return;
+  }
+  const childName =
+    trainingChildSelect.options[trainingChildSelect.selectedIndex]?.textContent || "";
+
+  const data = await getDescriptors(childId).catch(() => null);
+  if (!data || !data.descriptors || data.descriptors.length === 0) {
+    alert("No training data to export for this child. Save some training photos first.");
+    return;
+  }
+
+  const exportPayload = {
+    version:    1,
+    exportDate: new Date().toISOString(),
+    childId:    data.childId,
+    childName:  data.childName || childName,
+    descriptors: data.descriptors,
+  };
+
+  const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `storypark-face-${(childName || childId).replace(/\s+/g, "-").toLowerCase()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  showToast(`✓ Exported ${data.descriptors.length} descriptors for ${childName}`);
+});
+
+btnImportProfile.addEventListener("click", () => {
+  importProfileInput.click();
+});
+
+importProfileInput.addEventListener("change", async () => {
+  const file = importProfileInput.files?.[0];
+  if (!file) return;
+  importProfileInput.value = "";
+
+  let parsed;
+  try {
+    const text = await new Promise((resolve, reject) => {
+      const reader  = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+    parsed = JSON.parse(text);
+  } catch (e) {
+    alert("Could not read the file: " + e.message);
+    return;
+  }
+
+  if (!parsed || !Array.isArray(parsed.descriptors) || parsed.descriptors.length === 0) {
+    alert("Invalid profile file — no descriptors found. Make sure you chose a valid export.");
+    return;
+  }
+
+  // Determine the target child: prefer the currently-selected child; fall back
+  // to the childId embedded in the export file.
+  const targetChildId =
+    trainingChildSelect.value || parsed.childId || "";
+  const targetChildName = trainingChildSelect.value
+    ? (trainingChildSelect.options[trainingChildSelect.selectedIndex]?.textContent || "")
+    : (parsed.childName || parsed.childId || "Unknown");
+
+  if (!targetChildId) {
+    alert(
+      "Please select a child from the list first (or the export file must contain a childId)."
+    );
+    return;
+  }
+
+  const existing      = await getDescriptors(targetChildId).catch(() => null);
+  const existingCount = existing?.descriptors?.length ?? 0;
+  const importCount   = parsed.descriptors.length;
+
+  let mergedDescriptors;
+  if (existingCount > 0) {
+    const doMerge = confirm(
+      `${targetChildName} already has ${existingCount} stored descriptor(s).\n` +
+      `The import file contains ${importCount} descriptor(s).\n\n` +
+      `Click OK to MERGE both sets (up to ${MAX_DESCRIPTORS_PER_CHILD} kept).\n` +
+      `Click Cancel to REPLACE all existing data with the imported file.`
+    );
+    if (doMerge) {
+      // Merge: combine existing + imported, keep the most recent up to the cap.
+      const combined = [...existing.descriptors, ...parsed.descriptors];
+      mergedDescriptors = combined.slice(-MAX_DESCRIPTORS_PER_CHILD);
+    } else {
+      mergedDescriptors = parsed.descriptors.slice(-MAX_DESCRIPTORS_PER_CHILD);
+    }
+  } else {
+    mergedDescriptors = parsed.descriptors.slice(-MAX_DESCRIPTORS_PER_CHILD);
+  }
+
+  try {
+    await setDescriptors(targetChildId, targetChildName, mergedDescriptors);
+    // Notify the offscreen document to refresh its in-memory profile cache.
+    chrome.runtime.sendMessage({ type: "REFRESH_PROFILES" }).catch(() => {});
+    showToast(`✓ Imported ${mergedDescriptors.length} descriptors for ${targetChildName}`);
+    await refreshTrainingStatus(targetChildId);
+  } catch (e) {
+    alert("Import failed: " + e.message);
+  }
+});
 
 btnSave.addEventListener("click", async () => {
   btnSave.disabled    = true;

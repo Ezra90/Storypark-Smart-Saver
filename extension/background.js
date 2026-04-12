@@ -5,17 +5,20 @@
  * APIs directly. No DOM scraping, no content script, no Google Photos.
  *
  * Message handlers exposed to popup / options:
- *   GET_CHILDREN      – Return cached children list
- *   REFRESH_PROFILE   – Re-fetch profile from API and update cache
+ *   GET_CHILDREN         – Return cached children list
+ *   REFRESH_PROFILE      – Re-fetch profile from API and update cache
  *   EXTRACT_LATEST       – Incremental fetch (stops at known stories)
  *   DEEP_RESCAN          – Full paginated fetch ignoring history
  *   EXTRACT_ALL_LATEST   – Incremental fetch for every cached child sequentially
  *   DEEP_RESCAN_ALL      – Full paginated fetch for every cached child sequentially
- *   GET_REVIEW_QUEUE  – Return the IndexedDB HITL queue
- *   REVIEW_APPROVE    – Confirm face, update descriptor, download photo
- *   REVIEW_REJECT     – Discard review queue item
- *   GET_ACTIVITY_LOG  – Return the persisted activity log array
- *   CLEAR_ACTIVITY_LOG – Clear the persisted activity log
+ *   GET_REVIEW_QUEUE     – Return the IndexedDB HITL queue
+ *   REVIEW_APPROVE       – Confirm face, update descriptor, download photo
+ *   REVIEW_REJECT        – Discard review queue item
+ *   REVIEW_TRAIN_ONLY    – Save face descriptor from queue item without downloading
+ *   GET_ACTIVITY_LOG     – Return the persisted activity log array
+ *   CLEAR_ACTIVITY_LOG   – Clear the persisted activity log
+ *   DISCOVER_CENTRES     – Fetch /api/v3/centres and merge into centreLocations
+ *   SAVE_TRAINING_DESCRIPTOR – Persist a pre-computed face descriptor (no re-detection)
  */
 
 import {
@@ -458,10 +461,40 @@ async function loadAndCacheProfile() {
       }
     }
 
+    // Also attempt to fetch centres directly from the dedicated /api/v3/centres
+    // endpoint.  This returns structured {name, address, suburb, state} objects
+    // for every centre linked to the user's account, which is more reliable than
+    // inferring names from child/profile data alone.
+    await fetchAndDiscoverCentresFromApi();
+
     return children;
   } catch (err) {
     await logger("ERROR", `Profile fetch failed: ${err.message}`);
     return [];
+  }
+}
+
+/**
+ * Fetch centre details from the Storypark /api/v3/centres endpoint and merge
+ * any newly-discovered centres into centreLocations storage.
+ * Non-fatal — silently skips on auth or network errors.
+ */
+async function fetchAndDiscoverCentresFromApi() {
+  try {
+    const data = await apiFetch(`${STORYPARK_BASE}/api/v3/centres`);
+    const centres = data.centres || data.services || [];
+    if (!centres.length) return;
+
+    const names = centres
+      .map((c) => c.name || c.display_name || "")
+      .filter(Boolean);
+
+    if (names.length > 0) {
+      await discoverCentres([...new Set(names)]);
+    }
+  } catch (err) {
+    // Non-fatal — /api/v3/centres may not be accessible for all account types
+    console.warn("[centres] /api/v3/centres fetch failed:", err.message);
   }
 }
 
@@ -1311,6 +1344,64 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           // Refresh the offscreen profile cache so new training data is used
           // immediately in any subsequent extraction.
           sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
+    case "SAVE_TRAINING_DESCRIPTOR": {
+      // Save a pre-computed face descriptor (from the options-page live preview)
+      // directly, without re-running face detection in the offscreen document.
+      // This is the preferred path when the options page has already confirmed
+      // a face is present – it avoids duplicated model inference and the failure
+      // modes that can occur when the offscreen document has not yet loaded.
+      const { childId, childName, descriptor } = msg;
+      if (!childId || !Array.isArray(descriptor) || descriptor.length === 0) {
+        sendResponse({ ok: false, error: "Missing childId or descriptor." });
+        return false;
+      }
+      appendDescriptor(childId, childName ?? childId, descriptor)
+        .then(() => {
+          sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
+          sendResponse({ ok: true });
+        })
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "DISCOVER_CENTRES": {
+      // Explicitly refresh centres from the Storypark /api/v3/centres endpoint.
+      // Called when the user clicks "Discover Centres" in Settings.
+      fetchAndDiscoverCentresFromApi()
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "REVIEW_TRAIN_ONLY": {
+      // Save the face descriptor from a review-queue item to improve the
+      // recognition model, but do NOT download the photo.  The item is removed
+      // from the queue so the user can act on remaining items.
+      (async () => {
+        try {
+          const item = await getReviewQueueItem(msg.id);
+          if (!item) throw new Error("Review item not found.");
+
+          let descriptor = item.descriptor;
+          if (item.allFaces && item.allFaces.length > (msg.selectedFaceIndex ?? 0)) {
+            descriptor = item.allFaces[msg.selectedFaceIndex ?? 0].descriptor;
+          }
+
+          if (descriptor && item.childId) {
+            await appendDescriptor(item.childId, item.childName, descriptor);
+            sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
+          }
+
+          await removeFromReviewQueue(msg.id);
+          chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
           sendResponse({ ok: true });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
