@@ -302,8 +302,8 @@ function buildCentreRow(name, loc) {
     }
     if (newKey) {
       centreLocationsCache[newKey] = {
-        lat:     coords ? coords.lat : null,
-        lng:     coords ? coords.lng : null,
+        lat: coords ? coords.lat : null,
+        lng: coords ? coords.lng : null,
         address: address || centreLocationsCache[newKey]?.address || null,
       };
     }

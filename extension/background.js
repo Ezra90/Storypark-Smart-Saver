@@ -246,6 +246,9 @@ class RateLimitError extends Error {
 /** Maximum number of milliseconds to wait before a 429-retry (2 minutes). */
 const MAX_RETRY_WAIT_MS = 120_000;
 
+/** Nominatim OSM rate-limit: at most one request per second per their ToS. */
+const NOMINATIM_RATE_LIMIT_MS = 1_000;
+
 /** Content-Type substrings that indicate a JSON API response. */
 const JSON_CONTENT_TYPES = ["application/json", "text/javascript", "text/plain"];
 
@@ -595,7 +598,7 @@ async function discoverCentres(centres) {
     // Re-read before each write so we don't clobber concurrent updates.
     const { centreLocations: current = {} } = await chrome.storage.local.get("centreLocations");
     if (current[name]?.lat != null) continue; // already geocoded by another path
-    await new Promise((r) => setTimeout(r, 1000)); // Nominatim: 1 req/sec
+    await new Promise((r) => setTimeout(r, NOMINATIM_RATE_LIMIT_MS));
     const coords = await geocodeCentre(name, address);
     if (coords) {
       current[name] = { ...(current[name] || {}), lat: coords.lat, lng: coords.lng, address };
