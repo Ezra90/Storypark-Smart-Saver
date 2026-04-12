@@ -140,7 +140,7 @@ const LEVEL_COLORS = { INFO: "level-INFO", SUCCESS: "level-SUCCESS", WARNING: "l
 
 /**
  * Render a single log entry object into the activity log terminal.
- * @param {{timestamp: string, level: string, message: string}} entry
+ * @param {{timestamp: string, level: string, message: string, storyDate?: string}} entry
  */
 function appendActivityEntry(entry) {
   // Remove placeholder on first real entry
@@ -151,9 +151,12 @@ function appendActivityEntry(entry) {
     activityLogBox.innerHTML = "";
   }
   const p = document.createElement("p");
+  // Show the story's own date in the prefix when available (e.g. "15/03/2024"),
+  // otherwise fall back to showing only the wall-clock time.
+  const datePart = entry.storyDate ? `${entry.storyDate} ` : "";
   const ts = new Date(entry.timestamp).toLocaleTimeString(undefined, { hour12: false });
   p.className   = LEVEL_COLORS[entry.level] || "level-INFO";
-  p.textContent = `[${ts}] [${entry.level}] ${entry.message}`;
+  p.textContent = `[${datePart}${ts}] [${entry.level}] ${entry.message}`;
   activityLogBox.appendChild(p);
   activityLogBox.scrollTop = activityLogBox.scrollHeight;
 }
@@ -400,8 +403,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     // Update the Activity Log tab
     appendActivityEntry(msg.entry);
     // Also mirror into the inline log box on the Save Photos tab (Bug 6)
+    const datePart = msg.entry.storyDate ? `${msg.entry.storyDate} ` : "";
     const ts = new Date(msg.entry.timestamp).toLocaleTimeString(undefined, { hour12: false });
-    appendLog(`[${ts}] [${msg.entry.level}] ${msg.entry.message}`);
+    appendLog(`[${datePart}${ts}] [${msg.entry.level}] ${msg.entry.message}`);
   }
   if (msg.type === "REVIEW_QUEUE_UPDATED") loadReviewQueue();
 

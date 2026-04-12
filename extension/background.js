@@ -125,13 +125,17 @@ function _scheduleLogFlush() {
  *
  * @param {"INFO"|"SUCCESS"|"WARNING"|"ERROR"} level
  * @param {string} message
+ * @param {string} [storyDate] Optional story date in YYYY-MM-DD format.
+ *   When provided it is formatted as DD/MM/YYYY and stored on the entry so
+ *   the popup can display the story's own date instead of the wall-clock date.
  */
-function logger(level, message) {
+function logger(level, message, storyDate = null) {
   const entry = {
     timestamp: new Date().toISOString(),
     level,
     message,
   };
+  if (storyDate) entry.storyDate = formatDateDMY(storyDate);
 
   // Buffer for batched storage write
   _logBuffer.push(entry);
@@ -593,18 +597,24 @@ async function discoverCentres(centres) {
   }
 
   // Auto-geocode new centres that have an address but no GPS coords yet.
-  // Runs sequentially with a 1-second gap to respect Nominatim's rate limit.
-  for (const { name, address } of toGeocode) {
-    // Re-read before each write so we don't clobber concurrent updates.
-    const { centreLocations: current = {} } = await chrome.storage.local.get("centreLocations");
-    if (current[name]?.lat != null) continue; // already geocoded by another path
-    await new Promise((r) => setTimeout(r, NOMINATIM_RATE_LIMIT_MS));
-    const coords = await geocodeCentre(name, address);
-    if (coords) {
-      current[name] = { ...(current[name] || {}), lat: coords.lat, lng: coords.lng, address };
-      await chrome.storage.local.set({ centreLocations: current });
-      console.debug(`[centres] Auto-geocoded "${name}": ${coords.lat}, ${coords.lng}`);
-    }
+  // Runs in the background (fire-and-forget) so it does not block callers
+  // waiting for a message-channel response — centres are already persisted
+  // above without GPS and will gain coordinates once geocoding completes.
+  if (toGeocode.length > 0) {
+    (async () => {
+      for (const { name, address } of toGeocode) {
+        // Re-read before each write so we don't clobber concurrent updates.
+        const { centreLocations: current = {} } = await chrome.storage.local.get("centreLocations");
+        if (current[name]?.lat != null) continue; // already geocoded by another path
+        await new Promise((r) => setTimeout(r, NOMINATIM_RATE_LIMIT_MS));
+        const coords = await geocodeCentre(name, address);
+        if (coords) {
+          current[name] = { ...(current[name] || {}), lat: coords.lat, lng: coords.lng, address };
+          await chrome.storage.local.set({ centreLocations: current });
+          console.debug(`[centres] Auto-geocoded "${name}": ${coords.lat}, ${coords.lng}`);
+        }
+      }
+    })();
   }
 }
 
@@ -888,7 +898,7 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
     }).catch(() => {});
 
     await smartDelay("READ_STORY");
-    await logger("INFO", `Processing story ${si + 1} of ${totalStories} for ${childName}${dateStr ? ` (${formatDateDMY(dateStr)})` : ""}…`);
+    await logger("INFO", `Processing story ${si + 1} of ${totalStories} for ${childName}…`, storyDateStr);
 
     // Fetch full story detail
     let story;
@@ -1021,18 +1031,17 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
         continue;
       }
 
-      const dateSuffix = storyDateStr ? ` [${formatDateDMY(storyDateStr)}]` : "";
       const forChild   = ` for ${childName}`;
       if (result?.result === "approve") {
         approved++;
-        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${forChild}${dateSuffix}`);
+        await logger("SUCCESS", `  ✓ Downloaded: ${img.filename}${forChild}`, storyDateStr);
       } else if (result?.result === "review") {
         queued++;
-        const baseReview = `${img.filename}${forChild}${dateSuffix}`;
+        const baseReview = `${img.filename}${forChild}`;
         const reviewMsg  = result.noTrainingData
           ? `  📚 Queued for profile building: ${baseReview} (no training data yet)`
           : `  👀 Queued for review: ${baseReview} (${result.matchPct ?? "?"}% match)`;
-        await logger("INFO", reviewMsg);
+        await logger("INFO", reviewMsg, storyDateStr);
         chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
       } else {
         // "reject" result: below minThreshold (normal) or processImage threw.
@@ -1076,8 +1085,7 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
           savePath,
         });
         approved++;
-        const dateSuffix = storyDateStr ? ` [${formatDateDMY(storyDateStr)}]` : "";
-        await logger("SUCCESS", `  🎬 Downloaded video: ${videoFilename} for ${childName}${dateSuffix}`);
+        await logger("SUCCESS", `  🎬 Downloaded video: ${videoFilename} for ${childName}`, storyDateStr);
       } catch (err) {
         if (err.name === "AuthError" || err.message.includes("401")) {
           await logger("ERROR", `🛑 ${err.message} — stopping scan.`);
@@ -1487,9 +1495,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     case "DISCOVER_CENTRES": {
-      // Explicitly refresh centres from the Storypark /api/v3/centres endpoint.
-      // Called when the user clicks "Discover Centres" in Settings.
-      fetchAndDiscoverCentresFromApi()
+      // Try all discovery paths: /users/me communities, per-child companies,
+      // and the dedicated /api/v3/centres endpoint.
+      // loadAndCacheProfile() covers all three paths, so calling it here gives
+      // the best chance of finding centres even when one endpoint is unavailable.
+      loadAndCacheProfile()
         .then(() => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;

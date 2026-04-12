@@ -52,21 +52,22 @@
     }
     .tab {
       flex: 1;
-      padding: 7px 10px;
+      padding: 9px 10px;
       border: none;
-      border-radius: 7px;
-      background: var(--surface);
+      border-radius: 8px;
+      background: var(--primary);
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
+      transition: opacity 0.15s;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 5px;
     }
+    .tab:hover { opacity: 0.85; }
     .tab.active {
-      background: var(--primary);
       color: var(--text);
     }
     .tab-badge {
@@ -136,26 +137,17 @@
       font-size: 15px;
     }
     #btnDeepRescan {
-      background: var(--surface);
+      background: var(--primary);
       color: var(--text);
-      padding: 8px 10px;
-      font-size: 12px;
+      padding: 12px 10px;
+      font-size: 15px;
     }
-    #btnDeepRescan:disabled { color: var(--muted); }
     #btnTestConnection {
-      background: var(--surface);
+      background: var(--primary);
       color: var(--text);
-      padding: 8px 10px;
-      font-size: 12px;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.15s;
-      width: 100%;
+      padding: 12px 10px;
+      font-size: 15px;
     }
-    #btnTestConnection:hover { opacity: 0.85; }
-    #btnTestConnection:disabled { opacity: 0.45; color: var(--muted); cursor: not-allowed; }
 
     .helper-text {
       font-size: 10px;
@@ -470,7 +462,7 @@
     <div class="action-btns">
       <button class="btn-action" id="btnExtractLatest" disabled>⬇ Download Latest</button>
       <button class="btn-action" id="btnDeepRescan"    disabled>🔁 Full History Scan</button>
-      <button id="btnTestConnection">🔌 Test Connection</button>
+      <button class="btn-action" id="btnTestConnection">🔌 Test Connection</button>
     </div>
     <div class="helper-text">
       <strong>Download Latest:</strong> Use daily/weekly to get new photos.<br>
