@@ -246,8 +246,28 @@ function cropFaceToDataUrl(img, box) {
 /* ================================================================== */
 
 /**
+ * Map of downloadId → object URL for deferred revocation.
+ * Blob URLs are revoked only once the download reaches a terminal state
+ * (complete or interrupted), rather than on a fixed timer, to avoid
+ * revoking the URL before large files have finished transferring.
+ */
+const _pendingRevocations = new Map();
+
+chrome.downloads.onChanged.addListener((delta) => {
+  const terminal = delta.state?.current === "complete" ||
+                   delta.state?.current === "interrupted";
+  if (!terminal) return;
+  const pendingUrl = _pendingRevocations.get(delta.id);
+  if (pendingUrl) {
+    URL.revokeObjectURL(pendingUrl);
+    _pendingRevocations.delete(delta.id);
+  }
+});
+
+/**
  * Create an object URL from a Blob, trigger a download via
- * chrome.downloads.download(), then immediately revoke the URL.
+ * chrome.downloads.download(), and revoke the URL once the download
+ * reaches a terminal state (or after 5 minutes as a safety fallback).
  *
  * @param {Blob}   blob
  * @param {string} savePath   e.g. "Storypark_Smart_Saver/Alice/photo.jpg"
@@ -262,8 +282,14 @@ function downloadBlob(blob, savePath) {
           URL.revokeObjectURL(url);
           reject(new Error(chrome.runtime.lastError.message));
         } else {
-          // Delay revocation so the browser has time to read the blob data
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          // Track for event-driven revocation; fall back to a 5-minute timer
+          // in case the onChanged event is not delivered.
+          _pendingRevocations.set(downloadId, url);
+          setTimeout(() => {
+            if (_pendingRevocations.delete(downloadId)) {
+              URL.revokeObjectURL(url);
+            }
+          }, 300_000);
           resolve(downloadId);
         }
       }
@@ -302,11 +328,20 @@ async function processImage(msg) {
   if (!res.ok) throw new Error(`Image fetch ${res.status}: ${imageUrl}`);
   const buffer = await res.arrayBuffer();
 
+  // Determine the actual content type so we don't write EXIF into non-JPEG blobs.
+  const contentType = res.headers.get("content-type") || "image/jpeg";
+  const isJpeg = contentType.includes("jpeg") || contentType.includes("jpg");
+
+  // Helper: build a stamped blob, skipping EXIF for non-JPEG media.
+  const makeStampedBlob = async (date) => {
+    const srcBlob = new Blob([buffer], { type: contentType });
+    return isJpeg ? applyExif(srcBlob, date, description, gpsCoords) : srcBlob;
+  };
+
   // ---- 2. If no encodings configured, auto-approve everything ----
   if (childEncodings.length === 0) {
-    const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
-    const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
+    const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+    const stampedBlob = await makeStampedBlob(date);
     await downloadBlob(stampedBlob, savePath);
     return { ok: true, result: "approve" };
   }
@@ -334,9 +369,8 @@ async function processImage(msg) {
   }
 
   if (useFallback) {
-    const srcBlob     = new Blob([buffer], { type: "image/jpeg" });
     const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
+    const stampedBlob = await makeStampedBlob(date);
     await downloadBlob(stampedBlob, savePath);
     return { ok: true, result: "approve" };
   }
@@ -381,9 +415,8 @@ async function processImage(msg) {
 
   if (bestPct >= autoThreshold) {
     // Auto-approve: stamp EXIF and download
-    const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
-    const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-    const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
+    const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+    const stampedBlob = await makeStampedBlob(date);
     await downloadBlob(stampedBlob, savePath);
 
     // Continuous learning: persist the confirmed descriptor so future scans
@@ -454,9 +487,13 @@ async function downloadApproved(msg) {
   if (!res.ok) throw new Error(`Image fetch ${res.status}: ${storyData.originalUrl}`);
   const buffer = await res.arrayBuffer();
 
-  const srcBlob    = new Blob([buffer], { type: "image/jpeg" });
-  const date       = storyData.createdAt ? new Date(storyData.createdAt) : null;
-  const stampedBlob = await applyExif(srcBlob, date, description, gpsCoords);
+  const contentType = res.headers.get("content-type") || "image/jpeg";
+  const isJpeg      = contentType.includes("jpeg") || contentType.includes("jpg");
+  const srcBlob     = new Blob([buffer], { type: contentType });
+  const date        = storyData.createdAt ? new Date(storyData.createdAt) : null;
+  const stampedBlob = isJpeg
+    ? await applyExif(srcBlob, date, description, gpsCoords)
+    : srcBlob;
   await downloadBlob(stampedBlob, savePath);
 }
 
@@ -497,7 +534,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "PROCESS_IMAGE") {
     processImage(msg)
       .then((result) => sendResponse(result))
-      .catch((err)   => sendResponse({ ok: true, result: "reject", error: err.message }));
+      // Return ok:false so sendToOffscreen() in background.js rejects the
+      // promise and the error is logged as a WARNING rather than silently
+      // counted as a face-rejection.
+      .catch((err)   => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 
