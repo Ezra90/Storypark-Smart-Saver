@@ -348,23 +348,30 @@ async function ensureOffscreen() {
 
 /**
  * Send a message to the offscreen document and await its response.
- * If the document has crashed (connection error), the ready flag is reset
- * and the document is re-created for a single automatic retry.
+ * If the document has crashed or not yet finished initializing (connection
+ * error / message port closed), reset the ready flag, wait briefly for the
+ * new document to boot, and retry up to two times before giving up.
  *
  * @param {Object}  message
- * @param {boolean} [_isRetry=false]  Internal flag — do not pass externally.
+ * @param {number}  [_retryCount=0]  Internal retry counter — do not pass externally.
  */
-async function sendToOffscreen(message, _isRetry = false) {
+async function sendToOffscreen(message, _retryCount = 0) {
   await ensureOffscreen();
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
         const errMsg = chrome.runtime.lastError.message || "";
-        // Detect a crashed / closed offscreen document and retry once.
-        if (!_isRetry && (errMsg.includes("Could not establish connection") ||
-            errMsg.includes("The message port closed"))) {
+        const isConnErr =
+          errMsg.includes("Could not establish connection") ||
+          errMsg.includes("The message port closed");
+        // Retry up to 2 times with an increasing back-off to give the offscreen
+        // document time to finish loading its module scripts after (re-)creation.
+        if (_retryCount < 2 && isConnErr) {
           offscreenReady = false;
-          sendToOffscreen(message, true).then(resolve).catch(reject);
+          const delayMs = 500 * (_retryCount + 1); // 500 ms, then 1000 ms
+          setTimeout(() => {
+            sendToOffscreen(message, _retryCount + 1).then(resolve).catch(reject);
+          }, delayMs);
         } else {
           reject(new Error(errMsg));
         }
@@ -477,7 +484,8 @@ async function loadAndCacheProfile() {
 /**
  * Fetch centre details from the Storypark /api/v3/centres endpoint and merge
  * any newly-discovered centres into centreLocations storage.
- * Non-fatal — silently skips on auth or network errors.
+ * Extracts both name and address (when available) and auto-geocodes using
+ * the Nominatim OSM API.  Non-fatal — silently skips on auth or network errors.
  */
 async function fetchAndDiscoverCentresFromApi() {
   try {
@@ -485,12 +493,19 @@ async function fetchAndDiscoverCentresFromApi() {
     const centres = data.centres || data.services || [];
     if (!centres.length) return;
 
-    const names = centres
-      .map((c) => c.name || c.display_name || "")
+    const entries = centres
+      .map((c) => {
+        const name = (c.name || c.display_name || "").trim();
+        if (!name) return null;
+        // Build a human-readable address string from whatever fields the API returns.
+        const addrParts = [c.address, c.suburb, c.state, c.postcode].filter(Boolean);
+        const address = addrParts.length > 0 ? addrParts.join(", ") : null;
+        return { name, address };
+      })
       .filter(Boolean);
 
-    if (names.length > 0) {
-      await discoverCentres([...new Set(names)]);
+    if (entries.length > 0) {
+      await discoverCentres(entries);
     }
   } catch (err) {
     // Non-fatal — /api/v3/centres may not be accessible for all account types
@@ -499,25 +514,94 @@ async function fetchAndDiscoverCentresFromApi() {
 }
 
 /**
- * Merge newly-discovered centre names into the persisted centreLocations
- * map without overwriting existing GPS data.  Each key is a centre name;
- * values are { lat: number|null, lng: number|null }.
+ * Auto-geocode a centre using its address (preferred) or name via Nominatim OSM.
+ * Returns { lat, lng } on success, or null on failure.
+ * Nominatim ToS: max 1 request/second; callers must add delays between calls.
  *
- * @param {string[]} names  One or more centre/community names
+ * @param {string} name
+ * @param {string|null} address
+ * @returns {Promise<{lat: number, lng: number}|null>}
  */
-async function discoverCentres(names) {
-  if (!names || names.length === 0) return;
+async function geocodeCentre(name, address) {
+  try {
+    // Prefer the full address for accuracy; fall back to "name + childcare".
+    const query = address
+      ? `${name}, ${address}`
+      : (/childcare|daycare|kindergarten|preschool|nursery|early learning|child care/i.test(name)
+          ? name
+          : `${name} childcare`);
+
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+      { headers: { "User-Agent": "StoryparkSmartSaver/1.0" } }
+    );
+    const results = await resp.json();
+    if (results.length === 0) return null;
+    return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge newly-discovered centre names (and optional addresses) into the
+ * persisted centreLocations map without overwriting existing GPS data.
+ * Each key is a centre name; values are { lat, lng, address }.
+ *
+ * Accepts either:
+ *   • string[]                – names only (backward-compatible)
+ *   • { name, address? }[]   – with optional address for richer data
+ *
+ * When an address is available and GPS coordinates are not yet set,
+ * auto-geocoding via Nominatim is attempted in the background.
+ *
+ * @param {(string|{name:string, address?:string})[]} centres
+ */
+async function discoverCentres(centres) {
+  if (!centres || centres.length === 0) return;
   const { centreLocations = {} } = await chrome.storage.local.get("centreLocations");
   let changed = false;
-  for (const name of names) {
-    const trimmed = name.trim();
-    if (trimmed && !(trimmed in centreLocations)) {
-      centreLocations[trimmed] = { lat: null, lng: null };
+  const toGeocode = []; // collect entries that need geocoding after storage write
+
+  for (const centre of centres) {
+    const name    = (typeof centre === "string" ? centre : centre.name || "").trim();
+    const address = typeof centre === "string" ? null : (centre.address || null);
+    if (!name) continue;
+
+    if (!(name in centreLocations)) {
+      centreLocations[name] = { lat: null, lng: null, address };
       changed = true;
+      if (address) toGeocode.push({ name, address });
+    } else {
+      // Update address if we now have one and didn't before.
+      if (address && centreLocations[name].address == null) {
+        centreLocations[name].address = address;
+        changed = true;
+      }
+      // Queue geocoding if address is available but GPS coords are still null.
+      if (address && centreLocations[name].lat == null) {
+        toGeocode.push({ name, address });
+      }
     }
   }
+
   if (changed) {
     await chrome.storage.local.set({ centreLocations });
+  }
+
+  // Auto-geocode new centres that have an address but no GPS coords yet.
+  // Runs sequentially with a 1-second gap to respect Nominatim's rate limit.
+  for (const { name, address } of toGeocode) {
+    // Re-read before each write so we don't clobber concurrent updates.
+    const { centreLocations: current = {} } = await chrome.storage.local.get("centreLocations");
+    if (current[name]?.lat != null) continue; // already geocoded by another path
+    await new Promise((r) => setTimeout(r, 1000)); // Nominatim: 1 req/sec
+    const coords = await geocodeCentre(name, address);
+    if (coords) {
+      current[name] = { ...(current[name] || {}), lat: coords.lat, lng: coords.lng, address };
+      await chrome.storage.local.set({ centreLocations: current });
+      console.debug(`[centres] Auto-geocoded "${name}": ${coords.lat}, ${coords.lng}`);
+    }
   }
 }
 
@@ -708,9 +792,15 @@ function buildDescription(body, childFirstName, routineText, roomName, centreNam
  * @param {string} childId
  * @param {string} childName
  * @param {"EXTRACT_LATEST"|"DEEP_RESCAN"} mode
- * @returns {Promise<{approved, queued, rejected}>}
+ * @param {object} [options]
+ * @param {boolean} [options.closeOffscreenOnExit=true]
+ *   When false, the offscreen document is kept alive after the run.
+ *   Use this when calling runExtraction multiple times in sequence (e.g.
+ *   DEEP_RESCAN_ALL) so we avoid the teardown/re-create cycle between
+ *   children, which can cause "message port closed" errors.
+ * @returns {Promise<{approved, queued, rejected, cancelled}>}
  */
-async function runExtraction(childId, childName, mode) {
+async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = true } = {}) {
   logger(
     "INFO",
     `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`
@@ -1012,9 +1102,14 @@ async function runExtraction(childId, childName, mode) {
     chrome.storage.session
       .set({ isScanning: false, cancelRequested: false, _requestCount: 0 })
       .catch(() => {});
-    // Release the heavy Human AI models immediately to prevent memory leaks.
-    await chrome.offscreen.closeDocument().catch(() => {});
-    offscreenReady = false;
+    // Release the heavy Human AI models immediately to prevent memory leaks —
+    // unless the caller has opted to keep the offscreen document alive for a
+    // subsequent child scan (avoids the re-init overhead and "message port
+    // closed" errors between children in a multi-child scan run).
+    if (closeOffscreenOnExit) {
+      await chrome.offscreen.closeDocument().catch(() => {});
+      offscreenReady = false;
+    }
   }
 
   const msg = `Scan complete — Downloaded: ${approved}, Review: ${queued}, Rejected: ${rejected}`;
@@ -1161,14 +1256,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             // wasCancelled snapshots the state because runExtraction's finally
             // block resets cancelRequested to false after each child.
             if (wasCancelled) break;
-            const child = children[i];
+            const child   = children[i];
+            // Keep the offscreen document alive across child iterations to
+            // avoid the teardown/re-init cycle, which can produce "message
+            // port closed" errors while the new document's module scripts
+            // are still loading.  We close it explicitly once all children
+            // are done (or on cancellation) in the outer finally block below.
+            const isLastChild = i === children.length - 1;
             await logger("INFO", `Scanning ${child.name} (${i + 1}/${children.length})…`);
             chrome.runtime.sendMessage({
               type: "LOG",
               message: `📋 Scanning ${child.name} (${i + 1}/${children.length})…`,
             }).catch(() => {});
             try {
-              const stats = await runExtraction(child.id, child.name, mode);
+              const stats = await runExtraction(child.id, child.name, mode, {
+                closeOffscreenOnExit: isLastChild,
+              });
               totalApproved  += stats.approved;
               totalQueued    += stats.queued;
               totalRejected  += stats.rejected;
@@ -1192,6 +1295,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         } finally {
           isScanning      = false;
           cancelRequested = false;
+          // Ensure the offscreen document is closed even if the loop exited
+          // early (e.g. cancellation on the first child, where isLastChild
+          // would have been false and the document was kept alive).
+          await chrome.offscreen.closeDocument().catch(() => {});
+          offscreenReady = false;
           chrome.storage.session
             .set({ isScanning: false, cancelRequested: false })
             .catch(() => {});
