@@ -394,6 +394,22 @@ After a large backup import or manifest repair, IDB hot caches may be stale. Alw
 ### _pendingDownloadIds Race Condition
 Do NOT delete entries from `_pendingDownloadIds` inside `downloadBlob()` or `downloadDataUrl()`. Only `handleDownloadChanged()` should remove them. If you add cleanup in the download functions, you'll get double-releases of the semaphore.
 
+### Story Card JPEGs Must Never Appear in HTML Gallery or as Thumbnails
+Story Cards (`*Story Card.jpg`) are generated JPEG assets for Google Photos import.
+They are NOT downloaded media files and must NEVER be in `approvedFilenames` or
+rendered as gallery images in `story.html` or index page thumbnails.
+
+**Filter pattern:** `/Story Card\.jpg$/i`
+
+Apply this filter in:
+1. `handlers-rebuild.js` Phase 2 — when scanning disk files to populate `mediaFiles`
+2. `lib/disk-sync.js` `repairManifestFromDisk()` — when scanning story folders
+3. `lib/html-builders.js` `buildStoryPage()` — before rendering `<img>` tags
+4. `lib/html-builders.js` `buildChildStoriesIndex()` — thumbnail + photo count
+5. `background.js` inline `buildStoryHtml()` — same filter (inline copy of buildStoryPage)
+
+**Correct:** `const mediaFiles = files.filter(f => MEDIA_EXT.test(f) && !/Story Card\.jpg$/i.test(f));`
+
 ### isScanning Stale State After SW Crash
 MV3 service workers cannot resume a scan loop after a restart (OOM crash, Coffee Break
 suspension, or browser restart). `chrome.storage.session` persists `isScanning=true` across
