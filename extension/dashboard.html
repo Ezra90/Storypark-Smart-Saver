@@ -1065,6 +1065,21 @@
             🏷️ Fix Photo Metadata
           </button>
         </div>
+        <!-- Rebuild Database enrichment option — shown when folder is linked -->
+        <div id="enrichStoriesRow" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:8px;font-size:12px;">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:0;">
+            <input type="checkbox" id="chkEnrichStories" checked style="width:auto;margin:3px 0 0;flex-shrink:0;">
+            <div>
+              <strong style="color:var(--accent);font-size:12px;">🔄 Fetch full story data</strong>
+              <p style="margin:2px 0 0;color:var(--muted);font-size:11px;line-height:1.5;">
+                After matching story IDs, fetch each story's text, educator name, classroom, centre, and daily routine —
+                then rebuild <code style="font-size:10px;">story.html</code> + Story Cards with complete information.<br>
+                <em style="color:var(--warning);">⏱ ~45–60 min for 500 stories</em> · Stop button works between stories.
+              </p>
+            </div>
+          </label>
+        </div>
+
         <!-- Repair child selector — shown only when a folder is linked -->
         <div id="repairChildRow" style="display:none;align-items:center;gap:8px;margin-top:6px;">
           <label style="font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;">Repair for child:</label>

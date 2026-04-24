@@ -2793,6 +2793,7 @@ function wireSettingsEvents() {
 
   const $btnRepairManifestUI  = document.getElementById("btnRepairManifest");
   const $btnRebuildDatabaseUI = document.getElementById("btnRebuildDatabase");
+  const $enrichStoriesRowUI   = document.getElementById("enrichStoriesRow");
   const $btnRewriteMetadata   = document.getElementById("btnRewriteMetadata");
 
   /** Update the folder card UI based on whether a folder is currently linked. */
@@ -2805,6 +2806,7 @@ function wireSettingsEvents() {
         $btnReconcileFolder.style.display = "";
         if ($btnRepairManifestUI)  $btnRepairManifestUI.style.display = "";
         if ($btnRebuildDatabaseUI) $btnRebuildDatabaseUI.style.display = "";
+        if ($enrichStoriesRowUI)   $enrichStoriesRowUI.style.display = "";
         if ($btnRewriteMetadata)   $btnRewriteMetadata.style.display = "";
         const $repairRow = document.getElementById("repairChildRow");
         if ($repairRow) $repairRow.style.display = "flex";
@@ -2819,6 +2821,7 @@ function wireSettingsEvents() {
         $btnReconcileFolder.style.display = "none";
         if ($btnRepairManifestUI)  $btnRepairManifestUI.style.display = "none";
         if ($btnRebuildDatabaseUI) $btnRebuildDatabaseUI.style.display = "none";
+        if ($enrichStoriesRowUI)   $enrichStoriesRowUI.style.display = "none";
         if ($btnRewriteMetadata)   $btnRewriteMetadata.style.display = "none";
         const $repairRowH = document.getElementById("repairChildRow");
         if ($repairRowH) $repairRowH.style.display = "none";
@@ -3113,13 +3116,21 @@ function wireSettingsEvents() {
           }];
 
       const totalFolders = childrenToRebuild.length;
+      // Read enrichment option from the checkbox (defaulting to true)
+      const enrichStories = document.getElementById("chkEnrichStories")?.checked !== false;
+
+      const enrichNote = enrichStories
+        ? `• Fetch full story data for each matched story (body, educator, room, routine)\n• Rebuild story.html + Story Cards with complete information\n• ⏱ ~45–60 min for 500 stories`
+        : `• Quick ID-match only — story.html will show placeholder text until Deep Rescan`;
+
       if (!confirm(
         `Rebuild database for ${isAll ? "all children" : childrenToRebuild[0].name} from disk + Storypark API?\n\n` +
         `This will:\n` +
         `• Walk your ${handle.name} folder to find all story folders (~5 sec)\n` +
         `• Fetch your story list from Storypark API (~30 sec for 500 stories)\n` +
         `• Match on-disk folders to real story IDs by date + title\n` +
-        `• Mark all matched stories as processed → next scan skips them\n\n` +
+        `• Mark all matched stories as processed → next scan skips them\n` +
+        `${enrichNote}\n\n` +
         `Requires you to be logged into Storypark. Continue?`
       )) return;
 
@@ -3174,6 +3185,7 @@ function wireSettingsEvents() {
             childId: child.id,
             childName: child.name,
             diskFolders,
+            enrichStories,
           });
 
           if (res?.ok) {
