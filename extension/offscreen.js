@@ -920,7 +920,13 @@ async function downloadVideo(msg) {
   // so mid-stream failures don't corrupt the blob.  Cloudflare/Storypark 403/404
   // responses propagate (caller logs + skips) — we only retry on TypeError /
   // ECONNRESET style failures that indicate a flaky network.
-  const _tryFetch = async () => fetch(videoUrl, { credentials: "include" });
+  // Add Range header: video CDNs require it to serve streams correctly.
+  // Without it, some CDNs return 403 even with valid session cookies.
+  // Accept 200 (full) and 206 (partial content — range response) as success.
+  const _tryFetch = async () => fetch(videoUrl, {
+    credentials: "include",
+    headers: { "Range": "bytes=0-" },
+  });
 
   let res;
   try {
@@ -931,7 +937,9 @@ async function downloadVideo(msg) {
     res = await _tryFetch();
   }
 
-  if (!res.ok) throw new Error(`Video fetch ${res.status}: ${videoUrl}`);
+  if (res.status !== 200 && res.status !== 206) {
+    throw new Error(`Video fetch ${res.status}: ${videoUrl}`);
+  }
 
   const contentType = res.headers.get("content-type") || "video/mp4";
   const totalBytes  = parseInt(res.headers.get("content-length") || "0", 10) || 0;

@@ -31,6 +31,13 @@ This project is designed for **fully AI-driven maintenance**. The human owner re
 ### You do NOT need permission to update AI_RULES.md
 AI agents are expected to update this file as part of normal development. Failure to update it when discovering new invariants is a bug in the AI's behaviour.
 
+### Git operations — USER ONLY
+AI agents must NEVER run `git commit`, `git push`, or `git pull`. After making changes:
+1. Run `node scripts/verify-imports.js` → must show 0 errors
+2. Stop. The user handles all git operations (commit, push, pull) using their own tools or the `.bat` scripts.
+
+Rationale: the user manages when changes are committed and published. The AI's job is to make correct code changes and confirm they are import-clean.
+
 ---
 
 ## Table of Contents
@@ -472,10 +479,10 @@ chrome.storage.session.set({ isScanning: true }).catch(() => {});
 
 ## 10. File Size Rules
 
-AI agents must keep files within these limits so smaller models can stay in context for a single file edit.
+These are **soft targets** for AI context friendliness, not hard limits. The goal is to keep individual files small enough that a single AI session can read, understand, and edit the whole file without losing context.
 
-| File | Max lines | Max KB | Action if exceeded |
-|------|-----------|--------|-------------------|
+| File | Target lines | Max KB | When to consider splitting |
+|------|-------------|--------|---------------------------|
 | `background.js` | ~2,500 | 40 KB | Wire more cases to handler files; remove inline duplicates |
 | `dashboard.js` | ~800 | 35 KB | Split into dashboard-scan.js, dashboard-review.js, dashboard-settings.js, dashboard-cleanup.js |
 | `offscreen.js` | ~1,500 | 65 KB | Split into offscreen-face.js + offscreen-exif.js + offscreen-card.js |
@@ -484,13 +491,25 @@ AI agents must keep files within these limits so smaller models can stay in cont
 | `lib/handlers-*.js` | ~600 | 25 KB | Split by domain |
 | All other lib files | ~400 | 20 KB | Refactor into sub-modules |
 
+### When to split (and when NOT to)
+**Split only when** the excess code forms a complete, self-contained domain that makes sense as its own file — e.g., all rebuild logic moved to `handlers-rebuild.js`, all audit logic in `handlers-audit.js`. The new file should be independently readable and understandable.
+
+**Do NOT split** just to hit a line count. Adding a 30-line function does not justify creating a new file. Prefer keeping related logic together.
+
+### Creating new files
+New files ARE allowed. When creating a new file:
+1. Follow the extension directory structure (lib handlers → `extension/lib/handlers-*.js`, pure helpers → `extension/lib/*.js`)
+2. Add a `┌─ WHAT THIS FILE OWNS ─┐` block comment at the top
+3. Add to §5 Module Responsibilities in this file
+4. Add to ARCHITECTURE.md directory listing + message protocol table (if it handles messages)
+5. Run `node scripts/verify-imports.js` → must show 0 errors
+
 ### Splitting protocol
 1. Create the new file with a `┌─ WHAT THIS FILE OWNS ─┐` header comment
 2. Move the relevant code
 3. Import in the parent file
 4. Run `node scripts/verify-imports.js` → must show 0 errors
-5. Commit immediately with message `"refactor: split X into Y"`
-6. Update §5 Module Responsibilities in this file
+5. Update §5 Module Responsibilities in this file
 
 ### Current oversized files (as of v3.0)
 - `background.js`: ~5,900 lines (target: ~1,000) — handler files exist but not yet wired

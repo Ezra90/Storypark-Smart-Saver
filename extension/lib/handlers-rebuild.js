@@ -300,6 +300,34 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
         const mediaFiles = files.filter(f => MEDIA_EXT.test(f) && !STORY_CARD_RE.test(f));
 
         if (bestId && bestScore >= 0.6) {
+          // ── storyId dedup: if this story is already in IDB (e.g. from the same story
+          // saved under an em-dash folder name vs a hyphen folder name), reuse the existing
+          // manifest instead of creating a second one. This prevents duplicate index cards
+          // when the disk has both old-format and new-format folders for the same story.
+          const existingByStoryId = existingManifests.find(
+            m => String(m.storyId) === String(bestId) && String(m.childId) === String(childId)
+          );
+          if (existingByStoryId) {
+            matched++;
+            // If the stored folderName differs from the current disk folder name
+            // (e.g. after an em-dash → hyphen rename), update the manifest so Phase 5
+            // writes story.html to the correct folder and index pages link correctly.
+            if (existingByStoryId.folderName !== folderName) {
+              const migratedManifest = { ...existingByStoryId, folderName };
+              await addDownloadedStory(migratedManifest).catch(() => {});
+              matchedManifests.push({ manifest: migratedManifest, isExisting: true });
+            } else {
+              matchedManifests.push({ manifest: existingByStoryId, isExisting: true });
+            }
+            continue;
+          }
+          // Also skip if this storyId was already matched in THIS rebuild run
+          // (protects against two disk folders matching the same API story ID)
+          const alreadyMatchedThisRun = matchedManifests.find(
+            mm => String(mm.manifest.storyId) === String(bestId)
+          );
+          if (alreadyMatchedThisRun) { matched++; continue; }
+
           const manifest = {
             childId, childName,
             storyId: bestId,
@@ -459,7 +487,7 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
               .filter(mu => mu.filename);
 
             // Update manifest with full data
-            const enrichedManifest = {
+            let enrichedManifest = {
               ...m,
               storyBody,
               excerpt,
@@ -471,6 +499,50 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
               mediaUrls: mediaUrls.length > 0 ? mediaUrls : m.mediaUrls,
               storyTitle: stripHtml(story.display_title || story.title || story.excerpt || m.storyTitle || "Story"),
             };
+
+            // ── Count-based missing photo detection ──────────────────────────
+            // Only count DOWNLOADABLE images (JPG/PNG/GIF/WEBP).
+            // Exclude: Story Cards (generated assets), story.html, PDF pages
+            // (story_pdf_* — educator-only, 403 from family accounts), and
+            // videos (counted separately; failures are expected for some CDN configs).
+            // This prevents false "N missing" warnings for stories that have all
+            // their photos but also contain un-downloadable PDF/video media.
+            const _scReE    = /Story Card\.jpg$/i;
+            const _vidExtE  = /\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+            const _pdfPageE = /story_pdf_/i;
+
+            const diskCount = (enrichedManifest.approvedFilenames || []).filter(f =>
+              !_scReE.test(f) && !/\.html$/i.test(f) && !_vidExtE.test(f) && !_pdfPageE.test(f)
+            ).length;
+
+            const apiCount = mediaItems.filter(item => {
+              if (!item.original_url) return false;
+              const fn = item.file_name || item.filename
+                || (item.original_url.split("/").pop() || "").split("?")[0];
+              return !_vidExtE.test(fn) && !_pdfPageE.test(fn);
+            }).length;
+
+            if (apiCount > 0 && diskCount < apiCount) {
+              await ctx.logger("WARNING",
+                `  ⚠ ${apiCount - diskCount} of ${apiCount} photos missing from disk (${diskCount} found) — run Audit & Repair to re-download`,
+                m.storyDate || null
+              );
+              // If disk has NO downloadable photos at all, populate approvedFilenames
+              // from the API image list (excluding PDFs and videos) so Audit & Repair
+              // can detect this story as db_only and re-download everything.
+              if (diskCount === 0 && mediaUrls.length > 0) {
+                const downloadableFilenames = mediaUrls
+                  .map(mu => mu.filename)
+                  .filter(f => !_vidExtE.test(f) && !_pdfPageE.test(f));
+                if (downloadableFilenames.length > 0) {
+                  enrichedManifest = {
+                    ...enrichedManifest,
+                    approvedFilenames: downloadableFilenames,
+                    thumbnailFilename: downloadableFilenames.find(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f)) || "",
+                  };
+                }
+              }
+            }
 
             await addDownloadedStory(enrichedManifest).catch(() => {});
             enrichedManifests.push(enrichedManifest);

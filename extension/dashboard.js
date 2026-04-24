@@ -2987,6 +2987,8 @@ function wireSettingsEvents() {
         ? `⏳ Rebuilding database for ${childrenToRepair.length} children…`
         : "⏳ Rebuilding database…";
       $linkedFolderStatus.style.display = "none";
+      // Show the global status banner so the user can see progress on any tab
+      setRunning(true);
 
       let totalRepaired = 0, totalTracked = 0, totalStories = 0, totalErrors = 0, totalSynced = 0;
       const summaryLines = [];
@@ -3088,6 +3090,7 @@ function wireSettingsEvents() {
       } finally {
         $btnRepairManifest.disabled = false;
         $btnRepairManifest.textContent = "🔧 Repair Database from Disk";
+        setRunning(false); // hide the global status banner
       }
     });
   }
@@ -3705,19 +3708,16 @@ function wireSettingsEvents() {
 
   /* ── 6: Generate Story Cards (settings) ── */
 
+  // Settings "Rebuild Pages & Cards" — same as Review tab button (BUILD_HTML_STRUCTURE)
   document.getElementById("btnGenerateStoryCardsAll")?.addEventListener("click", async () => {
     const $btn = document.getElementById("btnGenerateStoryCardsAll");
     const $status = document.getElementById("storyCardsStatus");
-    const childId = document.getElementById("storyCardsChildSel")?.value || null;
-    if ($btn) { $btn.disabled = true; $btn.textContent = "⏳ Generating…"; }
-    if ($status) $status.textContent = "⏳ Generating story cards…";
-    const res = await send({
-      type: "GENERATE_STORY_CARDS_ALL",
-      childId: childId || undefined,
-    });
-    if ($btn) { $btn.disabled = false; $btn.textContent = "🎴 Generate Story Cards"; }
+    if ($btn) { $btn.disabled = true; $btn.textContent = "⏳ Rebuilding…"; }
+    if ($status) $status.textContent = "⏳ Rebuilding pages & cards…";
+    const res = await send({ type: "BUILD_HTML_STRUCTURE" });
+    if ($btn) { $btn.disabled = false; $btn.textContent = "🔄 Rebuild Pages & Cards"; }
     if (res?.ok) {
-      const msg = `✅ Generated ${res.generated} cards${res.skipped > 0 ? `, ${res.skipped} skipped` : ""}${res.errors > 0 ? `, ${res.errors} errors` : ""}`;
+      const msg = `✅ Rebuilt ${res.storyCount} story pages + Story Cards + index pages`;
       if ($status) $status.textContent = msg;
       toast(msg, "success", 5000);
     } else {
@@ -4439,6 +4439,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
   }
   if (msg.type === "PROGRESS") {
+    // Re-assert running state — SCAN_COMPLETE briefly hides the banner between
+    // multi-child operations. Any PROGRESS message means work is in progress.
+    if (!isRunning) setRunning(true);
     $progressBar.style.display = "block";
     $progressText.style.display = "block";
     $progressBar.value = msg.current;

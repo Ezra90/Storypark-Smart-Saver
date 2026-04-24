@@ -1120,6 +1120,15 @@ function buildStoryHtml({ title, date, body, childName, childAge, roomName, cent
     ? `<div class="body">${escHtml(body).replace(/\n/g, "<br>")}</div>`
     : `<div class="body empty">📄 Story text not yet available — run a scan to restore the full story.</div>`;
 
+  // Card preview: thumbnail + date + title + educator + excerpt + photo count
+  const _scReP = /Story Card\.jpg$/i;
+  const firstPhoto = (mediaFilenames || []).filter(f => !_scReP.test(f) && !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f))[0];
+  const previewThumb = firstPhoto
+    ? `<img src="./${encodeURIComponent(firstPhoto)}" alt="" class="preview-img" onclick="this.closest('.preview-card').nextElementSibling.scrollIntoView({behavior:'smooth'})">`
+    : `<div class="preview-img preview-placeholder">📸</div>`;
+  const previewExcerpt = (body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().substring(0, 200);
+  const displayPhotoCount = (mediaFilenames || []).filter(f => !_scReP.test(f)).length;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1128,29 +1137,37 @@ function buildStoryHtml({ title, date, body, childName, childAge, roomName, cent
   <title>${escHtml(title || "Story")} — ${dateDisplay}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Georgia, 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 56px 40px; color: #333; line-height: 1.6; }
-
-    nav { margin-bottom: 20px; font-size: 14px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 32px; color: #333; line-height: 1.6; background: #f5f7fa; }
+    nav { margin-bottom: 20px; font-size: 13px; color: #888; }
     nav a { color: #0f3460; text-decoration: none; }
     nav a:hover { text-decoration: underline; }
-    .header { border-bottom: 2px solid #0f3460; padding-bottom: 16px; margin-bottom: 24px; }
-    .header h1 { font-size: 24px; color: #0f3460; margin-bottom: 4px; }
-    .meta { font-size: 14px; color: #666; }
-    .meta span { margin-right: 16px; }
-    .body { font-size: 16px; margin-bottom: 24px; white-space: pre-wrap; }
-    .body.empty { color: #999; font-style: italic; font-family: -apple-system, sans-serif; font-size: 14px; }
-    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-bottom: 24px; }
-    .photo img { width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: opacity 0.15s; }
-    .photo img:hover { opacity: 0.9; }
-    .photo img.zoomed { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; background: rgba(0,0,0,0.92); z-index: 9999; border-radius: 0; cursor: zoom-out; padding: 24px; }
-    .routine-block { margin-bottom: 24px; }
-    .divider-line { border-top: 2px solid #c5d3e8; margin: 14px 0; }
-    .routine-label { font-size: 15px; font-weight: bold; color: #0f3460; margin-bottom: 8px; }
-    .routine-text { font-size: 14px; white-space: pre-line; color: #444; line-height: 1.8; margin-bottom: 14px; }
-    .attribution { font-size: 13px; color: #555; line-height: 2.0; margin-bottom: 24px; }
-    .attribution.solo { border-top: 1px solid #e0e8f0; padding-top: 16px; }
-    .footer { font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 12px; }
-    @media print { body { padding: 20px; } .photos { break-inside: avoid; } nav { display: none; } .photo img.zoomed { display: none; } }
+    .preview-card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,0.10); overflow: hidden; display: flex; margin-bottom: 32px; cursor: pointer; transition: box-shadow 0.15s; }
+    .preview-card:hover { box-shadow: 0 6px 28px rgba(0,0,0,0.14); }
+    .preview-img { width: 220px; min-width: 220px; height: 200px; object-fit: cover; flex-shrink: 0; border: none; display: block; }
+    .preview-placeholder { width: 220px; min-width: 220px; height: 200px; background: #e8edf3; display: flex; align-items: center; justify-content: center; font-size: 48px; flex-shrink: 0; }
+    .preview-info { padding: 20px 22px; display: flex; flex-direction: column; gap: 5px; }
+    .preview-date { font-size: 12px; color: #888; }
+    .preview-title { font-size: 18px; font-weight: 700; color: #0f3460; line-height: 1.3; }
+    .preview-educator { font-size: 13px; color: #666; }
+    .preview-excerpt { font-size: 13px; color: #555; line-height: 1.5; margin-top: 4px; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    .preview-photos { font-size: 13px; color: #4a90d9; font-weight: 600; margin-top: 6px; }
+    .full-content { background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 32px; margin-bottom: 24px; }
+    .full-content h2 { font-size: 20px; color: #0f3460; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #e8edf3; font-family: Georgia, serif; }
+    .body { font-size: 15px; margin-bottom: 20px; white-space: pre-wrap; font-family: Georgia, 'Times New Roman', serif; }
+    .body.empty { color: #999; font-style: italic; font-size: 13px; }
+    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 20px; }
+    .photo img { width: 100%; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); cursor: pointer; transition: opacity 0.15s; }
+    .photo img:hover { opacity: 0.88; }
+    .photo img.zoomed { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; background: rgba(0,0,0,0.92); z-index: 9999; border-radius: 0; cursor: zoom-out; padding: 24px; opacity: 1; }
+    .divider-line { border-top: 2px solid #c5d3e8; margin: 16px 0; }
+    .routine-block { margin-bottom: 0; }
+    .routine-label { font-size: 14px; font-weight: bold; color: #0f3460; margin-bottom: 8px; }
+    .routine-text { font-size: 13px; white-space: pre-line; color: #444; line-height: 1.9; margin-bottom: 14px; }
+    .attribution { font-size: 12px; color: #666; line-height: 2.0; }
+    .attribution.solo { border-top: 1px solid #e8edf3; padding-top: 14px; }
+    .footer { font-size: 11px; color: #aaa; text-align: center; margin-top: 24px; }
+    @media (max-width: 600px) { .preview-card { flex-direction: column; } .preview-img, .preview-placeholder { width: 100%; min-width: 0; height: 200px; } body { padding: 16px; } .full-content { padding: 20px; } }
+    @media print { body { background: #fff; padding: 20px; } .preview-card { box-shadow: none; } nav { display: none; } .photo img.zoomed { display: none; } }
   </style>
   <script>
     document.addEventListener('click', e => {
@@ -1162,25 +1179,27 @@ function buildStoryHtml({ title, date, body, childName, childAge, roomName, cent
 </head>
 <body>
   <nav>
-    <a href="../index.html">← Back to all stories</a> · 
+    <a href="../index.html">← Back to all stories</a> ·
     <a href="../../../index.html">← All children</a>
   </nav>
-  <div class="header">
-    <h1>${escHtml(title || "Story")}</h1>
-    <div class="meta">
-      <span>📅 ${dateDisplay}</span>
-      ${childName ? `<span>👶 ${escHtml(childName)}${childAge ? ` (${escHtml(childAge)})` : ""}</span>` : ""}
-      ${educatorName ? `<span>👩‍🏫 ${escHtml(educatorName)}</span>` : ""}
-      ${roomName ? `<span>🏠 ${escHtml(roomName)}</span>` : ""}
-      ${centreName ? `<span>🏫 ${escHtml(centreName)}</span>` : ""}
+
+  <div class="preview-card" onclick="document.querySelector('.full-content').scrollIntoView({behavior:'smooth'})">
+    ${previewThumb}
+    <div class="preview-info">
+      <div class="preview-date">📅 ${dateDisplay}</div>
+      <div class="preview-title">${escHtml(title || "Story")}</div>
+      ${educatorName ? `<div class="preview-educator">👩‍🏫 ${escHtml(educatorName)}</div>` : ""}
+      <div class="preview-excerpt">${escHtml(previewExcerpt)}${previewExcerpt.length >= 200 ? "…" : ""}</div>
+      <div class="preview-photos">${displayPhotoCount} photo${displayPhotoCount !== 1 ? "s" : ""}</div>
     </div>
   </div>
 
-  ${bodyHtml}
-
-  ${mediaHtml ? `<div class="photos">\n      ${mediaHtml}\n    </div>` : ""}
-
-  ${routineSection}
+  <div class="full-content">
+    <h2>${escHtml(title || "Story")}</h2>
+    ${bodyHtml}
+    ${mediaHtml ? `<div class="photos">\n      ${mediaHtml}\n    </div>` : ""}
+    ${routineSection}
+  </div>
 
   <div class="footer">
     Saved from Storypark by Storypark Smart Saver — ${new Date().toISOString().split("T")[0]}
@@ -1257,12 +1276,24 @@ function buildChildrenIndexHtml(children) {
  */
 function buildMasterIndexHtml(childName, manifests) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const sorted = [...manifests].sort((a, b) => (b.storyDate || "").localeCompare(a.storyDate || ""));
+  // Dedup by storyId — keeps manifest with most approved photos.
+  // Prevents duplicate cards from em-dash vs hyphen folder variants in IDB.
+  const _scRe2 = /Story Card\.jpg$/i;
+  const _dd = new Map();
+  for (const m of (manifests || [])) {
+    const sid = m.storyId || m.folderName;
+    const ex = _dd.get(sid);
+    const cnt = (m.approvedFilenames || []).filter(f => !_scRe2.test(f)).length;
+    if (!ex || cnt > (ex.approvedFilenames || []).filter(f => !_scRe2.test(f)).length) _dd.set(sid, m);
+  }
+  const sorted = [..._dd.values()].sort((a, b) => (b.storyDate || "").localeCompare(a.storyDate || ""));
 
   const cards = sorted.map(m => {
-    const thumb = m.thumbnailFilename
+    const thumb = m.thumbnailFilename && !_scRe2.test(m.thumbnailFilename)
       ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(m.thumbnailFilename)}" alt="" loading="lazy">`
-      : `<div class="no-thumb">📸</div>`;
+      : ((m.approvedFilenames || []).find(f => !_scRe2.test(f))
+          ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent((m.approvedFilenames).find(f => !_scRe2.test(f)))}" alt="" loading="lazy">`
+          : `<div class="no-thumb">📸</div>`);
     const date = formatDateDMY(m.storyDate) || m.storyDate || "";
     const meta = [
       m.educatorName ? `👩‍🏫 ${escHtml(m.educatorName)}` : "",
@@ -2424,9 +2455,23 @@ async function runExtraction(childId, childName, mode, { closeOffscreenOnExit = 
     // Track originalUrl→filename mapping for rebuild-from-scratch capability
     const mediaUrls = [];
 
-    // Process each image sequentially
+    // ── PDF page detection: separate pdf-page images from regular photos ──
+    // story_pdf_* images are individual pages of a PDF document uploaded by an educator.
+    // Family accounts get 403 trying to download them — it's a Storypark permission
+    // restriction, not a network error. Log ONE summary warning instead of N per page.
+    const PDF_PAGE_RE = /story_pdf_/i;
+    const pdfImages = images.filter(i => PDF_PAGE_RE.test(i.filename));
+    const regularImages = images.filter(i => !PDF_PAGE_RE.test(i.filename));
+    if (pdfImages.length > 0) {
+      await logger("WARNING",
+        `  📄 PDF story — ${pdfImages.length} page${pdfImages.length !== 1 ? "s" : ""} not accessible from family account (educator-only)`,
+        storyDateStr
+      );
+    }
+
+    // Process each image sequentially (PDF pages skipped above)
     let aborted = false;
-    for (const img of images) {
+    for (const img of regularImages) {
       if (cancelRequested) { scanCancelled = true; aborted = true; break; }
 
       // ── Rejection tracking: skip images previously rejected by user ──
