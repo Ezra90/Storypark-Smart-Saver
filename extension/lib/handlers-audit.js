@@ -252,9 +252,10 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
   // ── Phase 2: Repair ──
   const newlyDownloaded = new Set();
   const _total = brokenStories.length;
+  let repairAborted = false;
 
   for (let si = 0; si < _total; si++) {
-    if (ctx.getCancelRequested()) {
+    if (ctx.getCancelRequested() || repairAborted) {
       await ctx.logger("WARNING", `⏸ Repair cancelled after ${si} of ${_total} stories.`);
       break;
     }
@@ -335,10 +336,17 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
           else totalFailed++;
         }
       } catch (dlErr) {
+        if (dlErr.name === "RateLimitError" || dlErr.message.includes("429") || dlErr.message.includes("403")) {
+          await ctx.logger("ERROR", "🛑 Rate limited by Storypark. Aborting repair. Please try again later.");
+          repairAborted = true;
+          break;
+        }
         await ctx.logger("WARNING", `⚠ ${filename}: ${dlErr.message}`);
         totalFailed++;
       }
     }
+
+    if (repairAborted) break;
 
     // Regenerate HTML + Card if files were downloaded
     if ((storyDownloaded > 0 || (needsAssets && missingFiles.length === 0)) && !ctx.getCancelRequested()) {
@@ -370,7 +378,7 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
   }
 
   // Rebuild index pages
-  if (totalDownloaded > 0 && !ctx.getCancelRequested()) {
+  if (totalDownloaded > 0 && !ctx.getCancelRequested() && !repairAborted) {
     const { children = [] } = await chrome.storage.local.get("children");
     await rebuildIndexPages(children).catch(() => {});
   }

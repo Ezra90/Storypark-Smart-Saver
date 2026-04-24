@@ -238,3 +238,34 @@ export async function getActivityLog(newestFirst = false) {
 export async function clearActivityLog() {
   await chrome.storage.local.set({ activityLog: [] });
 }
+
+/**
+ * Delete the activity log file from disk (Database/activity_log.jsonl).
+ * Also clears chrome.storage.local.activityLog.
+ *
+ * INVARIANT: Only callable from the dashboard page context (has FSA access).
+ *
+ * @param {FileSystemDirectoryHandle} folderHandle — Linked SSS folder
+ * @returns {Promise<{ deleted: boolean }>}
+ */
+export async function deleteActivityLogFromDisk(folderHandle) {
+  if (!folderHandle) return { deleted: false };
+  try {
+    const dbFolder = await folderHandle.getDirectoryHandle("Storypark Smart Saver", { create: false })
+      .then(sss => sss.getDirectoryHandle("Database", { create: false }))
+      .catch(() => null);
+
+    if (dbFolder) {
+      try {
+        await dbFolder.removeEntry(ACTIVITY_LOG_FILENAME);
+      } catch { /* file may not exist */ }
+    }
+
+    // Also clear chrome.storage.local
+    await chrome.storage.local.set({ activityLog: [] });
+    return { deleted: true };
+  } catch (err) {
+    console.warn("[log-manager] deleteActivityLogFromDisk failed (non-fatal):", err.message);
+    return { deleted: false };
+  }
+}

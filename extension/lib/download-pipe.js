@@ -270,6 +270,16 @@ export function downloadHtmlFile(dataUrl, savePath) {
 }
 
 /**
+ * Return current download pipeline stats (active slots + queued items).
+ * Used by logMemorySnapshot() in background.js for accurate memory reporting.
+ *
+ * @returns {{ active: number, queued: number }}
+ */
+export function getDownloadStats() {
+  return { active: _activeDownloads, queued: _downloadQueue.length };
+}
+
+/**
  * Download a video using a blob URL that was already created in the
  * offscreen document (via DOWNLOAD_VIDEO message).
  *

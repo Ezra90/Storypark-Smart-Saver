@@ -27,12 +27,14 @@
  */
 
 import {
-  getDownloadedStories, addDownloadedStory,
+  getDownloadedStories, addDownloadedStory, getAllDownloadedStories,
   countImageFingerprints, countCachedStories,
   clearAllImageFingerprints, clearAllCachedStories,
   clearAllRejections,
   getActiveDatabaseInfo,
   markFilenameApprovedInManifest,
+  assignStoryNumbers,
+  getCentreGPS,
 } from "./db.js";
 import { apiFetch, STORYPARK_BASE } from "./api-client.js";
 import { getActivityLog, clearActivityLog } from "./log-manager.js";
@@ -264,6 +266,146 @@ export async function handleRewriteExifOnly(msg, ctx) {
 export async function handleGenerateStoryCard(msg, ctx) {
   try {
     return await ctx.sendToOffscreen(msg);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/* ================================================================== */
+/*  Story metadata correction                                          */
+/* ================================================================== */
+
+/**
+ * FIX_STORY_METADATA — Bulk-update centreName and/or roomName for a child's
+ * story manifests, then optionally regenerate HTML + Story Cards.
+ *
+ * This allows correcting metadata mistakes (e.g. wrong centre/room assigned
+ * when a child attended two daycares) without running a full rescan.
+ *
+ * @param {{
+ *   childId:       string,
+ *   childName:     string,
+ *   centreName?:   string    — New centre name (null = leave unchanged)
+ *   roomName?:     string    — New room name   (null = leave unchanged, "" = clear)
+ *   dateFrom?:     string    — YYYY-MM-DD start of date range (inclusive)
+ *   dateTo?:       string    — YYYY-MM-DD end of date range (inclusive)
+ *   regenerateHtml?: boolean — Rebuild story.html + Story Card after patching
+ * }} msg
+ */
+export async function handleFixStoryMetadata(msg, ctx) {
+  try {
+    const {
+      childId, childName,
+      centreName: newCentre = null,
+      roomName:   newRoom   = null,
+      dateFrom = null,
+      dateTo   = null,
+      regenerateHtml = true,
+    } = msg;
+
+    if (!childId) return { ok: false, error: "Missing childId" };
+    if (newCentre === null && newRoom === null) return { ok: false, error: "Nothing to change — provide centreName and/or roomName" };
+
+    const manifests = await getDownloadedStories(childId);
+    let updated = 0;
+    const updatedManifests = [];
+
+    for (const m of manifests) {
+      // Apply date range filter
+      if (dateFrom && m.storyDate && m.storyDate < dateFrom) continue;
+      if (dateTo   && m.storyDate && m.storyDate > dateTo)   continue;
+
+      let changed = false;
+      const patched = { ...m };
+
+      if (newCentre !== null && patched.centreName !== newCentre) {
+        patched.centreName = newCentre;
+        changed = true;
+      }
+      if (newRoom !== null && patched.roomName !== newRoom) {
+        patched.roomName = newRoom;
+        changed = true;
+      }
+
+      if (changed) {
+        await addDownloadedStory(patched).catch(() => {});
+        updatedManifests.push(patched);
+        updated++;
+      }
+    }
+
+    await ctx.logger("SUCCESS", `✏️ Metadata updated for ${updated} stories${childName ? ` (${childName})` : ""}${newCentre ? ` → Centre: "${newCentre}"` : ""}${newRoom !== null ? ` → Room: "${newRoom || "(cleared)"}"` : ""}`);
+
+    // Optionally regenerate HTML + Story Cards for all updated stories
+    if (regenerateHtml && updatedManifests.length > 0 && ctx.sendToOffscreen) {
+      const { saveStoryCard = true } = await chrome.storage.local.get("saveStoryCard");
+      let htmlBuilt = 0, cardBuilt = 0;
+
+      for (const m of updatedManifests) {
+        try {
+          const { downloadDataUrl: _dl, downloadHtmlFile: _dh } = await import("./download-pipe.js");
+          const { buildStoryPage: _bp } = await import("./html-builders.js");
+          const { sanitizeName: _sn } = await import("./metadata-helpers.js");
+
+          const storyBasePath = `Storypark Smart Saver/${_sn(m.childName)}/Stories/${m.folderName}`;
+          const rejectedSet   = new Set(m.rejectedFilenames || []);
+          const approvedOnly  = (m.approvedFilenames || []).filter(f => !rejectedSet.has(f));
+          if (approvedOnly.length === 0) continue;
+
+          const routineStr = typeof m.storyRoutine === "string" ? m.storyRoutine : (m.storyRoutine?.detailed || m.storyRoutine?.summary || "");
+          const htmlContent = _bp({
+            title: m.storyTitle, date: m.storyDate, body: m.storyBody || "",
+            childName: m.childName, childAge: m.childAge || "",
+            roomName: m.roomName || "", centreName: m.centreName || "",
+            educatorName: m.educatorName || "", routineText: routineStr,
+            mediaFilenames: approvedOnly,
+          });
+          const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/story.html`, mimeType: "text/html" });
+          if (htmlRes?.dataUrl && htmlRes?.savePath) { await _dh(htmlRes.dataUrl, htmlRes.savePath); htmlBuilt++; }
+
+          if (saveStoryCard && m.storyBody && approvedOnly.length > 0) {
+            const gpsCoords = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
+            const cardPath  = `${storyBasePath}/${m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+            const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: m.storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText: routineStr, photoCount: approvedOnly.filter(f => !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)).length, gpsCoords, savePath: cardPath });
+            if (cr?.ok && cr?.dataUrl) { await _dl(cr.dataUrl, cardPath); cardBuilt++; }
+          }
+        } catch (err) {
+          console.warn("[handleFixStoryMetadata] regen failed for", m.storyId, err.message);
+        }
+      }
+
+      await ctx.logger("INFO", `📄 Regenerated ${htmlBuilt} story pages + ${cardBuilt} Story Cards with corrected metadata.`);
+    }
+
+    return { ok: true, updated, regenerated: regenerateHtml ? updatedManifests.length : 0 };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * ASSIGN_STORY_NUMBERS — Trigger manual story number assignment for a child.
+ * Numbers stories oldest→newest (oldest=1). Called from Tools tab GUI.
+ *
+ * @param {{ childId: string }} msg
+ */
+export async function handleAssignStoryNumbers(msg, ctx) {
+  try {
+    const childId = msg.childId ? String(msg.childId) : null;
+    if (!childId) {
+      // Number all children
+      const { children = [] } = await chrome.storage.local.get("children");
+      let total = 0;
+      for (const child of children) {
+        const n = await assignStoryNumbers(child.id).catch(() => 0);
+        total += n;
+      }
+      await ctx.logger("SUCCESS", `🔢 Story numbers assigned for all children: ${total} stories numbered.`);
+      return { ok: true, numbered: total };
+    }
+    const numbered = await assignStoryNumbers(childId);
+    await ctx.logger("SUCCESS", `🔢 Story numbers assigned: ${numbered} stories numbered oldest→newest.`);
+    return { ok: true, numbered };
   } catch (err) {
     return { ok: false, error: err.message };
   }

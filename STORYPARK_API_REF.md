@@ -178,7 +178,7 @@ GET /api/v3/children/{child_id}/stories
 
 Returns a paginated list of story summaries for a child. Each page contains full story data (not just IDs).
 
-**Response shape (verified from captures):**
+**Response shape (verified from HAR captures — April 2026):**
 
 ```jsonc
 {
@@ -186,12 +186,14 @@ Returns a paginated list of story summaries for a child. Each page contains full
     {
       "id": "108400285",                 // string
       "created_at": "2026-04-17T02:06:24.594Z",
-      "date": "2026-04-17",
+      "date": "2026-04-17",             // ⭐ educator-set event date (preferred over created_at)
       "excerpt": "Hello families...",
-      "group_id": "176910",
-      "group_name": "My Early Learning Centre",  // NOTE: this is the CENTRE name, not room
+      "group_id": "176910",             // numeric centre ID as string
+      "group_name": "My Early Learning Centre",  // ⭐ CENTRE name (NOT room name)
       "display_subtitle": "Group Story for Child1, Child2...",
-      "media": [                          // NOTE: field is "media", NOT "media_items"
+      "display_subtitle_children_names": ["Child1", "Child2"],  // co-featured children
+      "learning_tags": [ ... ],         // EYLF 2.0 2023 outcomes per story
+      "media": [                        // NOTE: field is "media", NOT "media_items"
         {
           "id": "0a606aca-e683-4ebf-95a1-042b92e716a0",
           "type": "image",
@@ -208,7 +210,16 @@ Returns a paginated list of story summaries for a child. Each page contains full
 }
 ```
 
-**Extension usage:** `fetchStorySummaries(childId, mode)` — paginates until `next_page_token` is absent or a known story ID is encountered.
+**⭐ Key HAR findings (April 2026):**
+- `group_name` = **centre name** for every story in the feed — available WITHOUT fetching individual story details.
+  SSS now calls `discoverCentres([s.group_name])` during pagination to pre-populate ALL daycares in Centre Locations.
+  This fixes the bug where Hugo's second daycare did not appear in the Centre Locations GPS panel.
+- `date` = educator-set event date (preferred over `created_at`). SSS now uses this for filenames, EXIF, and manifests.
+- `group_id` = numeric centre ID (not currently used by SSS).
+- `display_subtitle_children_names` = list of co-featured children in group stories.
+- `learning_tags` = per-story EYLF 2.0 2023 curriculum outcomes.
+
+**Extension usage:** `fetchStorySummaries(childId, mode)` — paginates until `next_page_token` is absent or a known story ID is encountered. Calls `discoverCentres([s.group_name])` for each new centre seen in the feed.
 
 ---
 
@@ -270,6 +281,8 @@ Returns the full story object. The Storypark web app calls this with `?comments_
 
 **Extension fallback chain for centre name:** `community_name` → `centre_name` → `service_name` → `group_name` → `childCentreFallback` (from profile)
 
+**⭐ Date preference (v3.5.0+):** SSS uses `story.date` (educator-set event date) over `story.created_at` for filenames, EXIF, and manifests. Fallback: `created_at`.
+
 **Room name deduplication:** If `group_name` equals the resolved centre name, it's treated as the centre (not duplicated as a room).
 
 ---
@@ -330,15 +343,68 @@ Returns paginated daily routine records. Each record contains a date and an arra
 
 ---
 
-### 8. Media Download
+### 8. Learning Tags
 
-Media items in story responses include `original_url` for full-resolution downloads. The URL pattern:
+```
+GET /api/v3/children/{child_id}/learning_tags
+```
 
+Returns all EYLF 2.0 (2023) curriculum outcome tags recorded for a child across all stories.
+
+**Verified from HAR captures (April 2026):**
+- Harry (age ~3 years): 48 tags
+- Hugo (age ~2 years): 314 tags
+
+Learning tags are also embedded per-story in both the story list feed and story detail responses.
+
+**Current status:** Not yet consumed by SSS. Future use: photo tagging, filtering by outcome, enriched story cards.
+
+---
+
+### 9. Moments
+
+```
+GET /api/v3/children/{child_id}/moments
+```
+
+Returns moment entries (quick educator notes, not full stories) for a child.
+
+**Current status:** Not yet consumed by SSS. Future use: supplementary timeline data, attendance notes.
+
+---
+
+### 10. Media Download
+
+Media items in story responses include `original_url` for full-resolution downloads.
+
+**Standard images — app.storypark.com URLs:**
 ```
 https://app.storypark.com/media_items/{token}/{id}/original/{account_id}/{expiry}/{signature}
 ```
-
 Resized versions use `640_wide` or `large` instead of `original` in the path.
+
+**CDN URLs (also seen in HAR — no auth required):**
+```
+https://media.storypark-cdn.com/media/story/{storyId}/story_image_v2_{uuid}_original
+```
+
+**⭐ PDF story pages — JPEG images, NOT real PDFs:**
+```
+https://media.storypark-cdn.com/media/story/{storyId}/story_pdf_{uuid}_{page}_640_wide
+```
+- MIME type: `image/jpeg` — these are rendered JPEG images of each PDF page, not binary PDFs
+- HTTP status: `200 OK` — **fully accessible to family accounts** (confirmed via HAR analysis April 2026)
+- Page numbers start at 0 (`_0_640_wide` = page 1, `_1_640_wide` = page 2, etc.)
+- SSS sanitizes these to `pdf_page_01.jpg`, `pdf_page_02.jpg`, etc. during download (v3.5.0+)
+- Previous misconception: these were believed to be educator-only. HAR analysis disproved this.
+
+**⭐ Video files — HTTP 206 streaming (normal, not an error):**
+```
+https://media.storypark-cdn.com/media/story/{storyId}/story_video_{uuid}_720_high.mp4
+```
+- HTTP status: `206 Partial Content` — this is standard streaming behaviour, **not** an access restriction
+- Videos ARE fully accessible to family accounts
+- SSS downloads these via `DOWNLOAD_VIDEO` → offscreen document blob streaming
 
 The extension downloads using `original_url` directly — no URL construction needed.
 
@@ -373,7 +439,7 @@ Storypark
 
 **Emoji handling:** All emojis are stripped from EXIF text to prevent corruption (EXIF uses ASCII/Latin-1 encoding).
 
-`DateTimeOriginal` and `DateTime` are set from `story.created_at`.
+`DateTimeOriginal` and `DateTime` are set from `story.date` (educator-set event date), falling back to `story.created_at` (v3.5.0+).
 
 ---
 
@@ -386,11 +452,15 @@ YYYY-MM-DD_ChildName[_RoomName]_originalname.ext
 ```
 
 **Photo example:** `2026-04-17_Alex_Smith_Kangaroo_Room_story_image_v2_abc123_original.jpg`
-**Video example:** `2026-04-17_Alex_Smith_Kangaroo_Room_49e4a13c.mp4`
+**Video example:** `2026-04-17_Alex_Smith_Kangaroo_Room_story_video_ed6bfaa6_720_high.mp4`
+**PDF page example:** `2026-04-17_Alex_Smith_Kangaroo_Room_pdf_page_01.jpg`
 
+- Date comes from `story.date` (educator-set) if available, else `story.created_at` (v3.5.0+).
 - JPEG photos also have EXIF date metadata embedded (Google Photos prefers EXIF over filename).
 - Non-JPEG images (PNG, WebP, GIF) and MP4 videos rely on the filename date signal.
-- Room name is included when it differs from the centre name; omitted when they're the same.
+- Room name is included when it differs from the centre name; omitted when same or unknown.
+- PDF story pages: `story_pdf_{uuid}_{page}_640_wide` URL → sanitized to `pdf_page_NN.jpg` (1-based page numbers).
+- **Custom Filename & Mass Renamer** (Tools tab, v3.5.0+): apply a `{StoryDate}_{ChildName}_{Room}_{OriginalName}` template to all downloaded media with live preview and on-disk rename.
 
 ---
 

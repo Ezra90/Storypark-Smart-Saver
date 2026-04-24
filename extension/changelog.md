@@ -2,6 +2,27 @@
 
 ---
 
+## v3.5.0 — April 2026
+
+- ✅ **PDF story pages now downloaded** — HAR analysis confirmed `story_pdf_*` files are JPEG images (HTTP 200, accessible to family accounts). SSS now downloads all PDF pages as `pdf_page_01.jpg`, `pdf_page_02.jpg`, etc.
+- ✅ **Second daycare centre name pre-populated** — `group_name` from the story list feed is now used to discover ALL daycares during pagination, fixing the bug where a child's second daycare did not appear in Centre Locations
+- ✅ **Educator-set event date** — SSS now uses `story.date` (the educator-set event date) instead of `created_at` for filenames, EXIF DateTimeOriginal, and manifests
+- ✅ **Custom Filename & Mass Renamer** — Tools tab: build a `{StoryDate}_{ChildName}_{Room}_{OriginalName}` template, preview all renames, then apply with on-disk file rename + database update + story HTML rebuild
+- ✅ **STORYPARK_API_REF.md updated** — added learning tags endpoint, moments endpoint, CDN URL patterns, HTTP 206 video streaming note, PDF page clarification, educator-set date field
+
+---
+
+## v3.4.0 — April 2026
+
+- ✅ **Story numbers** — every story gets a sequential number (oldest = 1) assigned automatically after each scan; can be triggered manually from Tools tab
+- ✅ **Centre-aware room tracking** — prevents a room name from an old daycare bleeding into stories from a new daycare when a child attends multiple centres
+- ✅ **Fix Story Metadata** — Tools tab: bulk-correct centre name and/or room name for a date range of stories, then regenerate HTML + Story Cards
+- ✅ **Delete log file** — Activity Log tab: delete the `Database/activity_log.jsonl` file from your linked folder
+- ✅ **Export log for AI** — Activity Log tab: export the current activity log as JSON for AI analysis of issues
+- ✅ **HAR capture tools** — `SSS-Junk-Backup/` analysis scripts to examine `.har` captures from browser sessions
+
+---
+
 ## v2.5.0 — April 2026
 
 - ✅ **ETA on all 8 status bars** — every progress bar now shows estimated time remaining (e.g. "⏱ ~12m")

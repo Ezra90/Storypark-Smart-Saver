@@ -29,10 +29,11 @@
  */
 
 import { apiFetch, smartDelay, discoverCentres, STORYPARK_BASE, AuthError, RateLimitError } from "./api-client.js";
+import { fetchRoutineSummary } from "./scan-engine.js";
 import {
   addDownloadedStory, markStoryProcessed, getAllDownloadedStories,
   getCentreGPS, saveChildProfile, isChildProfileStale, getChildProfile,
-  cacheStory, getCachedStory,
+  cacheStory, getCachedStory, assignStoryNumbers,
 } from "./db.js";
 import { rebuildIndexPages } from "./handlers-html.js";
 import { downloadDataUrl, downloadHtmlFile } from "./download-pipe.js";
@@ -114,13 +115,14 @@ function _buildRoutineData(events) {
  */
 async function _fetchAllRoutines(childId, logger) {
   const routineMap = new Map();
-  let pageToken = "null";
+  let pageToken = null;
   let pages = 0;
   while (pages < 120) { // max ~12,000 days of routine data
     try {
       await smartDelay("FEED_SCROLL");
-      const url = `${STORYPARK_BASE}/api/v3/children/${childId}/daily_routines?page_token=${pageToken}`;
-      const data = await apiFetch(url);
+      const url = new URL(`${STORYPARK_BASE}/api/v3/children/${childId}/daily_routines`);
+      if (pageToken) url.searchParams.set("page_token", pageToken);
+      const data = await apiFetch(url.toString());
       for (const r of (data.daily_routines || [])) {
         if (r.date && !routineMap.has(r.date)) {
           routineMap.set(r.date, _buildRoutineData(r.events || []));
@@ -129,7 +131,15 @@ async function _fetchAllRoutines(childId, logger) {
       pageToken = data.next_page_token;
       if (!pageToken) break;
       pages++;
-    } catch { break; }
+    } catch (err) {
+      if (err.name === "RateLimitError") {
+        await logger("WARNING", "⏳ Rate limited during bulk routine fetch — pausing 30s…");
+        await new Promise(r => setTimeout(r, 30000));
+        continue;
+      }
+      await logger("WARNING", `  ⚠ Bulk routine fetch stopped early: ${err.message}`);
+      break;
+    }
   }
   return routineMap;
 }
@@ -467,8 +477,12 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
             const childAge = calculateAge(childBirthday, m.storyDate || "");
             const excerpt = stripHtml(storyBody).substring(0, 200);
 
-            // Routine from bulk-fetched map
-            const routineData = m.storyDate ? (routineMap.get(m.storyDate) || { summary: "", detailed: "" }) : { summary: "", detailed: "" };
+            // Routine from bulk-fetched map OR fallback to individual fetch
+            let routineData = m.storyDate ? routineMap.get(m.storyDate) : null;
+            if (!routineData && m.storyDate && !String(m.storyId).startsWith("recovered_")) {
+              routineData = await fetchRoutineSummary(childId, m.storyDate);
+            }
+            routineData = routineData || { summary: "", detailed: "" };
             const storyRoutine = routineData.detailed || routineData.summary || "";
 
             // Discover centre GPS if new
@@ -486,13 +500,18 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
               }))
               .filter(mu => mu.filename);
 
-            // Update manifest with full data
+            // Update manifest with full data.
+            // Room safety: if the centre changed (child moved daycare), don't inherit
+            // the previous centre's room name — leave it empty so it doesn't mislead.
+            const centreChanged = centreName && m.centreName && centreName !== m.centreName;
+            const resolvedRoomName = roomName || (centreChanged ? "" : (m.roomName || ""));
+
             let enrichedManifest = {
               ...m,
               storyBody,
               excerpt,
               educatorName,
-              roomName: roomName || m.roomName || "",
+              roomName: resolvedRoomName,
               centreName: centreName || m.centreName || "",
               childAge: childAge || m.childAge || "",
               storyRoutine,
@@ -524,13 +543,12 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
 
             if (apiCount > 0 && diskCount < apiCount) {
               await ctx.logger("WARNING",
-                `  ⚠ ${apiCount - diskCount} of ${apiCount} photos missing from disk (${diskCount} found) — run Audit & Repair to re-download`,
+                `  ⚠ ${apiCount - diskCount} of ${apiCount} photos missing from disk (${diskCount} found) — database updated, run Audit & Repair to re-download the story`,
                 m.storyDate || null
               );
-              // If disk has NO downloadable photos at all, populate approvedFilenames
-              // from the API image list (excluding PDFs and videos) so Audit & Repair
-              // can detect this story as db_only and re-download everything.
-              if (diskCount === 0 && mediaUrls.length > 0) {
+              // Populate approvedFilenames from the API image list (excluding PDFs and videos)
+              // so Audit & Repair can detect this story as missing photos and re-download everything.
+              if (mediaUrls.length > 0) {
                 const downloadableFilenames = mediaUrls
                   .map(mu => mu.filename)
                   .filter(f => !_vidExtE.test(f) && !_pdfPageE.test(f));
@@ -626,6 +644,15 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
       await rebuildIndexPages(children, ctx);
     } catch (idxErr) {
       await ctx.logger("WARNING", `⚠ Index page rebuild failed (non-fatal): ${idxErr.message}`);
+    }
+
+    // Assign sequential story numbers (oldest=1) after rebuild completes.
+    // Non-fatal — always runs even if Phase 4/5 had partial errors.
+    try {
+      const numbered = await assignStoryNumbers(childId);
+      if (numbered > 0) await ctx.logger("INFO", `🔢 Story numbers assigned: ${numbered} stories numbered oldest→newest.`);
+    } catch (numErr) {
+      console.warn("[handleRebuildDatabaseFromDisk] assignStoryNumbers failed (non-fatal):", numErr?.message || numErr);
     }
 
     // Final summary

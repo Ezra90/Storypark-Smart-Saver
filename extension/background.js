@@ -105,7 +105,7 @@ import {
 // initDownloadPipe() wires in sendToOffscreen for the blob-URL creation path.
 import {
   downloadBlob, downloadDataUrl, downloadHtmlFile, downloadVideoFromOffscreen,
-  MAX_CONCURRENT_DOWNLOADS, handleDownloadChanged, initDownloadPipe,
+  MAX_CONCURRENT_DOWNLOADS, handleDownloadChanged, initDownloadPipe, getDownloadStats,
 } from "./lib/download-pipe.js";
 
 // Wire up lib modules with runtime context.
@@ -155,6 +155,7 @@ import {
   handleClearAllRejections, handleRecycleOffscreen, handleActiveDatabaseInfo,
   handleGetActivityLog, handleClearActivityLog, handleLogToActivity,
   handleRewriteExifOnly, handleGenerateStoryCard,
+  handleFixStoryMetadata, handleAssignStoryNumbers,
 } from "./lib/handlers-misc.js";
 import { handleRebuildDatabaseFromDisk } from "./lib/handlers-rebuild.js";
 
@@ -426,18 +427,9 @@ async function sendToOffscreen(message, _retryCount = 0) {
 // Register the download changed handler (ONCE - prevents double-handler bug)
 chrome.downloads.onChanged.addListener(handleDownloadChanged);
 
-// Internal helpers still needed locally (sendToOffscreen uses these in the background pipeline)
-let   _activeDownloads = 0;
-const _downloadQueue   = [];
-const _pendingDownloadIds = new Map();
-function _releaseDownloadSlot() {
-  _activeDownloads = Math.max(0, _activeDownloads - 1);
-  const next = _downloadQueue.shift();
-  if (next) next();
-}
-
 // downloadBlob, downloadDataUrl, downloadHtmlFile, downloadVideoFromOffscreen → lib/download-pipe.js (imported)
-// _dataUrlToBlob, _enqueueDownload are internal to download-pipe.js
+// _dataUrlToBlob, _enqueueDownload, _activeDownloads, _downloadQueue are internal to download-pipe.js
+// Use getDownloadStats() (imported above) to read semaphore state for logging.
 
 /* ================================================================== */
 /*  Memory instrumentation (passive — logs only, no behaviour change)  */
@@ -461,7 +453,8 @@ async function logMemorySnapshot(contextLabel) {
       const limit = (performance.memory.jsHeapSizeLimit / 1048576).toFixed(0);
       line += ` — JS heap ${used}/${total} MB (limit ${limit} MB)`;
     }
-    line += ` — downloads active=${_activeDownloads} queued=${_downloadQueue.length}`;
+    const _dlStats = getDownloadStats();
+    line += ` — downloads active=${_dlStats.active} queued=${_dlStats.queued}`;
     console.log(line);
   } catch {
     // Non-fatal — instrumentation must never break a scan.
@@ -4432,15 +4425,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const manifests = await getDownloadedStories(amChildId);
           const manifest  = manifests.find(m => m.storyId === amStoryId);
           if (manifest) {
-            const current = manifest.approvedFilenames || [];
-            if (!current.includes(amFilename)) {
-              manifest.approvedFilenames = [...current, amFilename];
-              // Update thumbnail if the manifest had no photos
-              if (!manifest.thumbnailFilename) {
-                manifest.thumbnailFilename = amFilename;
-              }
-              await addDownloadedStory(manifest);
-            }
+            // Remove from rejectedFilenames — a rescued file must not remain excluded
+            // from HTML rendering (buildStoryPage filters on rejectedSet.has(f)).
+            const rejected = (manifest.rejectedFilenames || []).filter(f => f !== amFilename);
+            const current  = manifest.approvedFilenames || [];
+            const approved = current.includes(amFilename) ? current : [...current, amFilename];
+            await addDownloadedStory({
+              ...manifest,
+              approvedFilenames:  approved,
+              rejectedFilenames:  rejected,
+              thumbnailFilename:  manifest.thumbnailFilename || amFilename,
+            });
           }
           sendResponse({ ok: true });
         } catch (err) {
@@ -5089,6 +5084,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const { filesByFolder = {}, childId: targetChildId } = msg;
           const { children = [], saveStoryCard = true } = await chrome.storage.local.get(["children", "saveStoryCard"]);
           const MEDIA_EXT = /\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+          // Story Card JPEGs are generated assets for Google Photos — not downloaded media.
+          // They must never appear in approvedFilenames or be rendered as gallery images.
+          const _REGEN_STORY_CARD_RE = /Story Card\.jpg$/i;
 
           let rebuilt = 0, updated = 0, errors = 0;
 
@@ -5104,8 +5102,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
               const diskFiles = filesByFolder[m.folderName];
               if (!diskFiles) continue; // folder not found on disk — skip
 
-              // Filter to media files only (exclude story.html, story card, etc.)
-              const mediaFiles = diskFiles.filter(f => MEDIA_EXT.test(f));
+              // Filter to media files only — exclude story.html AND Story Card JPEGs.
+              // Story Cards are generated assets for Google Photos, not downloaded media.
+              const mediaFiles = diskFiles.filter(f => MEDIA_EXT.test(f) && !_REGEN_STORY_CARD_RE.test(f));
               if (mediaFiles.length === 0) continue;
 
               try {
@@ -5985,6 +5984,38 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           cancelRequested = false;
           chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
           chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
+        }
+      })();
+      return true;
+    }
+
+    /* ── Story metadata correction ── */
+    case "FIX_STORY_METADATA": {
+      // Bulk-update centreName and/or roomName for a child's story manifests,
+      // then regenerate HTML + Story Cards. Corrects metadata errors when a child
+      // attended two daycares and the wrong room/centre was assigned.
+      (async () => {
+        try {
+          const ctx = { logger, sendToOffscreen, getCancelRequested: () => cancelRequested };
+          const result = await handleFixStoryMetadata(msg, ctx);
+          sendResponse(result);
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
+    case "ASSIGN_STORY_NUMBERS": {
+      // Assign sequential story numbers to a child's stories (oldest=1).
+      // Called from the Tools tab GUI.
+      (async () => {
+        try {
+          const ctx = { logger, sendToOffscreen, getCancelRequested: () => cancelRequested };
+          const result = await handleAssignStoryNumbers(msg, ctx);
+          sendResponse(result);
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
         }
       })();
       return true;

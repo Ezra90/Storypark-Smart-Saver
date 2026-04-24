@@ -438,10 +438,39 @@ chrome.storage.session.get(["_requestCount", "_coffeeBreakAt", "lastReviewAction
 chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
 ```
 
-### Missing yieldForGC() in triggerOfflineScan (OOM Risk)
-**Bug:** `triggerOfflineScan()` in `dashboard.js` iterated over `imageFiles` running face detection but never called `await yieldForGC()`. This violated the OOM rule and could crash the worker on large folders.
+### Missing yieldForGC() in Face Detection Loops (OOM Risk)
+**Bug:** Loops in `dashboard.js` (like `triggerOfflineScan`, `runCleanup`, `runReEvaluateAll`) iterate over local disk files running face detection, but historically missed calling `await yieldForGC()`. This violated the OOM rule and caused the V8 engine to hold base64 data URLs until the tab crashed on large directories.
 
-**Fix:** Add `await yieldForGC(i + 1, imageFiles.length, $progressText)` immediately after `updateProgressBar()` in every face-detection loop, including `triggerOfflineScan`. The rule is: **every loop that calls `detectFaces()` must call `yieldForGC()` every iteration**.
+**Fix:** Add `await yieldForGC(processed, imageFiles.length, $progressText)` immediately after `updateProgressBar()` in EVERY face-detection loop. The rule is: **every loop that calls `detectFaces()` must call `yieldForGC()` every iteration**.
+
+### Rate Limit Ignorance in Background Loops (Anti-Abuse)
+**Bug:** Background loops (like `runAuditAndRepair` or `_fetchAllRoutines`) would hit a 429 Rate Limit from Storypark and either silently break out of the loop (leaving data incomplete) or blindly continue firing failing requests.
+**Fix:** Every background loop that calls `apiFetch` MUST explicitly catch `RateLimitError` and pause.
+```javascript
+if (err.name === "RateLimitError" || err.message.includes("429")) {
+  await ctx.logger("WARNING", "⏳ Rate limited — pausing 30s…");
+  await new Promise(r => setTimeout(r, 30000));
+  // Then either continue to retry, or break/abort cleanly
+}
+```
+
+### Global State Initialization Leaks
+**Bug:** Global flags like `humanAvailable` were declared as `let humanAvailable = false;` and only initialized inside lazily-called functions like `initSettingsTab()`. If a user clicked "Offline Scan" on the Scan tab before ever visiting the Settings tab, the operation would fail because the flag was still `false`.
+**Fix:** Always initialize global environment state immediately at the module level (e.g., `const humanAvailable = typeof Human !== "undefined";`), never inside a lazy-loaded tab init function.
+
+### humanAvailable const Reassignment in initSettingsTab
+**Bug:** `humanAvailable` was declared as `const` at module level (correct), but then `initSettingsTab()` had a redundant `humanAvailable = typeof Human !== "undefined";` assignment inside it. This threw a `TypeError: Assignment to constant variable` at runtime the first time Settings was visited.
+**Fix:** Remove the reassignment line from `initSettingsTab()`. The module-level `const humanAvailable = typeof Human !== "undefined";` is sufficient.
+
+### Tools Tab Not Triggering initSettingsTab
+**Bug:** The `switchTab()` function only called `initSettingsTab()` + `loadSettingsChildren()` when switching to `"settings"`. Switching directly to `"tools"` would not wire the Tools tab buttons (link folder, cleanup, audit, mass renamer, etc.) because `wireSettingsEvents()` hadn't been called yet.
+**Fix:** Update `switchTab()` to call both functions for `tabName === "settings" || tabName === "tools"`:
+```javascript
+if (tabName === "settings" || tabName === "tools") {
+  initSettingsTab();      // one-time: event wiring (guarded by _settingsInited)
+  loadSettingsChildren(); // always: refresh child dropdowns on every tab visit
+}
+```
 
 ### Hardcoded Path Index Ignores _sssLinked State
 **Bug:** In `triggerOfflineScan()`, the folder name was extracted with a hardcoded index `pathParts[3]`. This is only correct when the parent folder is linked. When the `Storypark Smart Saver` folder itself is linked (`_sssLinked = true`), path depth is one level shorter, so `pathParts[3]` returns the filename instead of the folder name — causing manifest lookup to silently fail for every image.
@@ -466,6 +495,50 @@ if (_fullImageCache.size >= MAX_LIGHTBOX_CACHE) {
 _fullImageCache.set(originalUrl, blobUrl);
 ```
 Note: this eviction pattern (oldest-first via `Map.keys().next().value`) relies on Maps preserving insertion order, which is guaranteed in all modern JS engines.
+
+### ADD_FILE_TO_MANIFEST Not Removing from rejectedFilenames
+**Bug:** The `ADD_FILE_TO_MANIFEST` inline handler in background.js added a rescued filename to `approvedFilenames` but did NOT remove it from `rejectedFilenames`. Since `buildStoryPage` and all HTML builders filter on `rejectedSet.has(f)`, the file remained invisible in story.html and index pages even after being "approved".
+
+**Fix:** When adding a file to `approvedFilenames`, also filter it out of `rejectedFilenames`:
+```javascript
+const rejected = (manifest.rejectedFilenames || []).filter(f => f !== amFilename);
+const current  = manifest.approvedFilenames || [];
+const approved = current.includes(amFilename) ? current : [...current, amFilename];
+await addDownloadedStory({
+  ...manifest,
+  approvedFilenames: approved,
+  rejectedFilenames: rejected,
+  thumbnailFilename: manifest.thumbnailFilename || amFilename,
+});
+```
+
+### Dead Download State Variables in background.js (logMemorySnapshot Always Shows 0)
+**Bug:** After modularising downloads to `lib/download-pipe.js`, background.js still declared its own local `_activeDownloads`, `_downloadQueue`, `_pendingDownloadIds`, and `_releaseDownloadSlot()` that were never updated. `logMemorySnapshot()` referenced these stale locals, always reporting `active=0 queued=0`.
+
+**Fix:** Remove the dead variable declarations from background.js. Export `getDownloadStats()` from `download-pipe.js` and import it in background.js:
+```javascript
+// download-pipe.js
+export function getDownloadStats() {
+  return { active: _activeDownloads, queued: _downloadQueue.length };
+}
+// background.js logMemorySnapshot()
+const _dlStats = getDownloadStats();
+line += ` — downloads active=${_dlStats.active} queued=${_dlStats.queued}`;
+```
+
+### Story Card Filter Missing in REGENERATE_FROM_DISK
+**Bug:** `handleRegenerateFromDisk` in `lib/handlers-html.js` and the inline `REGENERATE_FROM_DISK` handler in background.js both filtered disk files with only `MEDIA_EXT.test(f)`. This included `*Story Card.jpg` files in `approvedFilenames`, causing them to appear as gallery images in story.html and in index page thumbnails.
+
+**Fix:** Apply the Story Card filter pattern (documented in §8 "Story Card JPEGs Must Never Appear in HTML Gallery") to the `mediaFiles` filter in both locations:
+```javascript
+const STORY_CARD_RE = /Story Card\.jpg$/i;
+const mediaFiles = diskFiles.filter(f => MEDIA_EXT.test(f) && !STORY_CARD_RE.test(f));
+```
+
+### Routine Label 📋 Emoji Inconsistency
+**Bug:** `buildStoryPage` in `lib/html-builders.js` was missing the `📋` emoji prefix on the routine label (`<div class="routine-label">Child's Routine</div>`), while the local `buildStoryHtml` copy in background.js had it (`📋 Child's Routine`). Pages generated by different paths had inconsistent styling.
+
+**Fix:** Added `📋` emoji to `buildStoryPage` in html-builders.js to match background.js.
 
 ### cancelRequested After Finally Block
 Inside `runExtraction`, the `finally` block resets `cancelRequested = false`. Code in the EXTRACT_ALL_LATEST handler that reads `cancelRequested` after `runExtraction` returns will always see `false`. The fix: use `stats.cancelled` returned by `runExtraction`, not `cancelRequested`.

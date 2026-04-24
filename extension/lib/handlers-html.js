@@ -294,6 +294,9 @@ export async function handleRegenerateFromDisk(msg, ctx) {
     const { filesByFolder = {}, childId: targetChildId } = msg;
     const { children = [], saveStoryCard = true } = await chrome.storage.local.get(["children", "saveStoryCard"]);
     const MEDIA_EXT = /\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+    // Story Card JPEGs are generated assets for Google Photos — not downloaded media.
+    // They must never appear in approvedFilenames or be rendered as gallery images.
+    const STORY_CARD_RE = /Story Card\.jpg$/i;
     let rebuilt = 0, updated = 0, errors = 0;
 
     const relevantChildren = targetChildId
@@ -305,7 +308,8 @@ export async function handleRegenerateFromDisk(msg, ctx) {
       for (const m of manifests) {
         const diskFiles = filesByFolder[m.folderName];
         if (!diskFiles) continue;
-        const mediaFiles = diskFiles.filter(f => MEDIA_EXT.test(f));
+        // Filter Story Cards — generated assets, must never be in approvedFilenames
+        const mediaFiles = diskFiles.filter(f => MEDIA_EXT.test(f) && !STORY_CARD_RE.test(f));
         if (mediaFiles.length === 0) continue;
 
         try {

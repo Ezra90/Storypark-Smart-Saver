@@ -381,6 +381,19 @@
     <div class="sidebar-header">
       <h1>📸 Smart Saver</h1>
       <a href="https://app.storypark.com" target="_blank" class="open-sp">🔗 Open Storypark</a>
+      <div style="margin-top:14px; display:flex; flex-direction:column; gap:6px;">
+        <label for="childSelect" style="font-size:11px; color:var(--muted); font-weight:600;">ACTIVE CHILD</label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <select id="childSelect" style="padding:8px 10px; border:1px solid rgba(255,255,255,0.1); border-radius:6px; background:var(--bg); color:var(--text); font-size:13px; width:100%;">
+            <option value="">Loading children…</option>
+          </select>
+          <button class="btn-icon" id="btnRefresh" title="Refresh children from Storypark" style="width:34px;height:34px;min-width:34px;flex-shrink:0;">↻</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; margin-top:2px;">
+          <span class="phase-badge" id="phaseBadge" style="align-self:flex-start;"></span>
+          <span class="confidence-badge" id="confidenceBadge" style="display:none;font-size:11px;align-self:flex-start;"></span>
+        </div>
+      </div>
     </div>
     <nav class="sidebar-nav">
       <button class="nav-btn active" data-tab="scan">
@@ -395,6 +408,9 @@
       </button>
       <button class="nav-btn" data-tab="settings">
         <span class="nav-icon">⚙</span> Settings
+      </button>
+      <button class="nav-btn" data-tab="tools">
+        <span class="nav-icon">🧰</span> Tools & Maintenance
       </button>
     </nav>
     <div class="sidebar-footer">
@@ -427,17 +443,10 @@
       <div class="scan-layout" id="scanLayout">
         <!-- Left column: scan controls -->
         <div class="scan-controls">
-          <div class="child-row">
-            <select id="childSelect"><option value="">Loading children…</option></select>
-            <span class="phase-badge" id="phaseBadge"></span>
-            <span class="confidence-badge" id="confidenceBadge" style="display:none;font-size:12px;margin-left:6px;"></span>
-            <button class="btn-icon" id="btnRefresh" title="Refresh children from Storypark">↻</button>
-          </div>
-
           <div class="action-btns">
             <button class="btn-primary" id="btnExtractLatest" disabled>⬇ Scan Latest</button>
             <button class="btn-primary" id="btnDeepRescan" disabled>🔁 Scan All Stories</button>
-            <button class="btn-primary" id="btnOfflineScanMain" disabled style="background:#0f3460;" title="Read downloaded photos from disk and run face matching — no internet needed. Works even with zero training photos.">🔍 Offline Facial Scan</button>
+            <button class="btn-primary" id="btnOfflineScanMain" disabled style="background:#0f3460;" title="Smart Sort: runs face AI on your downloaded photos. High-confidence = kept, uncertain = Review tab, low-confidence = moved to Rejected Matches. No internet needed.">🧠 Smart Sort</button>
             <button class="btn-primary" id="btnResumeScan" disabled style="display:none;background:#a855f7;">▶ Resume Scan</button>
             <button class="btn-secondary" id="btnTestConnection">🔌 Test Connection</button>
             <button id="btnStopScan">🛑 Stop Scan</button>
@@ -771,11 +780,18 @@
 
     <!-- ──── TAB: ACTIVITY LOG ──── -->
     <div id="tabLog" class="tab-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
         <h2 style="font-size:20px;">📋 Activity Log</h2>
-        <button class="btn-secondary" id="btnClearLog">Clear log</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btnClearLog">🗑 Clear in-app log</button>
+          <button class="btn-secondary" id="btnDeleteLogFile" style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent);" title="Delete Database/activity_log.jsonl from your linked folder. Also clears the in-app log. Requires a linked folder.">🗑 Delete log file</button>
+          <button class="btn-secondary" id="btnExportLog" style="background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.3);color:#60a5fa;" title="Export the current activity log as a JSON file for AI analysis of issues">📤 Export for AI</button>
+        </div>
       </div>
-      <div style="position:relative;height:calc(100vh - 160px);">
+      <div id="logTabInfo" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,0.06);border-radius:6px;border:1px solid rgba(96,165,250,0.15);">
+        📁 Log saved to: <span id="logFilePath" style="font-family:monospace;color:#60a5fa;"></span>
+      </div>
+      <div style="position:relative;height:calc(100vh - 180px);">
         <div class="log-container" id="activityLogBox" style="height:100%;">
           <p class="level-INFO">No activity yet.</p>
         </div>
@@ -809,40 +825,6 @@
         <button class="btn-secondary" id="btnRefreshChildren" style="margin-top:8px;">↻ Refresh from Storypark</button>
       </div>
 
-      <!-- 📂 Active Database panel (Phase 5B) — shows where the source-of-truth JSON files live. -->
-      <div class="card" id="activeDatabaseCard">
-        <h2>📂 Active Database</h2>
-        <p class="help">All scan progress, rejections, face data, and story manifests are stored as portable JSON files inside your linked folder. Copy the folder to any computer to carry your data with you.</p>
-        <div id="activeDatabasePanel" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12px;line-height:1.7;color:var(--muted);min-height:60px;">
-          <em>Loading…</em>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-secondary" id="btnRefreshDbInfo">↻ Refresh</button>
-          <button class="btn-secondary" id="btnOpenDbFolderHint" title="Copy the folder path — paste into File Explorer to open.">📋 Copy Path</button>
-        </div>
-      </div>
-
-      <!-- 🛠 Audit & Repair panel (Phase 3D) — scan disk, classify every story, repair missing files. -->
-      <div class="card" id="auditRepairCard" style="border:1px solid rgba(96,165,250,0.2);">
-        <h2>🛠 Audit &amp; Repair Stories</h2>
-        <p class="help">Scan your linked folder and classify every story as <strong>complete</strong>, <strong>missing photos</strong>, <strong>missing HTML/Card</strong>, or <strong>DB-only</strong> (no files on disk). Then repair the broken ones by re-downloading the missing media. Uses existing download semaphore + 429 back-off.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-          <button class="btn-primary" id="btnAuditStories" style="background:#0f3460;">🔍 1. Audit Stories</button>
-          <button class="btn-primary" id="btnRepairAll" style="display:none;background:#a855f7;">🛠 2. Repair Broken Stories</button>
-          <button class="btn-secondary" id="btnSyncProcessed" title="Mark every downloaded story as processed so Scan Latest only fetches NEW stories. Safe to run anytime.">🔄 Sync Scan Progress</button>
-          <button class="btn-secondary" id="btnRebuildRejections" title="Walk the Rejected Matches/ folders on disk and rebuild Database/rejections.json. Use after restoring a folder-only backup.">🔄 Rebuild Rejections</button>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px;">
-          <input type="checkbox" id="chkRepairSkipFaceRec" checked style="width:auto;margin:0;">
-          Match my scan settings (bypass face recognition — don't re-download files that already exist)
-        </label>
-        <div id="auditProgress" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;line-height:1.7;color:var(--muted);">
-          <div id="auditProgressText">Preparing…</div>
-          <progress id="auditProgressBar" value="0" max="100" style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
-        </div>
-        <div id="auditReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
-      </div>
-
       <!-- 🔄 Rebuild Pages & Cards — mirrors the Review tab button -->
       <div class="card">
         <h2>🔄 Rebuild Pages &amp; Cards</h2>
@@ -851,28 +833,6 @@
           <button class="btn-primary" id="btnGenerateStoryCardsAll" style="background:#0f3460;">🔄 Rebuild Pages &amp; Cards</button>
         </div>
         <p id="storyCardsStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
-      </div>
-
-      <!-- Full Backup -->
-      <div class="card">
-        <h2>💾 Full Backup</h2>
-        <p class="help">Export everything (all children's face data, scan progress, settings) to a single file. Import after reinstalling Chrome or on another computer to pick up exactly where you left off.</p>
-        <div id="backupMeta" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-primary" id="btnFullBackupExport" style="background:#a855f7;">📤 Export Full Backup</button>
-          <button class="btn-secondary" id="btnFullBackupImport">📥 Import Full Backup</button>
-        </div>
-        <input type="file" id="fullBackupInput" accept=".json,.json.gz,.gz,application/json,application/gzip" style="display:none;">
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
-            <input type="radio" name="importMode" value="merge" checked style="width:auto;margin:0;"> Merge with existing
-          </label>
-          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
-            <input type="radio" name="importMode" value="replace" style="width:auto;margin:0;"> Replace all
-          </label>
-        </div>
-        <p class="help" style="margin-top:4px;">Merge: keeps higher progress + combines face data. Replace: overwrites everything.</p>
-        <p id="backupStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
       <!-- ═══ Section 2: Download Settings ═══ -->
@@ -940,6 +900,13 @@
           <div>
             <label for="chkKeepScenarioPhotos">📷 Auto-keep scenario photos (no face detected)</label>
             <p class="help" style="margin:0;">During Offline Facial Scan, photos with no face (group shots, artworks, pets) are automatically kept instead of going to Review. Leave off to decide each one yourself.</p>
+          </div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="chkDownloadVideos">
+          <div>
+            <label for="chkDownloadVideos">🎬 Download video files (.mp4, .mov, .webm, …)</label>
+            <p class="help" style="margin:0;">Download video files from stories (e.g. <code style="font-size:10px;">story_video_abc123_720_high.mp4</code>). Videos can be 50–200 MB each — leave <strong>off</strong> if you only want photos or have limited disk space.</p>
           </div>
         </div>
       </div>
@@ -1034,7 +1001,52 @@
         </div>
       </div>
 
-      <!-- Link Download Folder -->
+      <!-- ═══ Section 5: Developer ═══ -->
+      <div style="display:flex;align-items:center;gap:12px;margin:24px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
+        <span style="font-size:22px;">🛠</span>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--warning);">Developer</div>
+          <div style="font-size:12px;color:var(--muted);">Advanced debugging tools — leave these off during normal use.</div>
+        </div>
+      </div>
+
+      <!-- Debug -->
+      <div class="card" style="border:1px solid rgba(251,191,36,0.3);">
+        <h2 style="color:var(--warning);">🛠 Developer / Debug</h2>
+        <p class="help">⚠ Temporary debug feature. Disable during normal use.</p>
+        <div class="checkbox-row">
+          <input type="checkbox" id="chkDebugCaptureMode">
+          <div>
+            <label for="chkDebugCaptureMode">Enable Debug Capture Mode</label>
+            <p class="help" style="margin:0;">Captures all API responses in memory for export.</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btnDownloadDebugLog">📥 Download Debug Log</button>
+          <button class="btn-danger" id="btnClearDebugLog">🗑 Clear Debug Log</button>
+        </div>
+        <p id="debugLogStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+    </div><!-- end tabSettings -->
+
+    <!-- ──── TAB: TOOLS & MAINTENANCE ──── -->
+    <div id="tabTools" class="tab-panel">
+      <h2 style="font-size:20px;margin-bottom:4px;">🧰 Tools & Maintenance</h2>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Advanced operations for managing your downloaded files and database.</p>
+
+
+      <!-- 📂 Active Database panel (Phase 5B) — shows where the source-of-truth JSON files live. -->
+      <div class="card" id="activeDatabaseCard">
+        <h2>📂 Active Database</h2>
+        <p class="help">All scan progress, rejections, face data, and story manifests are stored as portable JSON files inside your linked folder. Copy the folder to any computer to carry your data with you.</p>
+        <div id="activeDatabasePanel" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12px;line-height:1.7;color:var(--muted);min-height:60px;">
+          <em>Loading…</em>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btnRefreshDbInfo">↻ Refresh</button>
+          <button class="btn-secondary" id="btnOpenDbFolderHint" title="Copy the folder path — paste into File Explorer to open.">📋 Copy Path</button>
+        </div>
+      </div><!-- Link Download Folder -->
       <div class="card">
         <h2>📁 Link Download Folder</h2>
 
@@ -1181,36 +1193,165 @@
         <div id="cleanupReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
       </div>
 
-      <!-- ═══ Section 5: Developer ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:24px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">🛠</span>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--warning);">Developer</div>
-          <div style="font-size:12px;color:var(--muted);">Advanced debugging tools — leave these off during normal use.</div>
+      
+
+      <!-- 🛠 Audit & Repair panel (Phase 3D) — scan disk, classify every story, repair missing files. -->
+      <div class="card" id="auditRepairCard" style="border:1px solid rgba(96,165,250,0.2);">
+        <h2>🛠 Audit &amp; Repair Stories</h2>
+        <p class="help">Scan your linked folder and classify every story as <strong>complete</strong>, <strong>missing photos</strong>, <strong>missing HTML/Card</strong>, or <strong>DB-only</strong> (no files on disk). Then repair the broken ones by re-downloading the missing media. Uses existing download semaphore + 429 back-off.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="btn-primary" id="btnAuditStories" style="background:#0f3460;">🔍 1. Audit Stories</button>
+          <button class="btn-primary" id="btnRepairAll" style="display:none;background:#a855f7;">🛠 2. Repair Broken Stories</button>
+          <button class="btn-secondary" id="btnSyncProcessed" title="Mark every downloaded story as processed so Scan Latest only fetches NEW stories. Safe to run anytime.">🔄 Sync Scan Progress</button>
+          <button class="btn-secondary" id="btnRebuildRejections" title="Walk the Rejected Matches/ folders on disk and rebuild Database/rejections.json. Use after restoring a folder-only backup.">🔄 Rebuild Rejections</button>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px;">
+          <input type="checkbox" id="chkRepairSkipFaceRec" checked style="width:auto;margin:0;">
+          Match my scan settings (bypass face recognition — don't re-download files that already exist)
+        </label>
+        <div id="auditProgress" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;line-height:1.7;color:var(--muted);">
+          <div id="auditProgressText">Preparing…</div>
+          <progress id="auditProgressBar" value="0" max="100" style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+        </div>
+        <div id="auditReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
       </div>
 
-      <!-- Debug -->
-      <div class="card" style="border:1px solid rgba(251,191,36,0.3);">
-        <h2 style="color:var(--warning);">🛠 Developer / Debug</h2>
-        <p class="help">⚠ Temporary debug feature. Disable during normal use.</p>
-        <div class="checkbox-row">
-          <input type="checkbox" id="chkDebugCaptureMode">
-          <div>
-            <label for="chkDebugCaptureMode">Enable Debug Capture Mode</label>
-            <p class="help" style="margin:0;">Captures all API responses in memory for export.</p>
+      <!-- Full Backup -->
+      <div class="card">
+        <h2>💾 Full Backup</h2>
+        <p class="help">Export everything (all children's face data, scan progress, settings) to a single file. Import after reinstalling Chrome or on another computer to pick up exactly where you left off.</p>
+        <div id="backupMeta" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-primary" id="btnFullBackupExport" style="background:#a855f7;">📤 Export Full Backup</button>
+          <button class="btn-secondary" id="btnFullBackupImport">📥 Import Full Backup</button>
+        </div>
+        <input type="file" id="fullBackupInput" accept=".json,.json.gz,.gz,application/json,application/gzip" style="display:none;">
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+            <input type="radio" name="importMode" value="merge" checked style="width:auto;margin:0;"> Merge with existing
+          </label>
+          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+            <input type="radio" name="importMode" value="replace" style="width:auto;margin:0;"> Replace all
+          </label>
+        </div>
+        <p class="help" style="margin-top:4px;">Merge: keeps higher progress + combines face data. Replace: overwrites everything.</p>
+        <p id="backupStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+
+      <!-- ✏️ Fix Story Metadata — correct centre/room for multi-daycare children -->
+      <div class="card" id="fixMetadataCard" style="border:1px solid rgba(251,191,36,0.2);">
+        <h2 style="color:var(--warning);">✏️ Fix Story Metadata</h2>
+        <p class="help">Correct the <strong>centre name</strong> or <strong>room name</strong> on stories where the wrong value was assigned — for example, when a child attended two daycares and room/centre was incorrectly inferred. After fixing, story HTML pages and Story Cards are regenerated automatically.</p>
+
+        <!-- Child selector — uses the universal sidebar selector -->
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">Apply to child:</label>
+          <select id="fixMetaChildSelect" style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:13px;">
+            <option value="">Loading children…</option>
+          </select>
+        </div>
+
+        <!-- Date range (optional) -->
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">Date range (optional — leave blank to apply to all stories):</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:4px;">
+              <label style="font-size:11px;color:var(--muted);">From:</label>
+              <input type="date" id="fixMetaFromDate" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
+            </div>
+            <span style="font-size:12px;color:var(--muted);">→</span>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <label style="font-size:11px;color:var(--muted);">To:</label>
+              <input type="date" id="fixMetaToDate" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
+            </div>
           </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-secondary" id="btnDownloadDebugLog">📥 Download Debug Log</button>
-          <button class="btn-danger" id="btnClearDebugLog">🗑 Clear Debug Log</button>
-        </div>
-        <p id="debugLogStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
-      </div>
-    </div>
-  </div>
 
-  <!-- Lightbox -->
+        <!-- New centre name -->
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">New centre name <em style="font-weight:400;">(leave blank to keep existing)</em>:</label>
+          <input type="text" id="fixMetaCentreName" placeholder="e.g. Sunshine Early Learning" style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;">
+        </div>
+
+        <!-- New room name -->
+        <div style="margin-bottom:12px;">
+          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">New room name <em style="font-weight:400;">(leave blank to keep existing, enter "-" to clear)</em>:</label>
+          <input type="text" id="fixMetaRoomName" placeholder='e.g. Nursery One  (use "-" to clear room name)' style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;">
+        </div>
+
+        <!-- Regenerate option -->
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px;font-size:12px;">
+          <input type="checkbox" id="chkFixMetaRegenerate" checked style="width:auto;margin:0;">
+          <span style="color:var(--text);">Regenerate story HTML + Story Cards after patching</span>
+        </label>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-primary" id="btnFixMetadata" style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.4);color:var(--warning);">✏️ Apply Metadata Fix</button>
+        </div>
+        <p id="fixMetadataStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+
+      <!-- 🔢 Story Numbers — assign oldest=1 numbering -->
+      <div class="card" id="storyNumbersCard">
+        <h2>🔢 Story Numbers</h2>
+        <p class="help">Assign sequential numbers to all stories — oldest story gets number 1, newest gets the highest number. This runs automatically after every scan and rebuild, but you can trigger it manually here. Story numbers are stored in the database and shown in future index pages.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn-primary" id="btnAssignStoryNumbers" style="background:#0f3460;">🔢 Number Stories (Oldest=1)</button>
+        </div>
+        <p id="storyNumbersStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+
+      <!-- ✏️ Custom Filename & Mass Renamer -->
+      <div class="card" id="renamerCard">
+        <h2>✏️ Custom Filename &amp; Mass Renamer</h2>
+        <p class="help">Build a filename template using tokens, preview changes, then rename all downloaded photos and videos for a child. Extension (.jpg, .mp4, etc.) is always preserved. Works on both photos and videos (e.g. <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;">story_video_abc123_720_high.mp4</code>).</p>
+
+        <!-- Child selector -->
+        <div style="margin-bottom:12px;">
+          <label for="renamerChildSelect">Rename files for child:</label>
+          <select id="renamerChildSelect"><option value="">— select a child —</option></select>
+        </div>
+
+        <!-- Template builder -->
+        <label>Filename Template</label>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.8;">
+          Available tokens:
+          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{ChildName}</code>
+          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{StoryDate}</code>
+          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{Room}</code>
+          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{OriginalName}</code>
+        </div>
+        <input type="text" id="renamerTemplate" value="{StoryDate}_{ChildName}_{Room}_{OriginalName}"
+          placeholder="e.g. {StoryDate}_{ChildName}_{Room}_{OriginalName}"
+          style="width:100%;padding:8px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:13px;margin-bottom:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+        <p class="help" style="margin:0 0 12px;">Windows-illegal characters are stripped automatically. Works for photos (.jpg, .png, .webp) and videos (.mp4, .mov, .avi, .webm, etc.)</p>
+
+        <!-- Live preview -->
+        <label>Live Preview</label>
+        <div id="renamerPreview" style="background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;font-family:monospace;min-height:44px;margin-bottom:12px;word-break:break-all;line-height:1.8;">
+          Enter a template above to see a preview…
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <button class="btn-primary" id="btnPreviewRename" style="background:#0f3460;" disabled>🔍 Preview Rename</button>
+          <button class="btn-primary" id="btnApplyRename" style="background:#a855f7;" disabled>✅ Apply Rename</button>
+        </div>
+
+        <!-- Progress (shown while running) -->
+        <div id="renamerProgress" style="display:none;margin-bottom:8px;">
+          <div id="renamerProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
+          <progress id="renamerProgressBar" value="0" max="100" style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;accent-color:#a855f7;"></progress>
+        </div>
+
+        <!-- Dry-run preview list / completion report -->
+        <div id="renamerReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;line-height:1.8;color:var(--muted);max-height:320px;overflow-y:auto;"></div>
+      </div><!-- end renamerCard -->
+
+    </div><!-- end tabTools -->
+  </div><!-- end .main -->
+
+<!-- Lightbox -->
   <div class="lightbox" id="lightbox"><img id="lightboxImg" src="" alt="Full size preview"></div>
 
   <!-- Toast -->

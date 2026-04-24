@@ -323,6 +323,70 @@ export async function rebuildRejectionsFromFolders(manifestsList, rejectedFilesB
 /** Regex for detecting video files by extension. */
 const _VIDEO_EXT_RE = /\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
 
+/* ================================================================== */
+/*  Story numbering — oldest = 1, newest = N                          */
+/*                                                                     */
+/*  storyNumber is assigned per-child, sorted ascending by storyDate  */
+/*  (oldest story in the database gets storyNumber=1).                */
+/*  Called after any operation that adds/modifies manifests:          */
+/*    - runExtraction completes for a child                           */
+/*    - REBUILD_DATABASE_FROM_DISK phase 4 completes                  */
+/*                                                                     */
+/*  storyNumber=0 means "not yet assigned" (pre-existing manifests).  */
+/* ================================================================== */
+
+/**
+ * Assign sequential story numbers for a child (oldest story = 1).
+ * Updates all manifests for the child in-place and persists to disk.
+ * Numbers are based on storyDate ascending (chronological order).
+ * Stories with no storyDate get storyNumber=0 (unassigned).
+ *
+ * @param {string} childId
+ * @returns {Promise<number>} — total stories numbered
+ */
+export async function assignStoryNumbers(childId) {
+  if (!childId) return 0;
+  try {
+    const cache = await _loadManifests();
+    // Collect all manifests for this child
+    const childManifests = Object.entries(cache)
+      .filter(([, m]) => String(m.childId) === String(childId) && m.storyDate)
+      .sort(([, a], [, b]) => (a.storyDate || "").localeCompare(b.storyDate || "")); // oldest first
+
+    if (childManifests.length === 0) return 0;
+
+    let num = 1;
+    for (const [key, m] of childManifests) {
+      cache[key] = { ...m, storyNumber: num++ };
+    }
+
+    // Also number stories without a date (storyNumber=0, unchanged)
+    await _writeDbFile(_DB_FILE_MANIFESTS, cache);
+    return childManifests.length;
+  } catch (err) {
+    console.warn("[assignStoryNumbers] Failed:", err?.message || err);
+    return 0;
+  }
+}
+
+/**
+ * Get story numbers for all of a child's stories.
+ * Returns a Map<storyId, storyNumber> for quick lookup.
+ *
+ * @param {string} childId
+ * @returns {Promise<Map<string, number>>}
+ */
+export async function getStoryNumberMap(childId) {
+  const cache = await _loadManifests();
+  const result = new Map();
+  for (const m of Object.values(cache)) {
+    if (String(m.childId) === String(childId) && m.storyId && m.storyNumber) {
+      result.set(String(m.storyId), m.storyNumber);
+    }
+  }
+  return result;
+}
+
 /**
  * Lazy-migrate a single manifest record to schema v2 with safe defaults.
  * Returns a new object — never mutates the input.

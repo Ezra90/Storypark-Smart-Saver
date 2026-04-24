@@ -54,7 +54,7 @@ import {
   cacheStory, getCachedStory,
   saveChildProfile, getChildProfile, isChildProfileStale,
   saveCentreProfile, getCentreGPS, updateCentreGPS,
-  saveEducator, recordFileDownloaded,
+  saveEducator, recordFileDownloaded, assignStoryNumbers,
 } from "./db.js";
 
 /* ================================================================== */
@@ -168,6 +168,10 @@ async function fetchStorySummaries(childId, mode, childName, cutoffDate = null, 
     : new Set();
 
   const summaries = [];
+  // Track group_names seen in story list — used for early centre discovery.
+  // Fixes: Hugo's second daycare not appearing in Centre Locations panel.
+  // HAR analysis confirmed group_name on the story LIST = centre name.
+  const _feedGroupNames = new Set();
   let pageToken   = null;
 
   while (true) {
@@ -187,7 +191,14 @@ async function fetchStorySummaries(childId, mode, childName, cutoffDate = null, 
       const id = String(s.id);
       if (knownIds.has(id)) { hitKnown = true; break; }
       if (cutoffDate && s.created_at && new Date(s.created_at) < cutoffDate) { hitCutoff = true; break; }
-      summaries.push({ id, created_at: s.created_at, title: s.title || s.excerpt || "" });
+      summaries.push({ id, created_at: s.created_at, title: s.title || s.excerpt || "", group_name: s.group_name || "" });
+      // Discover centre from story list immediately (non-blocking).
+      // This ensures ALL daycares a child ever attended appear in the Centre Locations panel
+      // even before we fetch individual story details — important for GPS pre-population.
+      if (s.group_name && !_feedGroupNames.has(s.group_name)) {
+        _feedGroupNames.add(s.group_name);
+        discoverCentres([s.group_name]).catch(() => {});
+      }
     }
 
     pageToken = data.next_page_token || null;
@@ -214,7 +225,7 @@ async function fetchStorySummaries(childId, mode, childName, cutoffDate = null, 
 // Cache routine summaries by date string to avoid duplicate fetches
 const routineCache = new Map();
 
-async function fetchRoutineSummary(childId, dateStr) {
+export async function fetchRoutineSummary(childId, dateStr) {
   const cacheKey = `${childId}:${dateStr}`;
   if (routineCache.has(cacheKey)) return routineCache.get(cacheKey);
   try {
@@ -528,9 +539,6 @@ export async function runExtraction(childId, childName, mode, {
 
   let approved = 0, queued = 0, rejected = 0, skippedAbsent = 0;
   let scanCancelled = false, scanCompletedFully = false, scanAbortReason = null;
-  let deferDownloads = false;
-  let _reEvalApprovalCount = 0;
-  const RE_EVAL_EVERY_N = 20;
 
   const abortAndCheckpoint = async (si, totalStories, summariesArr, reason) => {
     scanCancelled   = true;
@@ -548,14 +556,13 @@ export async function runExtraction(childId, childName, mode, {
 
   try {
     const {
-      autoThreshold: userAutoThreshold = 85, minThreshold: userMinThreshold = 50,
       activeCentreName = "", attendanceFilter = false,
       saveStoryHtml = true, saveStoryCard = true,
-      skipFaceRec = false, fillGapsOnly = false,
+      fillGapsOnly = false, downloadVideos = false,
       scanDateMode = "all", scanCutoffFromDate = null, scanCutoffToDate = null,
     } = await chrome.storage.local.get([
-      "autoThreshold", "minThreshold", "activeCentreName",
-      "attendanceFilter", "saveStoryHtml", "saveStoryCard", "skipFaceRec", "fillGapsOnly",
+      "activeCentreName",
+      "attendanceFilter", "saveStoryHtml", "saveStoryCard", "fillGapsOnly", "downloadVideos",
       "scanDateMode", "scanCutoffFromDate", "scanCutoffToDate",
     ]);
 
@@ -569,46 +576,7 @@ export async function runExtraction(childId, childName, mode, {
       await logger("INFO", `Date range: ${fromLabel} to ${toLabel}`);
     }
 
-    let minThreshold = skipFaceRec ? 0 : userMinThreshold;
-
-    const childPhaseData = await getChildPhase(childId);
-    let autoThreshold = userAutoThreshold;
-
-    const processedStories    = await getProcessedStories();
-    const childProcessedCount = processedStories.filter(s => String(s.childId) === String(childId)).length;
-    const isFirstPass         = childProcessedCount === 0;
-    if (isFirstPass && !skipFaceRec) {
-      minThreshold = 0;
-      await logger("INFO", `First scan detected — auto-reject DISABLED (all uncertain photos go to review)`);
-    }
-
-    if (skipFaceRec) {
-      autoThreshold = 0;
-    } else if (childPhaseData.phase === 1) {
-      autoThreshold = 100;
-    } else if (childPhaseData.phase === 2) {
-      autoThreshold = 95;
-    }
-    if (childPhaseData.phase >= 3 && !skipFaceRec) {
-      const autoCalResult = await computeAutoThreshold(childId);
-      if (autoCalResult) {
-        autoThreshold = autoCalResult.autoThreshold;
-        minThreshold  = autoCalResult.minThreshold;
-        await logger("INFO", `Auto-calibrated: approve >=${autoCalResult.autoThreshold}%, reject <${autoCalResult.minThreshold}% (gap=${autoCalResult.gap})`);
-      }
-    }
-
-    deferDownloads = !skipFaceRec && childPhaseData.phase < 4;
-
-    const PHASE_EMOJIS = { 1: "Ph1", 2: "Ph2", 3: "Ph3", 4: "Ph4" };
-    const PHASE_LABELS = { 1: "Discovery", 2: "Validation", 3: "Confident", 4: "Production" };
-    const phaseDetail  = `(${childPhaseData.verifiedCount} verified, threshold: ${autoThreshold}%)`;
-    if (skipFaceRec) {
-      await logger("INFO", `Face recognition DISABLED — downloading all photos without filtering`);
-    } else {
-      const dlNote = deferDownloads ? " — downloads deferred" : " — auto-downloading";
-      await logger("INFO", `${PHASE_LABELS[childPhaseData.phase] || "?"} ${phaseDetail}${dlNote}`);
-    }
+    await logger("INFO", `Downloading all photos for ${childName} — face sorting happens offline via Smart Sort`);
 
     // Per-child profile (birthday, regularDays, centre name)
     let childCentreFallback = activeCentreName;
@@ -657,24 +625,6 @@ export async function runExtraction(childId, childName, mode, {
       }
     } catch { /* fall back to activeCentreName */ }
 
-    await sendToOffscreen({ type: "REFRESH_PROFILES" });
-
-    // Load descriptors for THIS child only
-    const allDescriptors = await getAllDescriptors();
-    const childEncodings = allDescriptors
-      .filter((d) => String(d.childId) === String(childId))
-      .map((d) => ({
-        childId:          d.childId,
-        childName:        d.childName,
-        descriptors:      d.descriptors,
-        descriptorsByYear: d.descriptorsByYear || {},
-      }));
-
-    const negativeDescriptors = await getNegativeDescriptors(childId).catch(() => []);
-    if (negativeDescriptors.length > 0) {
-      await logger("INFO", `Loaded ${negativeDescriptors.length} negative face descriptors`);
-    }
-
     // Attendance filter bulk-fetch
     let attendanceMap = new Map(), attendanceOldestDate = null;
     if (attendanceFilter) {
@@ -722,6 +672,17 @@ export async function runExtraction(childId, childName, mode, {
     const { centreLocations: _initLocations = {} } = await chrome.storage.local.get("centreLocations");
     const discoveredInScan = new Set(Object.keys(_initLocations));
     if (childCentreFallback) discoveredInScan.add(childCentreFallback);
+
+    // ── Centre-aware room tracking ──────────────────────────────────────
+    // Prevents a room from a previous daycare from being "inferred" into
+    // stories from a new daycare (the bug: child moves from Centre A to
+    // Centre B, and Centre B stories get Centre A's room name applied).
+    //
+    // centreRoomContext: centre → Set of yearMonths that have an explicit room
+    // seenCentres: all distinct centreNames encountered in this scan
+    const centreRoomContext = new Map(); // Map<centreName, Set<yearMonth>>
+    const seenCentres       = new Set();
+    if (childCentreFallback) seenCentres.add(childCentreFallback);
 
     // Resume support
     let effectiveStartIndex = startIndex;
@@ -825,13 +786,45 @@ export async function runExtraction(childId, childName, mode, {
       const createdAt    = story.created_at || summary.created_at || "";
       const body         = story.display_content || story.body || story.excerpt || story.content || "";
       const centreName   = story.community_name || story.centre_name || story.service_name || story.group_name || childCentreFallback || "";
-      const storyDateStr = createdAt ? createdAt.split("T")[0] : null;
+      // Prefer story.date (educator-set event date) over created_at.
+      // HAR analysis: `date` field is set by educators and better reflects when the story event happened.
+      // It also aligns with display_subtitle_children_names and learning_tags grouping.
+      const storyDateStr = (story.date || createdAt || "").split("T")[0] || null;
 
       const rawRoom       = story.group_name || "";
       const storyTitleForRoom = story.display_title || story.title || summary.title || "";
       const extractedRoom = extractRoomFromTitle(storyTitleForRoom);
-      const inferredRoom  = inferRoom(storyDateStr, roomMap);
-      const roomName      = (rawRoom && rawRoom !== centreName) ? rawRoom : (extractedRoom || inferredRoom);
+
+      // ── Centre-aware room determination ───────────────────────────────
+      // Bug fix: If a child attended multiple daycares, don't let the room
+      // name from Centre A bleed into stories from Centre B.
+      //
+      // Track which centre is active in each period. Only infer a room via
+      // roomMap (built from titles pre-scan) if:
+      //   a) we've only ever seen ONE centre in this scan, OR
+      //   b) we've seen multiple centres but THIS centre already has
+      //      explicit rooms recorded in centreRoomContext for nearby periods
+      if (centreName) seenCentres.add(centreName);
+      const hasMultipleCentres = seenCentres.size > 1;
+
+      let inferredRoom = "";
+      if (!hasMultipleCentres) {
+        // Safe: single centre — use standard title-based inference
+        inferredRoom = inferRoom(storyDateStr, roomMap);
+      } else if (centreName && centreRoomContext.has(centreName)) {
+        // Multiple centres seen, but this centre has known rooms — safe to infer
+        inferredRoom = inferRoom(storyDateStr, roomMap);
+      }
+      // else: multiple centres, no known room for this centre → don't infer
+
+      const roomName = (rawRoom && rawRoom !== centreName) ? rawRoom : (extractedRoom || inferredRoom);
+
+      // Record explicit room for this centre/period (for future centre-aware inference)
+      if (roomName && centreName && storyDateStr) {
+        const ym = storyDateStr.substring(0, 7);
+        if (!centreRoomContext.has(centreName)) centreRoomContext.set(centreName, new Set());
+        centreRoomContext.get(centreName).add(ym);
+      }
 
       const childFirstName = (childName || "").split(/\s+/)[0];
 
@@ -869,6 +862,15 @@ export async function runExtraction(childId, childName, mode, {
           else if (ct.includes("webp")) fname += ".webp";
           else fname += ".jpg";
         }
+        // Sanitize story_pdf_* page filenames.
+        // HAR analysis confirmed these are JPEG images (HTTP 200, MIME image/jpeg), fully
+        // accessible to family accounts. Convert ugly internal names to clean page numbers:
+        //   "story_pdf_{uuid}_{page}_640_wide.jpg"  →  "pdf_page_01.jpg"
+        const pdfPageMatch = fname.match(/^story_pdf_[a-z0-9]+_(\d+)_\d+_\w+\.(jpg|jpeg|png|webp)$/i);
+        if (pdfPageMatch) {
+          const pageNum = String(parseInt(pdfPageMatch[1], 10) + 1).padStart(2, "0");
+          fname = `pdf_page_${pageNum}.${pdfPageMatch[2].toLowerCase()}`;
+        }
         const dotIdx = fname.lastIndexOf(".");
         const baseName = dotIdx >= 0 ? fname.slice(0, dotIdx) : fname;
         const ext      = dotIdx >= 0 ? fname.slice(dotIdx + 1) : "jpg";
@@ -888,7 +890,7 @@ export async function runExtraction(childId, childName, mode, {
       });
 
       if (images.length === 0 && videos.length === 0) {
-        if (saveStoryHtml && body && !deferDownloads) {
+        if (saveStoryHtml && body) {
           try {
             const storyTitle   = stripHtml(story.display_title || story.title || story.excerpt || "Story");
             const childAge     = calculateAge(childBirthday, storyDateStr);
@@ -940,235 +942,53 @@ export async function runExtraction(childId, childName, mode, {
       for (const img of images) {
         if (getCancelRequested()) { scanCancelled = true; aborted = true; break; }
 
-        if (await isRejected(summary.id, img.originalUrl).catch(() => false)) {
-          rejected++; continue;
-        }
-
-        // Fingerprint cache fast path (Phase 3+ only)
-        const cachedFP = await getImageFingerprint(summary.id, img.originalUrl).catch(() => null);
-        if (cachedFP && cachedFP.faces?.length > 0 && childEncodings.length > 0 && !skipFaceRec && childPhaseData.phase >= 3) {
-          const fpCentroids = new Map();
-          for (const enc of childEncodings) {
-            let ctr = buildCentroids(enc.descriptorsByYear || {});
-            if (ctr.length === 0 && enc.descriptors.length >= 3) { const c = computeCentroid(enc.descriptors); if (c) ctr = [c]; }
-            fpCentroids.set(enc.childId, ctr);
-          }
-          let bestEffCached = 0, bestPctCached = 0, bestDescCached = null;
-          for (const face of cachedFP.faces) {
-            if (!face.descriptor) continue;
-            for (const enc of childEncodings) {
-              const ctr = fpCentroids.get(enc.childId) || [];
-              const md  = enhancedMatch(face.descriptor, enc.descriptors, negativeDescriptors, ctr);
-              if (md.effectiveScore > bestEffCached) {
-                bestEffCached  = md.effectiveScore;
-                bestPctCached  = md.rawPositive;
-                bestDescCached = face.descriptor;
-              }
-            }
-          }
-          if (bestPctCached < minThreshold) { rejected++; continue; }
-          if (bestEffCached >= autoThreshold && deferDownloads) {
-            const exifMeta  = buildExifMetadata(body, childFirstName, routineText, roomName, centreName, childAge);
-            const fpSavePath = `${storyBasePath}/${img.filename}`;
-            try {
-              await addPendingDownload({ itemType: "image", childId, childName, storyId: summary.id, imageUrl: img.originalUrl, savePath: fpSavePath, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, gpsCoords, createdAt, roomName, centreName, filename: img.filename });
-            } catch (e) { await logger("WARNING", `  Pending-download save failed: ${e.message}`); }
-            approved++; _reEvalApprovalCount++;
-            approvedFilenames.push(img.filename);
-            mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
-            await logger("INFO", `  Cache approve (deferred): ${img.filename}`, storyDateStr);
-            if (bestDescCached) {
-              const yr = createdAt ? new Date(createdAt).getFullYear().toString() : "unknown";
-              await appendDescriptor(childId, childName, bestDescCached, yr).catch(() => {});
-            }
-            continue;
-          }
-          if (bestEffCached >= autoThreshold && !deferDownloads) {
-            try {
-              await smartDelay("DOWNLOAD_MEDIA");
-              const exifMeta   = buildExifMetadata(body, childFirstName, routineText, roomName, centreName, childAge);
-              const fpSavePath = `${storyBasePath}/${img.filename}`;
-              const dlResult   = await sendToOffscreen({ type: "DOWNLOAD_APPROVED", storyData: { storyId: summary.id, createdAt, body, roomName, centreName, originalUrl: img.originalUrl, filename: img.filename }, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, exifArtist, iptcCaption, iptcKeywords, iptcByline, childName, savePath: fpSavePath, gpsCoords });
-              if (dlResult.dataUrl && dlResult.savePath) {
-                await downloadDataUrl(dlResult.dataUrl, dlResult.savePath);
-                recordFileDownloaded({ filePath: dlResult.savePath, childId, storyId: String(summary.id), filename: img.filename, fileType: "image" }).catch(() => {});
-              }
-              approved++; _reEvalApprovalCount++;
-              approvedFilenames.push(img.filename);
-              mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
-              await logger("SUCCESS", `  Cache download: ${img.filename}`, storyDateStr);
-              if (bestDescCached) {
-                const yr = createdAt ? new Date(createdAt).getFullYear().toString() : "unknown";
-                await appendDescriptor(childId, childName, bestDescCached, yr).catch(() => {});
-              }
-              continue;
-            } catch (dlErr) {
-              await logger("WARNING", `  Cache download failed, using full pipeline: ${dlErr.message}`);
-            }
-          }
-          // Fall through to full pipeline
-        }
-
         await smartDelay("DOWNLOAD_MEDIA");
 
         const exifMeta  = buildExifMetadata(body, childFirstName, routineText, roomName, centreName, childAge);
         const savePath  = `${storyBasePath}/${img.filename}`;
 
-        if (skipFaceRec) {
-          let _skipDlSucceeded = false;
-          try {
-            const skipDlResult = await sendToOffscreen({ type: "DOWNLOAD_APPROVED", storyData: { storyId: summary.id, createdAt, body, roomName, centreName, originalUrl: img.originalUrl, filename: img.filename }, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, exifArtist, iptcCaption, iptcKeywords, iptcByline, childName, savePath, gpsCoords });
-            if (skipDlResult.dataUrl && skipDlResult.savePath) {
-            await downloadDataUrl(skipDlResult.dataUrl, skipDlResult.savePath);
-              _skipDlSucceeded = true;
-              recordFileDownloaded({ filePath: skipDlResult.savePath, childId, storyId: String(summary.id), filename: img.filename, fileType: "image" }).catch(() => {});
-              recordFileMovement({ type: "downloaded", childId, storyId: String(summary.id), filename: img.filename, toPath: storyBasePath, source: "download_all" }).catch(() => {});
-            }
-          } catch (skipErr) {
-            await logger("WARNING", `  Download failed for ${img.filename}: ${skipErr.message}`);
-          }
-          if (_skipDlSucceeded) {
-            approved++;
-            approvedFilenames.push(img.filename);
-            mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
-            await logger("SUCCESS", `  Downloaded: ${img.filename}`, storyDateStr);
-          }
-          continue;
-        }
-
-        let result;
+        let _skipDlSucceeded = false;
         try {
-          result = await sendToOffscreen({ type: "PROCESS_IMAGE", imageUrl: img.originalUrl, storyData: { storyId: summary.id, createdAt, body, roomName, centreName, originalUrl: img.originalUrl, filename: img.filename }, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, exifArtist, iptcCaption, iptcKeywords, iptcByline, childId, childName, savePath, childEncodings, negativeDescriptors, autoThreshold, minThreshold, gpsCoords });
-        } catch (err) {
-          if (err.name === "AuthError" || err.message.includes("401")) {
-            await logger("ERROR", `Auth error at story ${si}. Checkpoint saved, click Resume.`);
-            await abortAndCheckpoint(si, summaries.length, summaries, "auth");
-            aborted = true; break;
+          const skipDlResult = await sendToOffscreen({ type: "DOWNLOAD_APPROVED", storyData: { storyId: summary.id, createdAt, body, roomName, centreName, originalUrl: img.originalUrl, filename: img.filename }, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, exifArtist, iptcCaption, iptcKeywords, iptcByline, childName, savePath, gpsCoords });
+          if (skipDlResult.dataUrl && skipDlResult.savePath) {
+            await downloadDataUrl(skipDlResult.dataUrl, skipDlResult.savePath);
+            _skipDlSucceeded = true;
+            recordFileDownloaded({ filePath: skipDlResult.savePath, childId, storyId: String(summary.id), filename: img.filename, fileType: "image" }).catch(() => {});
+            recordFileMovement({ type: "downloaded", childId, storyId: String(summary.id), filename: img.filename, toPath: storyBasePath, source: "download_all" }).catch(() => {});
           }
-          if (err.name === "RateLimitError" || err.message.includes("429") || err.message.includes("403")) {
+        } catch (skipErr) {
+          if (skipErr.name === "RateLimitError" || skipErr.message.includes("429")) {
             await logger("ERROR", `Rate limited at story ${si}. Checkpoint saved, click Resume.`);
             await abortAndCheckpoint(si, summaries.length, summaries, "rate_limit");
             aborted = true; break;
           }
-          await logger("WARNING", `  Processing error: ${err.message}`);
-          continue;
+          await logger("WARNING", `  Download failed for ${img.filename}: ${skipErr.message}`);
         }
-
-        // Save fingerprint
-        if (result?.detectedFaces) {
-          saveImageFingerprint({ storyId: String(summary.id), imageUrl: img.originalUrl, childId, faces: result.detectedFaces, noFace: result.detectedFaces.length === 0 }).catch(() => {});
-        }
-
-        const forChild = ` for ${childName}`;
-        if (result?.result === "approve") {
-          if (deferDownloads) {
-            try {
-              await addPendingDownload({ itemType: "image", childId, childName, storyId: summary.id, imageUrl: img.originalUrl, savePath: result.savePath || savePath, description: exifMeta.description, exifTitle: exifMeta.title, exifSubject: exifMeta.subject, exifComments: exifMeta.comments, gpsCoords, createdAt, roomName, centreName, filename: img.filename });
-            } catch (e) { await logger("WARNING", `  Failed to cache: ${e.message}`); }
-            approved++; _reEvalApprovalCount++;
-            approvedFilenames.push(img.filename);
-            mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
-            await logger("INFO", `  Cached (deferred): ${img.filename}${forChild}`, storyDateStr);
-          } else {
-            if (result.dataUrl && result.savePath) {
-              await downloadDataUrl(result.dataUrl, result.savePath);
-              recordFileDownloaded({ filePath: result.savePath, childId, storyId: String(summary.id), filename: img.filename, fileType: "image" }).catch(() => {});
-            }
-            approved++; _reEvalApprovalCount++;
-            approvedFilenames.push(img.filename);
-            mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
-            await logger("SUCCESS", `  Downloaded: ${img.filename}${forChild}`, storyDateStr);
-          }
-
-          // Live re-evaluation every RE_EVAL_EVERY_N approvals
-          if (_reEvalApprovalCount >= RE_EVAL_EVERY_N && !skipFaceRec) {
-            _reEvalApprovalCount = 0;
-            try {
-              const freshDescs  = await getAllDescriptors();
-              const freshChild  = freshDescs.find(d => String(d.childId) === String(childId));
-              if (freshChild?.descriptors?.length > 0) {
-                const freshNeg  = await getNegativeDescriptors(childId).catch(() => []);
-                const queue     = await getReviewQueue();
-                const childQueue = queue.filter(item => String(item.childId) === String(childId) && item.descriptor);
-                if (childQueue.length > 0) {
-                  const reEvalResult = await sendToOffscreen({ type: "RE_EVALUATE_BATCH", items: childQueue.map(item => ({ id: item.id, descriptor: item.descriptor })), positiveDescriptors: freshChild.descriptors, descriptorsByYear: freshChild.descriptorsByYear || {}, negativeDescriptors: freshNeg, autoThreshold, minThreshold, disableAutoReject: childPhaseData.phase < 3 });
-                  let reApproved = 0, reRejected = 0;
-                  if (reEvalResult?.results) {
-                    for (const r of reEvalResult.results) {
-                      if (r.decision === "approve") {
-                        const item = childQueue.find(q => q.id === r.id);
-                        if (item) {
-                          if (item.descriptor && item.childId) {
-                            const rd = item.storyData?.createdAt ? new Date(item.storyData.createdAt) : null;
-                            await appendDescriptor(item.childId, item.childName, item.descriptor, rd ? rd.getFullYear().toString() : "unknown");
-                            await incrementVerifiedCount(item.childId);
-                          }
-                          await addPendingDownload({ childId: item.childId, childName: item.childName, storyData: item.storyData, savePath: item.savePath, description: item.description || "", exifTitle: item.exifTitle || "", exifSubject: item.exifSubject || "", exifComments: item.exifComments || "" });
-                          await removeFromReviewQueue(r.id);
-                          reApproved++; approved++;
-                        }
-                      } else if (r.decision === "reject") {
-                        const item = childQueue.find(q => q.id === r.id);
-                        if (item) {
-                          if (item.storyData?.storyId && item.storyData?.originalUrl) {
-                            await addRejection(item.storyData.storyId, item.storyData.originalUrl).catch(() => {});
-                          }
-                          if (item.descriptor && item.childId) {
-                            await appendNegativeDescriptor(item.childId, item.descriptor).catch(() => {});
-                          }
-                          await removeFromReviewQueue(r.id);
-                          reRejected++; rejected++;
-                        }
-                      }
-                    }
-                  }
-                  if (reApproved > 0 || reRejected > 0) {
-                    await logger("SUCCESS", `Live re-evaluation: ${reApproved} auto-approved, ${reRejected} auto-rejected (${childQueue.length - reApproved - reRejected} still in queue)`);
-                    sendToOffscreen({ type: "REFRESH_PROFILES" }).catch(() => {});
-                    chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
-                  }
-                }
-              }
-            } catch (reEvalErr) {
-              console.warn("[live-reeval]", reEvalErr.message);
-            }
-          }
-
-        } else if (result?.result === "review") {
-          queued++;
-          const reviewMsg = result.noTrainingData
-            ? `  Queued for profile building: ${img.filename}${forChild} (no training data)`
-            : `  Queued for review: ${img.filename}${forChild} (${result.matchPct ?? "?"}% match)`;
-          await logger("INFO", reviewMsg, storyDateStr);
-          chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
-        } else {
-          rejected++;
-          if (result?.error) await logger("WARNING", `  Processing error: ${result.error}`);
+        
+        if (_skipDlSucceeded) {
+          approved++;
+          approvedFilenames.push(img.filename);
+          mediaUrls.push({ filename: img.filename, originalUrl: img.originalUrl });
+          await logger("SUCCESS", `  Downloaded: ${img.filename}`, storyDateStr);
         }
       } // end images loop
 
       if (aborted) break;
 
-      // ─── Process videos ───
-      for (const vid of videos) {
-        if (getCancelRequested()) { scanCancelled = true; aborted = true; break; }
-        await smartDelay("DOWNLOAD_MEDIA");
+      // ─── Process videos (only when downloadVideos setting is enabled) ───
+      if (downloadVideos && videos.length > 0) {
+        for (const vid of videos) {
+          if (getCancelRequested()) { scanCancelled = true; aborted = true; break; }
+          await smartDelay("DOWNLOAD_MEDIA");
 
-        const dotIdx     = vid.filename.lastIndexOf(".");
-        const baseName   = dotIdx >= 0 ? vid.filename.slice(0, dotIdx) : vid.filename;
-        const ext        = dotIdx >= 0 ? vid.filename.slice(dotIdx + 1) : "mp4";
-        const nameParts  = [storyDateStr, sanitizeName(childName), roomName ? sanitizeName(roomName) : null, baseName].filter(Boolean);
-        const videoFilename = sanitizeName(`${nameParts.join("_")}.${ext}`);
-        const savePath   = `${storyBasePath}/${videoFilename}`;
+          const dotIdx     = vid.filename.lastIndexOf(".");
+          const baseName   = dotIdx >= 0 ? vid.filename.slice(0, dotIdx) : vid.filename;
+          const ext        = dotIdx >= 0 ? vid.filename.slice(dotIdx + 1) : "mp4";
+          const nameParts  = [storyDateStr, sanitizeName(childName), roomName ? sanitizeName(roomName) : null, baseName].filter(Boolean);
+          const videoFilename = sanitizeName(`${nameParts.join("_")}.${ext}`);
+          const savePath   = `${storyBasePath}/${videoFilename}`;
 
-        try {
-          if (deferDownloads) {
-            await addPendingDownload({ itemType: "video", childId, childName, storyId: summary.id, imageUrl: vid.originalUrl, savePath, filename: videoFilename, createdAt, roomName, centreName });
-            approved++;
-            approvedFilenames.push(videoFilename);
-            mediaUrls.push({ filename: videoFilename, originalUrl: vid.originalUrl });
-            await logger("INFO", `  Cached video: ${videoFilename} (deferred)`, storyDateStr);
-          } else {
+          try {
             const vidResult = await sendToOffscreen({ type: "DOWNLOAD_VIDEO", videoUrl: vid.originalUrl, savePath });
             if (vidResult?.blobUrl && vidResult?.savePath) {
               await downloadVideoFromOffscreen(vidResult);
@@ -1179,29 +999,29 @@ export async function runExtraction(childId, childName, mode, {
               const sizeMb = vidResult.size ? ` (${(vidResult.size / 1048576).toFixed(1)} MB)` : "";
               await logger("SUCCESS", `  Downloaded video: ${videoFilename}${sizeMb}`, storyDateStr);
             }
+          } catch (err) {
+            if (err.name === "AuthError" || err.message.includes("401")) {
+              await logger("ERROR", `Auth error — checkpoint saved at story ${si}.`);
+              await abortAndCheckpoint(si, summaries.length, summaries, "auth");
+              aborted = true; break;
+            }
+            if (err.message.startsWith("Video fetch 403") || err.message.startsWith("Video fetch 404")) {
+              await logger("WARNING", `  Video unavailable (skipped): ${videoFilename}`, storyDateStr);
+            } else if (err.name === "RateLimitError" || err.message.includes("429")) {
+              await logger("ERROR", `Rate limited — checkpoint saved at story ${si}.`);
+              await abortAndCheckpoint(si, summaries.length, summaries, "rate_limit");
+              aborted = true; break;
+            } else {
+              await logger("WARNING", `  Video download error: ${err.message}`, storyDateStr);
+            }
           }
-        } catch (err) {
-          if (err.name === "AuthError" || err.message.includes("401")) {
-            await logger("ERROR", `Auth error — checkpoint saved at story ${si}.`);
-            await abortAndCheckpoint(si, summaries.length, summaries, "auth");
-            aborted = true; break;
-          }
-          if (err.message.startsWith("Video fetch 403") || err.message.startsWith("Video fetch 404")) {
-            await logger("WARNING", `  Video unavailable (skipped): ${videoFilename}`, storyDateStr);
-          } else if (err.name === "RateLimitError" || err.message.includes("429")) {
-            await logger("ERROR", `Rate limited — checkpoint saved at story ${si}.`);
-            await abortAndCheckpoint(si, summaries.length, summaries, "rate_limit");
-            aborted = true; break;
-          } else {
-            await logger("WARNING", `  Video download error: ${err.message}`, storyDateStr);
-          }
-        }
-      } // end videos loop
+        } // end videos loop
+      } // end downloadVideos gate
 
       if (aborted) break;
 
       // Story HTML
-      if (saveStoryHtml && approvedFilenames.length > 0 && !deferDownloads) {
+      if (saveStoryHtml && approvedFilenames.length > 0) {
         try {
           const routineHtmlStr = _routineStr(routineText);
           const htmlContent = buildStoryPage({ title: storyTitle, date: storyDateStr, body, childName, childAge, roomName, centreName, educatorName, routineText: routineHtmlStr, mediaFilenames: approvedFilenames });
@@ -1214,7 +1034,7 @@ export async function runExtraction(childId, childName, mode, {
       }
 
       // Story Card
-      if (saveStoryCard && approvedFilenames.length > 0 && !deferDownloads && body) {
+      if (saveStoryCard && approvedFilenames.length > 0 && body) {
         try {
           const plainRoutineForCard = _routineStr(routineText);
           const cardSavePath = `${storyBasePath}/${storyDateStr || "story"} - Story Card.jpg`;
@@ -1264,26 +1084,25 @@ export async function runExtraction(childId, childName, mode, {
 
   if (scanCompletedFully) {
     await clearScanCheckpoint(childId).catch(() => {});
+    // Assign sequential story numbers (oldest=1) after a successful full scan.
+    // Done in the background — non-fatal, never blocks the scan result.
+    assignStoryNumbers(childId).catch(err =>
+      console.warn("[runExtraction] assignStoryNumbers failed (non-fatal):", err?.message || err)
+    );
   }
 
   const skippedPart = skippedAbsent > 0 ? `, Skipped (absent): ${skippedAbsent}` : "";
-  const dlWord      = deferDownloads ? "Cached" : "Downloaded";
   if (scanCompletedFully) {
-    await _ctx.logger("SUCCESS", `Scan complete — ${dlWord}: ${approved}, Review: ${queued}, Rejected: ${rejected}${skippedPart}`, null, { childName, approved, queued, rejected });
+    await _ctx.logger("SUCCESS", `Scan complete — Downloaded: ${approved}${skippedPart}`, null, { childName, approved, queued, rejected });
   } else if (scanCancelled) {
     const reasonLabel = scanAbortReason === "rate_limit" ? "Rate limited" : scanAbortReason === "auth" ? "Auth error" : scanAbortReason === "user_cancel" ? "Cancelled by user" : "Aborted";
-    await _ctx.logger("WARNING", `Scan paused (${reasonLabel}) — ${dlWord}: ${approved}, Review: ${queued}, Rejected: ${rejected}${skippedPart} — click Resume to continue.`, null, { childName, approved, queued });
+    await _ctx.logger("WARNING", `Scan paused (${reasonLabel}) — Downloaded: ${approved}${skippedPart} — click Resume to continue.`, null, { childName, approved, queued });
     try {
       chrome.notifications.create(`scan-abort-${childId}-${Date.now()}`, { type: "basic", iconUrl: "icons/icon128.png", title: "Storypark Smart Saver — Scan Paused", message: `${reasonLabel}: ${approved} saved so far. Click Resume to continue.` });
     } catch { /* notifications may not be granted */ }
   }
 
   if (!suppressEndMessages) {
-    if (deferDownloads && approved > 0) {
-      const pendingAll   = await getAllPendingDownloads().catch(() => []);
-      const pendingCount = pendingAll.filter(p => String(p.childId) === String(childId)).length;
-      await _ctx.logger("INFO", `${pendingCount} photos/videos cached for ${childName} — go to Review tab and click "Download Approved" to save them.`);
-    }
     try {
       chrome.notifications.create(`scan-done-${childId}`, { type: "basic", iconUrl: "icons/icon128.png", title: "Storypark Smart Saver", message: `${childName}: ${approved} downloaded, ${queued} to review${skippedAbsent > 0 ? `, ${skippedAbsent} skipped` : ""}` });
     } catch { /* notifications may not be granted */ }

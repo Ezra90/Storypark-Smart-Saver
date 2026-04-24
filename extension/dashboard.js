@@ -11,8 +11,10 @@
  */
 
 import { loadModels, detectFaces, matchEmbedding } from "./lib/face.js";
+import { sanitizeName } from "./lib/metadata-helpers.js";
 import { getDescriptors, setDescriptors, MAX_DESCRIPTORS_PER_CHILD, getAllDownloadedStories, addDownloadedStory, removeFileFromStoryManifest, markFilenameRejectedInManifest, addRejection, appendDescriptor, appendNegativeDescriptor, addToReviewQueue, saveImageFingerprint, getCentreGPS } from "./lib/db.js";
 import { linkFolder, getLinkedFolder, clearLinkedFolder, reconcileWithCache, repairManifestFromDisk, walkFolder, readFileAsDataUrl, moveFileToRejected, restoreFromRejected, deleteFile } from "./lib/disk-sync.js";
+import { deleteActivityLogFromDisk, flushActivityLogToDisk, ACTIVITY_LOG_FILENAME } from "./lib/log-manager.js";
 
 /* ================================================================== */
 /*  Shared helpers                                                     */
@@ -276,7 +278,7 @@ function switchTab(tabName) {
     b.classList.toggle("active", b.dataset.tab === tabName);
   });
   panels.forEach(p => {
-    const panelMap = { scan: "tabScan", review: "tabReview", log: "tabLog", settings: "tabSettings" };
+    const panelMap = { scan: "tabScan", review: "tabReview", log: "tabLog", settings: "tabSettings", tools: "tabTools" };
     p.classList.toggle("active", p.id === panelMap[tabName]);
   });
   // Show keyboard hints only on review tab
@@ -290,9 +292,10 @@ function switchTab(tabName) {
     triggerReEvaluation();
   }
   if (tabName === "log") loadActivityLog();
-  if (tabName === "settings") {
+  if (tabName === "settings" || tabName === "tools") {
+    // Tools tab shares wireSettingsEvents() for its buttons — guarded by _settingsInited
     initSettingsTab();      // one-time: event wiring (guarded by _settingsInited)
-    loadSettingsChildren(); // always: refresh confidence data on every tab visit
+    loadSettingsChildren(); // always: refresh child dropdowns on every tab visit
   }
 }
 
@@ -401,6 +404,23 @@ function setRunning(running) {
   }
 }
 
+function initGlobalChildSelector() {
+  $childSelect.addEventListener("change", () => {
+    chrome.storage.local.set({ lastSelectedChildId: $childSelect.value });
+    if (!isRunning && $childSelect.value) {
+      $btnLatest.disabled = false;
+      $btnDeep.disabled = false;
+      if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = false;
+    } else if (!$childSelect.value) {
+      $btnLatest.disabled = true;
+      $btnDeep.disabled = true;
+      if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = true;
+    }
+    loadChildPhase();
+    checkForResume();
+  });
+}
+
 function populateChildren(children) {
   $childSelect.innerHTML = "";
   if (!children || children.length === 0) {
@@ -430,21 +450,6 @@ function populateChildren(children) {
     }
   });
 }
-
-$childSelect.addEventListener("change", () => {
-  chrome.storage.local.set({ lastSelectedChildId: $childSelect.value });
-  if (!isRunning && $childSelect.value) {
-    $btnLatest.disabled = false;
-    $btnDeep.disabled = false;
-    if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = false;
-  } else if (!$childSelect.value) {
-    $btnLatest.disabled = true;
-    $btnDeep.disabled = true;
-    if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = true;
-  }
-  loadChildPhase();
-  checkForResume();
-});
 
 /** Check if a scan checkpoint exists for the selected child and show/hide the Resume button. */
 function checkForResume() {
@@ -673,16 +678,19 @@ function triggerExtraction(type) {
 $btnLatest.addEventListener("click", () => triggerExtraction("EXTRACT_LATEST"));
 $btnDeep.addEventListener("click", () => triggerExtraction("DEEP_RESCAN"));
 
-// Offline Facial Scan button — runs face matching on local disk files
-$btnOfflineScanMain?.addEventListener("click", () => triggerOfflineScan());
+// Smart Sort button — runs face matching on downloaded photos
+$btnOfflineScanMain?.addEventListener("click", () => runSmartSort());
 
 /**
- * Trigger the Offline Facial Scan from the Scan tab.
+ * Trigger the Smart Sort from the Scan tab.
+ * Reads already-downloaded photos and runs face AI:
+ *   - High confidence (≥ autoThreshold): kept, face model learns
+ *   - Uncertain (≥ minThreshold): sent to Review tab for human decision
+ *   - Low confidence (< minThreshold): physically moved to Rejected Matches folder
  * Supports both single-child and All-Children modes.
- * Uses the Scan tab's progress bar and log — same UX as online scans.
  * Works with zero training data (everything queued for review).
  */
-async function triggerOfflineScan() {
+async function runSmartSort() {
   if (isRunning) return;
   const childId = $childSelect.value;
   if (!childId) { scanLog("Please select a child first."); return; }
@@ -715,8 +723,8 @@ async function triggerOfflineScan() {
   $progressBar.value = 0; $progressBar.max = 100;
   $progressBar.style.display = "block";
   $progressText.style.display = "block";
-  setStatus("yellow", "Offline Facial Scan…");
-  scanLog(`🔍 Starting Offline Facial Scan for ${childId === ALL_CHILDREN ? "all children" : childrenToScan[0].name}…`);
+  setStatus("yellow", "Smart Sort…");
+  scanLog(`🧠 Starting Smart Sort for ${childId === ALL_CHILDREN ? "all children" : childrenToScan[0].name}…`);
   scanLog("⚡ Reading photos from disk — no internet needed.");
 
   // Get thresholds + scenario photo setting
@@ -889,8 +897,17 @@ async function triggerOfflineScan() {
           });
           queued++;
         } else {
+          // Low confidence — learn as negative AND physically move to Rejected Matches
           if (bestDescriptor) await appendNegativeDescriptor(cId, Array.from(bestDescriptor));
           rejected++;
+          // Move file to Rejected Matches so it doesn't clutter the main Stories folder
+          try {
+            await moveFileToRejected(handle, filePath);
+            const mEntry = manifest?.mediaUrls?.find(m => m.filename === filenameInPath);
+            if (manifest?.storyId && mEntry?.originalUrl) {
+              await addRejection(manifest.storyId, mEntry.originalUrl).catch(() => {});
+            }
+          } catch { /* non-fatal — keep going even if move fails */ }
         }
       } catch (e) {
         errors++;
@@ -917,8 +934,8 @@ async function triggerOfflineScan() {
   await refreshReviewQueue();
 
   setRunning(false);
-  setStatus("green", "Offline scan complete");
-  const summary = `✅ Offline Scan Done — ${totalAutoApproved} confirmed, ${totalQueued} to review, ${totalRejected} rejected`;
+  setStatus("green", "Smart Sort complete");
+  const summary = `✅ Smart Sort Done — ${totalAutoApproved} confirmed, ${totalQueued} to review, ${totalRejected} moved to Rejected Matches`;
   scanLog(`\n${summary}`);
   if (totalQueued > 0) scanLog(`💡 Go to the 👀 Pending Review tab — ${totalQueued} photos need your decision.`);
   toast(summary, "success", 6000);
@@ -1520,7 +1537,7 @@ async function handleReviewApprove(id, trainOnly = false) {
     }
     // Incremental card removal — no full DOM rebuild
     removeCardAnimated(id);
-    updateBatchButton(); // fire-and-forget
+     // fire-and-forget
     // Clear the action flag after a short delay to absorb trailing messages
     // but still allow rapid keyboard reviewing (was 2000ms, now 500ms)
     setTimeout(() => { _localActionInProgress = false; }, 500);
@@ -1624,7 +1641,7 @@ async function refreshReviewQueue() {
     }
   }
 
-  await updateBatchButton();
+  
 }
 
 async function updateBatchButton() {
@@ -1663,7 +1680,7 @@ $btnBatch.addEventListener("click", async () => {
     toast(res?.error || "Batch download failed", "error");
   }
   $btnBatch.disabled = false;
-  await updateBatchButton();
+  
 });
 
 // Build HTML — regenerate all HTML from stored manifests (no photo downloads)
@@ -1707,7 +1724,7 @@ $btnFinalV.addEventListener("click", async () => {
     const msg = `✅ Verified: ${res.verified}/${res.total} confirmed, ${res.rejected} rejected, ${res.flagged} flagged`;
     toast(msg, "success", 6000);
     await refreshReviewQueue();
-    await updateBatchButton();
+    
   } else {
     toast(res?.error || "Verification failed", "error");
   }
@@ -1826,7 +1843,8 @@ $btnClearLog.addEventListener("click", () => {
 let _settingsInited = false;
 let centreLocationsCache = {};
 let pendingTrainingFiles = [];
-let humanAvailable = false;
+// FIX: Initialize state globally
+const humanAvailable = typeof Human !== "undefined";
 
 // Settings DOM refs (grabbed lazily since they're in the settings panel)
 const $childrenListS    = document.getElementById("childrenListSettings");
@@ -1868,8 +1886,7 @@ function initSettingsTab() {
   if (_settingsInited) return;
   _settingsInited = true;
 
-  // Check human.js
-  humanAvailable = typeof Human !== "undefined";
+  // Check human.js (humanAvailable is a const set at module level — never reassign it here)
   if (!humanAvailable) document.getElementById("humanWarning").style.display = "block";
 
   // Load saved settings
@@ -1877,8 +1894,8 @@ function initSettingsTab() {
   const $skipFaceWarn = document.getElementById("skipFaceWarning");
 
   chrome.storage.local.get(
-    ["autoThreshold", "minThreshold", "debugCaptureMode", "attendanceFilter", "saveStoryHtml", "saveStoryCard", "skipFaceRec", "fillGapsOnly"],
-    ({ autoThreshold = 85, minThreshold = 50, debugCaptureMode = false, attendanceFilter = false, saveStoryHtml = true, saveStoryCard = true, skipFaceRec = false, fillGapsOnly = false }) => {
+    ["autoThreshold", "minThreshold", "debugCaptureMode", "attendanceFilter", "saveStoryHtml", "saveStoryCard", "skipFaceRec", "fillGapsOnly", "downloadVideos"],
+    ({ autoThreshold = 85, minThreshold = 50, debugCaptureMode = false, attendanceFilter = false, saveStoryHtml = true, saveStoryCard = true, skipFaceRec = false, fillGapsOnly = false, downloadVideos = false }) => {
       $autoRange.value = autoThreshold; $autoNum.value = autoThreshold;
       $minRange.value = minThreshold; $minNum.value = minThreshold;
       $chkDebug.checked = debugCaptureMode === true;
@@ -1888,6 +1905,8 @@ function initSettingsTab() {
       document.getElementById("chkFillGapsOnly").checked = fillGapsOnly === true;
       $chkSkipFace.checked = skipFaceRec === true;
       $skipFaceWarn.style.display = skipFaceRec ? "block" : "none";
+      const $chkDlVid = document.getElementById("chkDownloadVideos");
+      if ($chkDlVid) $chkDlVid.checked = downloadVideos === true;
     }
   );
 
@@ -1928,6 +1947,10 @@ function initSettingsTab() {
     chrome.storage.local.set({ keepScenarioPhotos: e.target.checked });
     toast(e.target.checked ? "✓ Scenario photos auto-kept" : "✓ Scenario photos sent to Review", "success", 1500);
   });
+  document.getElementById("chkDownloadVideos")?.addEventListener("change", (e) => {
+    chrome.storage.local.set({ downloadVideos: e.target.checked });
+    toast(e.target.checked ? "✓ Video downloads enabled" : "✓ Video downloads disabled", "success", 1500);
+  });
 
   // Threshold sync with clamping (0-100)
   function clampThreshold(el) {
@@ -1967,6 +1990,8 @@ function loadSettingsChildren() {
     const $repairChildReset = document.getElementById("repairChildSelect");
     if ($repairChildReset) $repairChildReset.innerHTML = '<option value="__ALL__">👨‍👩‍👧‍👦 All Children</option>';
     const $scReset = document.getElementById("storyCardsChildSel"); if ($scReset) $scReset.innerHTML = '<option value="">All children</option>';
+    const $renamerReset = document.getElementById("renamerChildSelect");
+    if ($renamerReset) $renamerReset.innerHTML = '<option value="">— select a child —</option>';
     if (children.length === 0) {
       $childrenListS.innerHTML = '<p style="font-size:13px;color:var(--muted);">No children found.</p>';
       return;
@@ -2024,6 +2049,14 @@ function loadSettingsChildren() {
       // Populate Generate Story Cards child select
       const $scSel=document.getElementById("storyCardsChildSel");
       if($scSel){const scOpt=document.createElement("option");scOpt.value=c.id;scOpt.textContent=c.name;$scSel.appendChild(scOpt);}
+      // Populate Custom Filename & Mass Renamer child select
+      const $renamerChild = document.getElementById("renamerChildSelect");
+      if ($renamerChild) {
+        const renameOpt = document.createElement("option");
+        renameOpt.value = c.id;
+        renameOpt.textContent = c.name;
+        $renamerChild.appendChild(renameOpt);
+      }
     }
   });
 }
@@ -2960,9 +2993,6 @@ function wireSettingsEvents() {
   // Run Clean Up button
   $btnRunCleanup?.addEventListener("click", () => runCleanup());
 
-  // Offline Smart Scan button
-  $btnOfflineScan?.addEventListener("click", () => runOfflineScan());
-
   // Undo Clean Up button
   $btnUndoCleanup?.addEventListener("click", () => undoCleanup());
 
@@ -3739,6 +3769,251 @@ function wireSettingsEvents() {
       toast(msg, "error");
     }
   });
+
+  /* ── 7: Custom Filename & Mass Renamer (Tools tab) ── */
+  {
+    const $renamerChildSel  = document.getElementById("renamerChildSelect");
+    const $renamerTemplate  = document.getElementById("renamerTemplate");
+    const $renamerPreview   = document.getElementById("renamerPreview");
+    const $btnPreviewRename = document.getElementById("btnPreviewRename");
+    const $btnApplyRename   = document.getElementById("btnApplyRename");
+    const $renamerProgress  = document.getElementById("renamerProgress");
+    const $renamerProgBar   = document.getElementById("renamerProgressBar");
+    const $renamerProgTxt   = document.getElementById("renamerProgressText");
+    const $renamerReport    = document.getElementById("renamerReport");
+
+    const MEDIA_EXT_RENAME = /\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+    const ILLEGAL_CHARS    = /[/\\:*?"<>|]/g;
+
+    /** Substitute tokens in the template and sanitize the resulting filename stem. */
+    function _applyRenameTemplate(template, { childName, storyDate, room, originalName, ext }) {
+      const clean = s => (s || "").replace(ILLEGAL_CHARS, "_").replace(/_{2,}/g, "_").trim();
+      const result = template
+        .replace(/\{ChildName\}/g,    clean(childName)    || "Unknown")
+        .replace(/\{StoryDate\}/g,    clean(storyDate)    || "0000-00-00")
+        .replace(/\{Room\}/g,         clean(room)         || "Unknown")
+        .replace(/\{OriginalName\}/g, clean(originalName) || "photo");
+      return sanitizeName(result).replace(/_{2,}/g, "_") + ext;
+    }
+
+    /** Update the live preview with two examples (photo + video). */
+    function _updateRenamePreview() {
+      if (!$renamerTemplate || !$renamerPreview) return;
+      const tpl = $renamerTemplate.value.trim();
+      if (!tpl) { $renamerPreview.textContent = "Enter a template above to see a preview…"; return; }
+      const exPhoto = _applyRenameTemplate(tpl, {
+        childName: "Emma Smith", storyDate: "2024-03-15",
+        room: "Butterflies", originalName: "story_photo_abc123", ext: ".jpg",
+      });
+      const exVideo = _applyRenameTemplate(tpl, {
+        childName: "Emma Smith", storyDate: "2024-03-15",
+        room: "Butterflies",
+        originalName: "story_video_ed6bfaa6-6f4b-48c0-b15a-76959be89d83_720_high",
+        ext: ".mp4",
+      });
+      $renamerPreview.innerHTML =
+        `📷 <strong style="color:var(--success);">${exPhoto}</strong><br>` +
+        `🎬 <strong style="color:#60a5fa;">${exVideo}</strong>`;
+    }
+
+    $renamerTemplate?.addEventListener("input", _updateRenamePreview);
+    _updateRenamePreview();
+
+    // Enable/disable action buttons when child is selected
+    $renamerChildSel?.addEventListener("change", () => {
+      const has = !!$renamerChildSel.value;
+      if ($btnPreviewRename) $btnPreviewRename.disabled = !has;
+      if ($btnApplyRename)   $btnApplyRename.disabled   = !has;
+    });
+
+    $btnPreviewRename?.addEventListener("click", () => _runRenamer(false));
+    $btnApplyRename?.addEventListener("click", async () => {
+      if (!confirm(
+        "Apply this rename template to all downloaded photos and videos for the selected child?\n\n" +
+        "Files will be physically renamed on disk and the story database will be updated.\n\n" +
+        "💡 Tip: Run 🔍 Preview Rename first to review what will change."
+      )) return;
+      await _runRenamer(true);
+    });
+
+    async function _runRenamer(apply) {
+      const childId   = $renamerChildSel?.value;
+      const childName = $renamerChildSel?.options[$renamerChildSel.selectedIndex]?.textContent?.trim() || "";
+      const template  = $renamerTemplate?.value?.trim();
+      if (!childId || !template) { toast("Select a child and enter a template", "error"); return; }
+
+      const handle = await getLinkedFolder();
+      if (!handle) { toast("Link a download folder first (Tools → Link Download Folder)", "error"); return; }
+
+      const allManifests   = await getAllDownloadedStories().catch(() => []);
+      const childManifests = allManifests.filter(m => m.childId === childId || m.childName === childName);
+      if (childManifests.length === 0) { toast("No downloaded stories found — run a scan first", "error"); return; }
+
+      const INVALID = /[/\\:*?"<>|]/g;
+      const childSafe     = childName.replace(INVALID, "_").trim();
+      const _sssLinked    = handle.name === "Storypark Smart Saver";
+      const storiesPrefix = _sssLinked
+        ? `${childSafe}/Stories`
+        : `Storypark Smart Saver/${childSafe}/Stories`;
+
+      /** @type {Array<{oldPath:string, newPath:string, manifest:object, oldFilename:string, newFilename:string}>} */
+      const renamePlan = [];
+
+      for (const manifest of childManifests) {
+        if (!manifest.folderName) continue;
+        const storyDate = manifest.storyDate || "0000-00-00";
+        const room      = (manifest.roomName || "Unknown").replace(INVALID, "_").trim();
+
+        for (const filename of (manifest.approvedFilenames || [])) {
+          if (!MEDIA_EXT_RENAME.test(filename)) continue;
+          const extMatch  = filename.match(/\.[^.]+$/i);
+          const ext       = extMatch ? extMatch[0].toLowerCase() : "";
+          const nameNoExt = ext ? filename.slice(0, -ext.length) : filename;
+
+          const newFilename = _applyRenameTemplate(template, {
+            childName: childSafe, storyDate, room, originalName: nameNoExt, ext,
+          });
+          if (newFilename === filename) continue; // already matches template
+
+          const oldPath = `${storiesPrefix}/${manifest.folderName}/${filename}`;
+          const newPath = `${storiesPrefix}/${manifest.folderName}/${newFilename}`;
+          renamePlan.push({ oldPath, newPath, manifest, oldFilename: filename, newFilename });
+        }
+      }
+
+      if (renamePlan.length === 0) {
+        if ($renamerReport) {
+          $renamerReport.style.display = "block";
+          $renamerReport.textContent = "✅ All files already match the template — nothing to rename.";
+        }
+        toast("✅ All files already match the template", "success");
+        return;
+      }
+
+      if (!apply) {
+        // Dry-run: show preview list
+        const lines = renamePlan.slice(0, 300).map(p =>
+          `<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);">` +
+          `<span style="color:var(--muted);">${p.oldFilename}</span>` +
+          ` → <span style="color:var(--success);">${p.newFilename}</span></div>`
+        );
+        if (renamePlan.length > 300) {
+          lines.push(`<div style="color:var(--warning);padding-top:4px;">…and ${renamePlan.length - 300} more files</div>`);
+        }
+        if ($renamerReport) {
+          $renamerReport.style.display = "block";
+          $renamerReport.innerHTML =
+            `<strong style="color:var(--text);display:block;margin-bottom:8px;">` +
+            `🔍 Preview — ${renamePlan.length} file${renamePlan.length !== 1 ? "s" : ""} would be renamed:</strong>` +
+            lines.join("");
+        }
+        toast(`🔍 Preview: ${renamePlan.length} file${renamePlan.length !== 1 ? "s" : ""} would be renamed`, "success", 4000);
+        return;
+      }
+
+      // ── Apply rename ──
+      if ($btnApplyRename)   setOperationRunning($btnApplyRename,   true, "✅ Apply Rename",   "⏳ Renaming…");
+      if ($btnPreviewRename) setOperationRunning($btnPreviewRename, true, "🔍 Preview Rename", "⏳ Working…");
+      showOperationProgress($renamerProgress, $renamerProgBar, $renamerReport, renamePlan.length);
+
+      let renamed = 0, errors = 0, processed = 0;
+      const loopStart = Date.now();
+      const manifestUpdates = new Map(); // key → { manifest, renames[] }
+
+      for (const item of renamePlan) {
+        processed++;
+        updateProgressBar($renamerProgBar, $renamerProgTxt, processed, renamePlan.length, loopStart,
+          `Renaming ${processed}/${renamePlan.length}: ${item.oldFilename}`);
+        if (processed % 10 === 0) await new Promise(r => setTimeout(r, 0)); // GC yield
+
+        try {
+          // Navigate to the story folder via FSA
+          const parts = item.oldPath.split("/");
+          let dir = handle;
+          for (let i = 0; i < parts.length - 1; i++) {
+            dir = await dir.getDirectoryHandle(parts[i], { create: false });
+          }
+
+          // Guard: skip if destination already exists (avoid accidental overwrite)
+          if (item.oldFilename !== item.newFilename) {
+            let destExists = false;
+            try { await dir.getFileHandle(item.newFilename); destExists = true; } catch { /* ok */ }
+            if (destExists) { errors++; continue; }
+          }
+
+          // FSA has no rename → copy to new name then delete old
+          // Using write(File) — File extends Blob, memory-efficient for large videos
+          const oldFH   = await dir.getFileHandle(parts[parts.length - 1]);
+          const oldFile = await oldFH.getFile();
+          const newFH   = await dir.getFileHandle(item.newFilename, { create: true });
+          const writable = await newFH.createWritable();
+          await writable.write(oldFile);   // streams the Blob content
+          await writable.close();
+          await dir.removeEntry(parts[parts.length - 1]);
+
+          // Track IDB update
+          const mKey = `${item.manifest.childId || ""}:${item.manifest.storyId || ""}`;
+          if (!manifestUpdates.has(mKey)) {
+            manifestUpdates.set(mKey, { manifest: item.manifest, renames: [] });
+          }
+          manifestUpdates.get(mKey).renames.push({ old: item.oldFilename, new: item.newFilename });
+          renamed++;
+        } catch (e) {
+          errors++;
+          console.warn("[mass-renamer]", item.oldPath, e.message);
+        }
+      }
+
+      // ── Update IDB manifests: swap approvedFilenames ──
+      for (const [, { manifest, renames }] of manifestUpdates) {
+        try {
+          const updated  = { ...manifest };
+          const approved = [...(manifest.approvedFilenames || [])];
+          for (const swap of renames) {
+            const idx = approved.indexOf(swap.old);
+            if (idx !== -1) approved[idx] = swap.new;
+          }
+          updated.approvedFilenames = approved;
+          await addDownloadedStory(updated);
+        } catch (e) {
+          console.warn("[mass-renamer] IDB update failed:", e.message);
+        }
+      }
+
+      // ── Rebuild HTML pages so story.html reflects new filenames ──
+      if (renamed > 0) {
+        if ($renamerProgTxt) $renamerProgTxt.textContent = "Rebuilding HTML pages…";
+        await send({ type: "BUILD_HTML_STRUCTURE" }).catch(() => {});
+      }
+
+      // ── Activity log entry ──
+      const logMsg = `✏️ Mass Rename complete for ${childName}: ` +
+        `${renamed} file${renamed !== 1 ? "s" : ""} renamed` +
+        (errors > 0 ? `, ${errors} error${errors !== 1 ? "s" : ""}` : "");
+      await send({
+        type: "LOG_TO_ACTIVITY",
+        level: (errors > 0 && renamed === 0) ? "ERROR" : "SUCCESS",
+        message: logMsg,
+        meta: { childName },
+      }).catch(() => {});
+
+      // ── Restore UI ──
+      if ($btnApplyRename)   setOperationRunning($btnApplyRename,   false, "✅ Apply Rename");
+      if ($btnPreviewRename) setOperationRunning($btnPreviewRename, false, "🔍 Preview Rename");
+      hideOperationProgress($renamerProgress);
+
+      if ($renamerReport) {
+        $renamerReport.style.display = "block";
+        $renamerReport.innerHTML =
+          `<strong style="color:var(--text);">✏️ Rename Complete</strong><br>` +
+          `✅ <strong>${renamed}</strong> file${renamed !== 1 ? "s" : ""} renamed` +
+          (errors > 0 ? ` · ❌ <strong>${errors}</strong> error${errors !== 1 ? "s" : ""}` : "") +
+          `<br><p style="font-size:11px;color:var(--muted);margin-top:6px;">` +
+          `Run <strong>🔍 Verify Files on Disk</strong> to confirm your database is up to date.</p>`;
+      }
+      toast(logMsg, (errors > 0 && renamed === 0) ? "error" : "success", 6000);
+    }
+  } // end Mass Renamer block
 }
 
 
@@ -3866,6 +4141,9 @@ async function runCleanup() {
     processed++;
     updateProgressBar($cleanupProgressBar, $cleanupProgressText, processed, imageFiles.length, _cleanupLoopStart,
       `Checking ${processed}/${imageFiles.length}: ${filePath.split("/").pop()}`);
+
+    // ── RAM management: GC yield + offscreen recycle via shared helper ──
+    await yieldForGC(processed, imageFiles.length, $cleanupProgressText);
 
     try {
       // Read image from disk as data URL
@@ -4045,203 +4323,6 @@ async function undoCleanup() {
   toast(`✅ Restored ${restored} photo${restored !== 1 ? "s" : ""}`, "success");
 }
 
-/* ================================================================== */
-/*  Offline Smart Scan — self-improving AI on local files             */
-/* ================================================================== */
-
-/**
- * Run the same face-matching AI pipeline as the online scan, but read
- * photos from the linked local folder instead of the Storypark API.
- *
- * High confidence → appendDescriptor (AI learns immediately, no review needed)
- * Medium confidence → addToReviewQueue → user approves in Review tab → AI learns
- * Low confidence → appendNegativeDescriptor (AI learns what NOT to match)
- *
- * 100% offline — reads local files, no internet required.
- * The extension tab must stay open while the scan is running.
- */
-async function runOfflineScan() {
-  const $cleanupChildSelect  = document.getElementById("cleanupChildSelect");
-  const $btnOfflineScan      = document.getElementById("btnOfflineScan");
-  const $cleanupProgress     = document.getElementById("cleanupProgress");
-  const $cleanupProgressBar  = document.getElementById("cleanupProgressBar");
-  const $cleanupProgressText = document.getElementById("cleanupProgressText");
-  const $cleanupReport       = document.getElementById("cleanupReport");
-
-  const childId   = $cleanupChildSelect.value;
-  const childName = $cleanupChildSelect.options[$cleanupChildSelect.selectedIndex]?.textContent || "";
-  if (!childId) { toast("Select a child first", "error"); return; }
-
-  const handle = await getLinkedFolder();
-  if (!handle) {
-    toast("Link a download folder first (Settings → Link Download Folder)", "error");
-    return;
-  }
-
-  const rec = await getDescriptors(childId).catch(() => null);
-  if (!rec?.descriptors?.length) {
-    toast("No face data — go to Settings → Face Training and upload photos of your child first", "error");
-    return;
-  }
-  const storedDescs = rec.descriptors;
-
-  if (!humanAvailable) { toast("Face models not available", "error"); return; }
-  try { await loadModels(); } catch (e) {
-    toast(`❌ Face models failed to load: ${e.message}`, "error");
-    return;
-  }
-
-  // Get thresholds from settings
-  const stored = await chrome.storage.local.get(["autoThreshold", "minThreshold", "keepScenarioPhotos"]).catch(() => ({}));
-  const autoThreshold      = stored.autoThreshold      ?? 85;
-  const minThreshold       = stored.minThreshold       ?? 50;
-  const keepScenarioPhotos = stored.keepScenarioPhotos ?? false;
-
-  setOperationRunning($btnOfflineScan, true, "🔍 Offline Smart Scan", "⏳ Scanning…");
-  showOperationProgress($cleanupProgress, $cleanupProgressBar, $cleanupReport, null);
-
-  const INVALID_CHARS  = /[/\\:*?"<>|]/g;
-  const childSafe      = childName.replace(INVALID_CHARS, "_").trim();
-  // Path prefix depends on whether SSS folder itself is linked
-  const _sssLinked3    = handle.name === "Storypark Smart Saver";
-  const storiesPrefix  = _sssLinked3 ? `${childSafe}/Stories` : `Storypark Smart Saver/${childSafe}/Stories`;
-  const MEDIA_EXT      = /\.(jpg|jpeg|png|gif|webp)$/i;
-  const year           = new Date().getFullYear().toString();
-
-  // Walk the child's Stories folder, skipping Rejected Matches folders
-  let allFiles = [];
-  try {
-    allFiles = await walkFolder(handle, "", { skipRejected: true });
-  } catch (e) {
-    toast(`❌ Failed to read folder: ${e.message}`, "error");
-    setOperationRunning($btnOfflineScan, false, "🔍 Offline Smart Scan");
-    hideOperationProgress($cleanupProgress);
-    return;
-  }
-
-  const imageFiles = allFiles.filter(f =>
-    f.startsWith(storiesPrefix + "/") && MEDIA_EXT.test(f)
-  );
-
-  if (imageFiles.length === 0) {
-    toast(`No images found for ${childName} — run a scan first to download photos`, "error");
-    setOperationRunning($btnOfflineScan, false, "🔍 Offline Smart Scan");
-    hideOperationProgress($cleanupProgress);
-    return;
-  }
-
-  $cleanupProgressBar.max = imageFiles.length;
-  let autoApproved = 0, queued = 0, rejected = 0, noFace = 0, errors = 0;
-  let processed = 0;
-  const _offlineScanLoopStart = Date.now(); // ETA tracking
-
-  for (const filePath of imageFiles) {
-    processed++;
-    updateProgressBar($cleanupProgressBar, $cleanupProgressText, processed, imageFiles.length, _offlineScanLoopStart,
-      `Scanning ${processed}/${imageFiles.length}: ${filePath.split("/").pop()}`);
-
-    // ── RAM management: GC yield + offscreen recycle via shared helper ──
-    await yieldForGC(processed, imageFiles.length, $cleanupProgressText);
-
-    try {
-      const dataUrl = await readFileAsDataUrl(handle, filePath);
-      const img = new Image();
-      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
-
-      // Face detection (local AI model)
-      let faces = [];
-      try { faces = await detectFaces(img); } catch { /* model error — skip */ }
-
-      if (faces.length === 0) {
-        noFace++;
-        if (!keepScenarioPhotos) {
-          const thumb = await _createSmallThumbnail(dataUrl);
-          await addToReviewQueue({
-            childId, childName,
-            storyData: { storyId: `offline:${filePath}`, createdAt: null, originalUrl: null },
-            savePath: filePath, description: `📷 Scenario photo — no face detected. Keep?`,
-            croppedFaceDataUrl: thumb, fullPhotoDataUrl: null,
-            descriptor: null, matchPct: 0, noFace: true, isOfflineFile: true, filePath,
-          });
-          queued++;
-        }
-        continue;
-      } // No face in photo
-
-      // Find best matching face
-      let bestScore = 0;
-      let bestDescriptor = null;
-      for (const face of faces) {
-        if (face.embedding) {
-          const score = (await matchEmbedding(face.embedding, storedDescs)) ?? 0;
-          if (score > bestScore) { bestScore = score; bestDescriptor = face.embedding; }
-        }
-      }
-
-      if (bestScore >= autoThreshold) {
-        // High confidence — auto-confirm, teach the model
-        if (bestDescriptor) {
-          await appendDescriptor(childId, childName, Array.from(bestDescriptor), year);
-        }
-        autoApproved++;
-      } else if (bestScore >= minThreshold) {
-        // Medium confidence — send to Review tab for human decision
-        const thumbnail = await _createSmallThumbnail(dataUrl);
-        await addToReviewQueue({
-          childId, childName,
-          storyData: { storyId: `offline:${filePath}`, createdAt: null, originalUrl: null },
-          savePath:  filePath,
-          description: `📁 Offline: ${filePath.split("/").pop()}`,
-          croppedFaceDataUrl: thumbnail,
-          fullPhotoDataUrl: null, // Too large to store — thumbnail is enough
-          descriptor: bestDescriptor ? Array.from(bestDescriptor) : null,
-          matchPct: Math.round(bestScore),
-          noFace: false,
-          isOfflineFile: true,  // Signals background.js to skip download step on approval
-          filePath,
-        });
-        queued++;
-      } else {
-        // Low confidence — learn what NOT to match
-        if (bestDescriptor) {
-          await appendNegativeDescriptor(childId, Array.from(bestDescriptor));
-        }
-        rejected++;
-      }
-    } catch (e) {
-      errors++;
-      console.warn("[offline-scan] Error processing:", filePath, e.message);
-    }
-  }
-
-  // Notify background to refresh profiles with newly learned descriptors
-  if (autoApproved > 0 || rejected > 0) {
-    chrome.runtime.sendMessage({ type: "REFRESH_PROFILES" }).catch(() => {});
-  }
-
-  // Notify Review tab if new items were queued
-  if (queued > 0) {
-    chrome.runtime.sendMessage({ type: "REVIEW_QUEUE_UPDATED" }).catch(() => {});
-  }
-
-  // Try to advance phase
-  send({ type: "ADVANCE_PHASE", childId }).catch(() => {});
-
-  hideOperationProgress($cleanupProgress);
-  $cleanupReport.style.display    = "block";
-  $cleanupReport.innerHTML = [
-    `<strong>📊 Offline Smart Scan Complete</strong>`,
-    `✅ <strong>${autoApproved}</strong> photos auto-confirmed (≥ ${autoThreshold}% — AI learned!)`,
-    `👀 <strong>${queued}</strong> uncertain matches sent to Review tab (${minThreshold}–${autoThreshold}%)`,
-    `❌ <strong>${rejected}</strong> non-matches learned as negative examples`,
-    noFace > 0 ? `📷 ${noFace} photos had no face detected (skipped)` : "",
-    errors > 0 ? `⚠ ${errors} files could not be read` : "",
-    queued > 0 ? `💡 Go to the 👀 Review tab — ${queued} photos need your decision.` : "",
-  ].filter(Boolean).join("<br>");
-
-  setOperationRunning($btnOfflineScan, false, "🔍 Offline Smart Scan");
-  toast(`✅ Offline scan done — ${autoApproved} confirmed, ${queued} to review`, "success", 5000);
-}
 
 /* ================================================================== */
 /*  Re-evaluate All Photos                                             */
@@ -4570,6 +4651,7 @@ if ($btnShowGuide) {
 /*  Init                                                               */
 /* ================================================================== */
 
+initGlobalChildSelector();
 loadChildren();
 refreshReviewQueue();
 loadActivityLog();
@@ -4703,3 +4785,218 @@ send({ type: "GET_SCAN_STATUS" }).then(res => {
     }
   }
 });
+
+/* ================================================================== */
+/*  Activity Log — Delete log file + Export for AI                     */
+/* ================================================================== */
+
+// Delete log file button — removes Database/activity_log.jsonl from linked folder
+document.getElementById("btnDeleteLogFile")?.addEventListener("click", async () => {
+  const handle = await getLinkedFolder();
+  if (!handle) {
+    toast("⚠ Link a folder first (Tools & Maintenance → Link Download Folder)", "error", 4000);
+    return;
+  }
+  if (!confirm("Delete the activity log file (Database/activity_log.jsonl) from your linked folder?\n\nThis also clears the in-app log. Cannot be undone.")) return;
+  try {
+    await deleteActivityLogFromDisk(handle);
+    // Also clear the in-app display
+    const $logBox = document.getElementById("activityLogBox");
+    if ($logBox) { $logBox.innerHTML = '<p class="level-INFO">Log file deleted.</p>'; }
+    toast("✅ Activity log file deleted", "success", 3000);
+  } catch (err) {
+    toast(`❌ Failed: ${err.message}`, "error");
+  }
+});
+
+// Export log for AI analysis — downloads current log as JSON
+document.getElementById("btnExportLog")?.addEventListener("click", async () => {
+  try {
+    // Flush current log to disk first if folder is linked
+    const handle = await getLinkedFolder().catch(() => null);
+    if (handle) await flushActivityLogToDisk(handle).catch(() => {});
+
+    const { activityLog = [] } = await chrome.storage.local.get("activityLog");
+    if (activityLog.length === 0) {
+      toast("No log entries to export", "error", 3000);
+      return;
+    }
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      extensionVersion: chrome.runtime.getManifest().version,
+      totalEntries: activityLog.length,
+      entries: activityLog,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sss_activity_log_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`✅ Exported ${activityLog.length} log entries`, "success", 3000);
+  } catch (err) {
+    toast(`❌ Export failed: ${err.message}`, "error");
+  }
+});
+
+/* ================================================================== */
+/*  Fix Story Metadata — correct centre/room for multi-daycare children */
+/* ================================================================== */
+
+// Populate the Fix Metadata child selector when the tools tab is opened
+function _populateFixMetaChildSelect() {
+  const $sel = document.getElementById("fixMetaChildSelect");
+  if (!$sel) return;
+  chrome.storage.local.get("children", ({ children = [] }) => {
+    $sel.innerHTML = '<option value="">— select a child —</option>';
+    for (const c of children) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      $sel.appendChild(o);
+    }
+  });
+}
+
+// Wire up Fix Metadata button
+document.getElementById("btnFixMetadata")?.addEventListener("click", async () => {
+  const $btn   = document.getElementById("btnFixMetadata");
+  const $status = document.getElementById("fixMetadataStatus");
+  const childId   = document.getElementById("fixMetaChildSelect")?.value;
+  const centreName = (document.getElementById("fixMetaCentreName")?.value || "").trim();
+  const roomInput  = (document.getElementById("fixMetaRoomName")?.value || "").trim();
+  const dateFrom   = document.getElementById("fixMetaFromDate")?.value || null;
+  const dateTo     = document.getElementById("fixMetaToDate")?.value || null;
+  const regenerate = document.getElementById("chkFixMetaRegenerate")?.checked !== false;
+
+  if (!childId) { toast("Select a child first", "error"); return; }
+  if (!centreName && !roomInput) { toast("Enter a new centre name and/or room name", "error"); return; }
+
+  // Handle "-" to clear room name
+  const newRoom = roomInput === "-" ? "" : (roomInput || null);
+  const newCentre = centreName || null;
+
+  if ($btn) { $btn.disabled = true; $btn.textContent = "⏳ Applying…"; }
+  if ($status) $status.textContent = "Updating stories…";
+
+  try {
+    const childName = document.getElementById("fixMetaChildSelect")?.options[
+      document.getElementById("fixMetaChildSelect")?.selectedIndex
+    ]?.text || "";
+
+    const res = await send({
+      type: "FIX_STORY_METADATA",
+      childId, childName,
+      centreName: newCentre,
+      roomName: newRoom,
+      dateFrom, dateTo,
+      regenerateHtml: regenerate,
+    });
+
+    if (res?.ok) {
+      const msg = `✅ Updated ${res.updated} stories${res.regenerated > 0 ? ` · ${res.regenerated} pages regenerated` : ""}`;
+      if ($status) $status.textContent = msg;
+      toast(msg, "success", 5000);
+    } else {
+      if ($status) $status.textContent = "❌ " + (res?.error || "Unknown error");
+      toast("❌ Failed: " + (res?.error || "Unknown"), "error");
+    }
+  } catch (err) {
+    if ($status) $status.textContent = "❌ " + err.message;
+    toast("❌ " + err.message, "error");
+  } finally {
+    if ($btn) { $btn.disabled = false; $btn.textContent = "✏️ Apply Metadata Fix"; }
+  }
+});
+
+/* ================================================================== */
+/*  Story Numbers — assign oldest=1 numbering                          */
+/* ================================================================== */
+
+document.getElementById("btnAssignStoryNumbers")?.addEventListener("click", async () => {
+  const $btn    = document.getElementById("btnAssignStoryNumbers");
+  const $status = document.getElementById("storyNumbersStatus");
+  const childId = $childSelect?.value || null;
+  const childName = $childSelect?.options[$childSelect?.selectedIndex]?.text || "";
+
+  if ($btn) { $btn.disabled = true; $btn.textContent = "⏳ Numbering…"; }
+  if ($status) $status.textContent = "Assigning story numbers…";
+
+  try {
+    const res = await send({
+      type: "ASSIGN_STORY_NUMBERS",
+      childId: (childId && childId !== "__ALL__") ? childId : null,
+    });
+    if (res?.ok) {
+      const msg = `✅ Numbered ${res.numbered} stories (oldest=1)`;
+      if ($status) $status.textContent = msg;
+      toast(msg, "success", 4000);
+    } else {
+      if ($status) $status.textContent = "❌ " + (res?.error || "Unknown");
+      toast("❌ " + (res?.error || "Unknown"), "error");
+    }
+  } catch (err) {
+    if ($status) $status.textContent = "❌ " + err.message;
+    toast("❌ " + err.message, "error");
+  } finally {
+    if ($btn) { $btn.disabled = false; $btn.textContent = "🔢 Number Stories (Oldest=1)"; }
+  }
+});
+
+// Populate fix meta child selector when tools tab opens
+const _origSwitchTab = switchTab;
+// Hook into tab switching to populate dropdowns in the Tools tab
+document.querySelectorAll(".nav-btn").forEach(btn => {
+  if (btn.dataset.tab === "tools") {
+    btn.addEventListener("click", () => {
+      _populateFixMetaChildSelect();
+      _populateRenamerChildSelect();
+    }, { capture: true });
+  }
+});
+
+/* ================================================================== */
+/*  Custom Filename & Mass Renamer                                     */
+/* ================================================================== */
+
+/**
+ * Populate the renamer child selector from stored children list.
+ */
+function _populateRenamerChildSelect() {
+  const $sel = document.getElementById("renamerChildSelect");
+  if (!$sel) return;
+  chrome.storage.local.get("children", ({ children = [] }) => {
+    $sel.innerHTML = '<option value="">— select a child —</option>';
+    for (const c of children) {
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      $sel.appendChild(o);
+    }
+    // Re-trigger preview if a child was already selected
+    if ($sel.value) $sel.dispatchEvent(new Event("change"));
+  });
+}
+
+/**
+ * Navigate a root FSA directory handle to the parent directory of a file.
+ * Returns [parentDirHandle, filename].
+ *
+ * @param {FileSystemDirectoryHandle} rootHandle
+ * @param {string}                   relativePath  e.g. "Hugo Hill/Stories/2024-01-15 - Story/photo.jpg"
+ * @returns {Promise<[FileSystemDirectoryHandle, string]>}
+ */
+async function _renamerNavigateToParent(rootHandle, relativePath) {
+  const parts = relativePath.split("/").filter(Boolean);
+  if (parts.length === 0) throw new Error("Empty path");
+  let current = rootHandle;
+  for (let i = 0; i < parts.length - 1; i++) {
+    current = await current.getDirectoryHandle(parts[i]);
+  }
+  return [current, parts[parts.length - 1]];
+}
+
+// initRenamer IIFE removed — renamer is implemented inside wireSettingsEvents()
+// (the _runRenamer, _applyRenameTemplate, _updateRenamePreview functions above).
+// _populateRenamerChildSelect and _renamerNavigateToParent helpers remain available.

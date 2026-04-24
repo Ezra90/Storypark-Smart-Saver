@@ -83,7 +83,7 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
     ? `
   <div class="routine-block">
     <div class="divider-line"></div>
-    <div class="routine-label">${childFirst ? escHtml(childFirst) + "'s" : "Daily"} Routine</div>
+    <div class="routine-label">📋 ${childFirst ? escHtml(childFirst) + "'s" : "Daily"} Routine</div>
     <div class="routine-text">${escHtml(routineText)}</div>
     <div class="divider-line"></div>
     <div class="attribution">${attributionHtml}</div>
