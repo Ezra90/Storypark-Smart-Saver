@@ -125,6 +125,7 @@ dashboard.js (Extension Page)
 | `REWRITE_EXIF_ONLY` | `imageDataUrl, date, description, ...` | `{ ok, dataUrl, readBack? }` |
 | `RECYCLE_OFFSCREEN` | — | `{ ok }` |
 | `REGENERATE_FROM_DISK` | `filesByFolder, childId?` | `{ ok, rebuilt, updated, errors }` |
+| `REBUILD_DATABASE_FROM_DISK` | `childId, childName, diskFolders: [{folderName, files[]}]` | `{ ok, matched, recovered, errors, totalFolders }` |
 | `ACTIVE_DATABASE_INFO` | — | `{ ok, info }` |
 | `AUDIT_STORIES` | `childId?, onDiskPaths, rejectedFilesByChild?` | `{ ok, summary, stories }` |
 | `REPAIR_STORY` | `childId, storyId, onlyFilenames?, options?` | `{ ok, downloaded, failed, skipped }` |
@@ -338,6 +339,7 @@ Storypark-Smart-Saver/
         ├── html-builders.js ← Story HTML + index HTML generators
         ├── human.js         ← Human AI model loader
         ├── matching.js      ← Pure-math face matching (SW-safe)
+        ├── handlers-rebuild.js ← REBUILD_DATABASE_FROM_DISK handler (cold-start DB repair via API)
         ├── metadata-helpers.js ← Pure string/date/EXIF helpers
         └── scan-engine.js   ← Main scan pipeline (runExtraction)
 ```

@@ -1056,6 +1056,10 @@
             title="After a backup restore, scan your disk to recover what's already downloaded and update your tracking database. Select a child first using the dropdown in the Clean Up Folder section below.">
             🔧 Repair Database from Disk
           </button>
+          <button class="btn-secondary" id="btnRebuildDatabase" style="display:none;background:rgba(99,102,241,0.12);color:var(--accent);border-color:rgba(99,102,241,0.3);"
+            title="Missing or old Database/ files? This fetches your story list from Storypark and matches on-disk story folders to real story IDs — so the next scan skips all already-downloaded stories. Use this if you downloaded everything on an older version of the extension.">
+            🔄 Rebuild Database from Disk (API)
+          </button>
           <button class="btn-secondary" id="btnRewriteMetadata" style="display:none;background:rgba(74,155,143,0.1);color:#4A9B8F;border-color:rgba(74,155,143,0.3);"
             title="Re-stamp EXIF Artist, GPS, date and IPTC keywords on all downloaded photos using your saved story data. Useful after enabling metadata for the first time.">
             🏷️ Fix Photo Metadata

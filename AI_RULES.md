@@ -283,6 +283,14 @@ Both must be kept in sync. Do NOT change this to single-write without updating a
 **Owns:** All IndexedDB read/write operations
 - All functions are pure IDB wrappers with no business logic
 
+### lib/handlers-rebuild.js (~280 lines)
+**Owns:** Cold-start database rebuild from on-disk story folders + Storypark API
+- Exports: `handleRebuildDatabaseFromDisk(msg, ctx)`
+- Algorithm: fetch full story feed → match disk folder names to story IDs by date+title → create manifests + mark processed
+- Anti-abuse: uses `smartDelay("FEED_SCROLL")` before every feed page API call
+- Respects `ctx.getCancelRequested()` and sends PROGRESS messages with ETA
+- WHY SEPARATE FILE: `handlers-audit.js` is at its 600-line limit; rebuild is a different domain (cold-start DB repair vs ongoing audit of a populated DB)
+
 ### lib/disk-sync.js (existing — do NOT restructure)
 **Owns:** File System Access API operations
 - `linkFolder`, `getLinkedFolder`, `clearLinkedFolder`
@@ -314,6 +322,17 @@ All messages from dashboard.js → background.js use `send({ type: "...", ...pay
 | `REVIEW_REJECT` | dashboard | `{ id }` | `{ ok }` |
 | `REVIEW_TRAIN_ONLY` | dashboard | `{ id, selectedFaceIndex }` | `{ ok }` |
 | `UNDO_LAST_REVIEW` | dashboard | — | `{ ok }` |
+
+### Database Repair Messages
+| Type | Sender | Payload | Response |
+|------|--------|---------|----------|
+| `REBUILD_DATABASE_FROM_DISK` | dashboard | `{ childId, childName, diskFolders: [{folderName, files[]}] }` | `{ ok, matched, recovered, errors, totalFolders }` |
+
+- **matched**: folders matched to real Storypark story IDs via API + date/title comparison
+- **recovered**: folders that couldn't be matched → `recovered_` manifest entries created
+- Sets `isScanning=true`, sends PROGRESS messages, broadcasts SCAN_COMPLETE on finish
+- Anti-abuse: `smartDelay("FEED_SCROLL")` before every feed page call
+- Use-case: Database/ files missing or from an old version; all stories already downloaded
 
 ### Background → Dashboard (broadcast)
 | Type | When | Payload |
@@ -374,6 +393,27 @@ After a large backup import or manifest repair, IDB hot caches may be stale. Alw
 
 ### _pendingDownloadIds Race Condition
 Do NOT delete entries from `_pendingDownloadIds` inside `downloadBlob()` or `downloadDataUrl()`. Only `handleDownloadChanged()` should remove them. If you add cleanup in the download functions, you'll get double-releases of the semaphore.
+
+### isScanning Stale State After SW Crash
+MV3 service workers cannot resume a scan loop after a restart (OOM crash, Coffee Break
+suspension, or browser restart). `chrome.storage.session` persists `isScanning=true` across
+SW micro-suspensions — so an OOM crash mid-scan leaves `isScanning=true` in session forever,
+locking the dashboard in "Scan in progress" permanently.
+
+**Fix (background.js):** Never restore `isScanning` from session storage. The module-load
+restore block explicitly sets `isScanning = false` unconditionally. The IDB `scanCheckpoints`
+store (saved every 5 stories) lets the user click Resume to restart the scan.
+
+```javascript
+// CORRECT — never restore isScanning:
+chrome.storage.session.get(["_requestCount", "_coffeeBreakAt", "lastReviewAction"]).then(data => {
+    isScanning = false;          // always false on SW activation
+    cancelRequested = false;     // always false on SW activation
+    _requestCount = data._requestCount ?? 0;
+    ...
+});
+chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
+```
 
 ### cancelRequested After Finally Block
 Inside `runExtraction`, the `finally` block resets `cancelRequested = false`. Code in the EXTRACT_ALL_LATEST handler that reads `cancelRequested` after `runExtraction` returns will always see `false`. The fix: use `stats.cancelled` returned by `runExtraction`, not `cancelRequested`.

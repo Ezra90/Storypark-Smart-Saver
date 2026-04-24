@@ -156,6 +156,7 @@ import {
   handleGetActivityLog, handleClearActivityLog, handleLogToActivity,
   handleRewriteExifOnly, handleGenerateStoryCard,
 } from "./lib/handlers-misc.js";
+import { handleRebuildDatabaseFromDisk } from "./lib/handlers-rebuild.js";
 
 // ── Small helpers needed by message handlers (not worth a full module) ──
 const _extractFilenameFromUrl = (url) => (url.split("/").pop() || "").split("?")[0];
@@ -193,13 +194,24 @@ let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
 // Restore volatile scan state from session storage in case the service worker
 // was suspended and re-activated (e.g. during a Coffee Break idle period).
 // This must run after all variable declarations above to avoid TDZ errors.
+//
+// IMPORTANT: isScanning and cancelRequested are intentionally NOT restored here.
+// MV3 service workers cannot resume a scan loop after a restart (OOM crash, normal
+// suspension, or browser restart).  Restoring isScanning=true from a previous
+// session would leave the dashboard permanently stuck in "Scan in progress" state
+// with no way to recover.  The IDB scanCheckpoints store (saved every 5 stories)
+// allows the user to click Resume and continue from where they left off.
+//
+// See AI_RULES.md §8 "isScanning Stale State After SW Crash" for full details.
 chrome.storage.session
-  .get(["isScanning", "cancelRequested", "_requestCount", "_coffeeBreakAt", "lastReviewAction"])
+  .get(["_requestCount", "_coffeeBreakAt", "lastReviewAction"])
   .then((data) => {
-    isScanning        = data.isScanning      ?? false;
-    cancelRequested   = data.cancelRequested ?? false;
-    _requestCount     = data._requestCount   ?? 0;
-    lastReviewAction  = data.lastReviewAction ?? null;
+    // isScanning and cancelRequested always start as false — never restored.
+    isScanning      = false;
+    cancelRequested = false;
+
+    _requestCount    = data._requestCount   ?? 0;
+    lastReviewAction = data.lastReviewAction ?? null;
 
     // Safety check: if the restored _coffeeBreakAt is stale (already exceeded
     // by the restored counter, or not set), reset it to a fresh random value
@@ -212,6 +224,11 @@ chrome.storage.session
     }
   })
   .catch(() => {});
+
+// Explicitly clear any stale isScanning flag that may have survived a SW OOM crash.
+// chrome.storage.session persists across SW micro-suspensions but not browser restarts.
+// Without this, an OOM crash mid-scan would leave isScanning=true in session indefinitely.
+chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
 
 /* ================================================================== */
 /*  Diagnostic API Log                                                 */
@@ -5875,6 +5892,52 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true, generated, skipped, errors });
         } catch (err) {
           sendResponse({ ok: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
+    /* ── Rebuild database from disk + API (cold-start repair for missing manifests.json) ── */
+    case "REBUILD_DATABASE_FROM_DISK": {
+      // Repair missing/empty manifests.json by walking on-disk story folders
+      // and matching them to real story IDs via the Storypark feed API.
+      //
+      // msg: {
+      //   childId: string,
+      //   childName: string,
+      //   diskFolders: [{ folderName: string, files: string[] }]
+      // }
+      // Returns: { ok, matched, recovered, errors, totalFolders }
+      // Progress: PROGRESS messages with ETA
+      // Side-effects: isScanning=true during run, SCAN_COMPLETE at end
+      if (isScanning) {
+        sendResponse({ ok: false, error: "A scan or repair is already in progress." });
+        return false;
+      }
+      if (!msg.childId || !msg.childName) {
+        sendResponse({ ok: false, error: "Missing childId or childName." });
+        return false;
+      }
+      isScanning      = true;
+      cancelRequested = false;
+      chrome.storage.session.set({ isScanning: true, cancelRequested: false, _requestCount: 0 }).catch(() => {});
+
+      (async () => {
+        try {
+          const ctx = {
+            logger,
+            getCancelRequested: () => cancelRequested,
+            sendToOffscreen,
+          };
+          const result = await handleRebuildDatabaseFromDisk(msg, ctx);
+          sendResponse(result);
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        } finally {
+          isScanning      = false;
+          cancelRequested = false;
+          chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
+          chrome.runtime.sendMessage({ type: "SCAN_COMPLETE" }).catch(() => {});
         }
       })();
       return true;

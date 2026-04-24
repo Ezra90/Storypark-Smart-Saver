@@ -2791,8 +2791,9 @@ function wireSettingsEvents() {
   const $linkedFolderInfo   = document.getElementById("linkedFolderInfo");
   const $linkedFolderStatus = document.getElementById("linkedFolderStatus");
 
-  const $btnRepairManifestUI = document.getElementById("btnRepairManifest");
-  const $btnRewriteMetadata  = document.getElementById("btnRewriteMetadata");
+  const $btnRepairManifestUI  = document.getElementById("btnRepairManifest");
+  const $btnRebuildDatabaseUI = document.getElementById("btnRebuildDatabase");
+  const $btnRewriteMetadata   = document.getElementById("btnRewriteMetadata");
 
   /** Update the folder card UI based on whether a folder is currently linked. */
   async function refreshLinkedFolderUI() {
@@ -2802,8 +2803,9 @@ function wireSettingsEvents() {
         $btnLinkFolder.textContent = "📁 Change Folder";
         $btnUnlinkFolder.style.display = "";
         $btnReconcileFolder.style.display = "";
-        if ($btnRepairManifestUI) $btnRepairManifestUI.style.display = "";
-        if ($btnRewriteMetadata) $btnRewriteMetadata.style.display = "";
+        if ($btnRepairManifestUI)  $btnRepairManifestUI.style.display = "";
+        if ($btnRebuildDatabaseUI) $btnRebuildDatabaseUI.style.display = "";
+        if ($btnRewriteMetadata)   $btnRewriteMetadata.style.display = "";
         const $repairRow = document.getElementById("repairChildRow");
         if ($repairRow) $repairRow.style.display = "flex";
         const $rwCfg = document.getElementById("rewriteMetadataConfig");
@@ -2815,8 +2817,9 @@ function wireSettingsEvents() {
         $btnLinkFolder.textContent = "📁 Link Folder";
         $btnUnlinkFolder.style.display = "none";
         $btnReconcileFolder.style.display = "none";
-        if ($btnRepairManifestUI) $btnRepairManifestUI.style.display = "none";
-        if ($btnRewriteMetadata) $btnRewriteMetadata.style.display = "none";
+        if ($btnRepairManifestUI)  $btnRepairManifestUI.style.display = "none";
+        if ($btnRebuildDatabaseUI) $btnRebuildDatabaseUI.style.display = "none";
+        if ($btnRewriteMetadata)   $btnRewriteMetadata.style.display = "none";
         const $repairRowH = document.getElementById("repairChildRow");
         if ($repairRowH) $repairRowH.style.display = "none";
         const $rwCfgH = document.getElementById("rewriteMetadataConfig");
@@ -3082,6 +3085,144 @@ function wireSettingsEvents() {
       } finally {
         $btnRepairManifest.disabled = false;
         $btnRepairManifest.textContent = "🔧 Repair Database from Disk";
+      }
+    });
+  }
+
+  /* ── Rebuild Database from Disk (API) — matches on-disk folders to real story IDs ── */
+  const $btnRebuildDatabase = document.getElementById("btnRebuildDatabase");
+  if ($btnRebuildDatabase) {
+    $btnRebuildDatabase.addEventListener("click", async () => {
+      const handle = await getLinkedFolder();
+      if (!handle) { toast("No folder linked", "error"); return; }
+      if (isRunning) { toast("A scan is already running", "error"); return; }
+
+      const $repairChildSel = document.getElementById("repairChildSelect");
+      const selectedVal = $repairChildSel?.value || "__ALL__";
+      const isAll = selectedVal === "__ALL__";
+
+      const childrenRes = await send({ type: "GET_CHILDREN" });
+      const childrenAll = childrenRes?.children || [];
+      if (childrenAll.length === 0) { toast("No children found — refresh profile first", "error"); return; }
+
+      const childrenToRebuild = isAll
+        ? childrenAll
+        : [childrenAll.find(c => String(c.id) === String(selectedVal)) || {
+            id: selectedVal,
+            name: $repairChildSel?.options[$repairChildSel.selectedIndex]?.textContent || "Unknown",
+          }];
+
+      const totalFolders = childrenToRebuild.length;
+      if (!confirm(
+        `Rebuild database for ${isAll ? "all children" : childrenToRebuild[0].name} from disk + Storypark API?\n\n` +
+        `This will:\n` +
+        `• Walk your ${handle.name} folder to find all story folders (~5 sec)\n` +
+        `• Fetch your story list from Storypark API (~30 sec for 500 stories)\n` +
+        `• Match on-disk folders to real story IDs by date + title\n` +
+        `• Mark all matched stories as processed → next scan skips them\n\n` +
+        `Requires you to be logged into Storypark. Continue?`
+      )) return;
+
+      setRunning(true);
+      $btnRebuildDatabase.disabled = true;
+      $btnRebuildDatabase.textContent = "⏳ Walking folder…";
+      $linkedFolderStatus.style.display = "none";
+
+      try {
+        // Walk the linked folder once for all children
+        const allFiles = await walkFolder(handle, "");
+        const isSSSRoot = handle.name === "Storypark Smart Saver";
+        const pathPrefix = isSSSRoot ? "" : "Storypark Smart Saver/";
+        const MEDIA_EXT = /\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+        const INVALID_CHARS = /[/\\:*?"<>|]/g;
+
+        let totalMatched = 0, totalRecovered = 0, totalErrors = 0;
+        const summaryLines = [];
+
+        for (const child of childrenToRebuild) {
+          $btnRebuildDatabase.textContent = `⏳ Rebuilding ${child.name}…`;
+          const childSafe = (child.name || "Unknown").replace(INVALID_CHARS, "_").trim();
+          const childStoriesPrefix = `${pathPrefix}${childSafe}/Stories/`;
+
+          // Build diskFolders: extract story folders from walked file list for this child
+          const folderFiles = new Map(); // folderName → [filenames]
+          for (const filePath of allFiles) {
+            if (!filePath.startsWith(childStoriesPrefix)) continue;
+            const rest = filePath.slice(childStoriesPrefix.length);
+            const slashIdx = rest.indexOf("/");
+            if (slashIdx <= 0) continue; // skip files directly under Stories/
+            const folderName = rest.slice(0, slashIdx);
+            const fileName   = rest.slice(slashIdx + 1);
+            if (folderName.endsWith(" Rejected Matches")) continue; // skip rejected
+            if (!folderFiles.has(folderName)) folderFiles.set(folderName, []);
+            folderFiles.get(folderName).push(fileName);
+          }
+
+          const diskFolders = [...folderFiles.entries()].map(([folderName, files]) => ({
+            folderName,
+            files: files.filter(f => MEDIA_EXT.test(f)),
+          })).filter(d => d.files.length > 0 || true); // include even empty (for date matching)
+
+          if (diskFolders.length === 0) {
+            summaryLines.push(`👶 <strong>${child.name}</strong>: No story folders found`);
+            continue;
+          }
+
+          // Send to background for API matching + manifest rebuild
+          const res = await send({
+            type: "REBUILD_DATABASE_FROM_DISK",
+            childId: child.id,
+            childName: child.name,
+            diskFolders,
+          });
+
+          if (res?.ok) {
+            totalMatched   += res.matched   || 0;
+            totalRecovered += res.recovered || 0;
+            totalErrors    += res.errors    || 0;
+            summaryLines.push(
+              `👶 <strong>${child.name}</strong>: ` +
+              `${res.matched} matched to API, ${res.recovered} recovered from disk` +
+              (res.errors > 0 ? `, ⚠ ${res.errors} errors` : "")
+            );
+            send({ type: "LOG_TO_ACTIVITY", level: "SUCCESS",
+              message: `🔄 Rebuilt database for ${child.name}: ${res.matched} matched, ${res.recovered} recovered`,
+              meta: { childName: child.name },
+            }).catch(() => {});
+          } else {
+            summaryLines.push(`👶 <strong>${child.name}</strong>: ❌ ${res?.error || "Unknown error"}`);
+            send({ type: "LOG_TO_ACTIVITY", level: "ERROR",
+              message: `❌ Rebuild failed for ${child.name}: ${res?.error || "Unknown"}`,
+              meta: { childName: child.name },
+            }).catch(() => {});
+          }
+        }
+
+        $linkedFolderStatus.style.display = "block";
+        $linkedFolderStatus.innerHTML = [
+          `<strong>🔄 Rebuild Complete</strong>`,
+          ...summaryLines,
+          childrenToRebuild.length > 1
+            ? `<br>✅ Total: <strong>${totalMatched}</strong> matched to API · 📁 <strong>${totalRecovered}</strong> recovered from disk` +
+              (totalErrors > 0 ? ` · ⚠ <strong>${totalErrors}</strong> errors` : "")
+            : "",
+          `💡 Run <strong>Scan Latest</strong> — it will skip all already-downloaded stories.`,
+          totalRecovered > 0
+            ? `🔍 ${totalRecovered} folders couldn't be matched to Storypark — run a <strong>Deep Rescan</strong> to enrich them with story text, educator, and centre data.`
+            : "",
+        ].filter(Boolean).join("<br>");
+
+        if (totalMatched > 0) {
+          toast(`✅ Database rebuilt — ${totalMatched} stories matched, ${totalRecovered} recovered. Run Scan Latest!`, "success", 6000);
+        } else {
+          toast(`✓ Rebuild done — ${totalRecovered} stories recovered from disk`, "success", 5000);
+        }
+      } catch (err) {
+        toast(`❌ Rebuild failed: ${err.message}`, "error");
+      } finally {
+        // SCAN_COMPLETE from background will call setRunning(false)
+        $btnRebuildDatabase.disabled = false;
+        $btnRebuildDatabase.textContent = "🔄 Rebuild Database from Disk (API)";
       }
     });
   }
