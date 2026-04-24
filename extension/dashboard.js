@@ -785,6 +785,8 @@ async function triggerOfflineScan() {
       updateProgressBar($progressBar, $progressText, i + 1, imageFiles.length, _childLoopStart,
         `${cName}: ${i + 1}/${imageFiles.length} — ${filePath.split("/").pop()}`);
 
+      await yieldForGC(i + 1, imageFiles.length, $progressText);
+
       try {
         const dataUrl = await readFileAsDataUrl(handle, filePath);
         const img = new Image();
@@ -821,9 +823,12 @@ async function triggerOfflineScan() {
         }
 
         // Parse file path to find manifest (for fingerprint cache + review card info)
-        // Structure: ROOT/childName/Stories/folderName/filename (or Rejected Matches variant)
+        // Structure depends on which folder was linked:
+        //   SSS linked    → childName/Stories/folderName/filename        (folderIdx=2)
+        //   Parent linked → Storypark Smart Saver/childName/Stories/folderName/filename (folderIdx=3)
         const pathParts       = filePath.split("/");
-        const folderName      = pathParts.length >= 5 ? pathParts[3] : null;
+        const folderIdx       = _sssLinked ? 2 : 3;
+        const folderName      = pathParts.length >= (folderIdx + 2) ? pathParts[folderIdx] : null;
         const filenameInPath  = pathParts[pathParts.length - 1];
         const manifest        = folderName ? manifestByFolder.get(folderName) : null;
         const isFromRejected  = filePath.includes(" Rejected Matches/");
@@ -1010,6 +1015,7 @@ const $reviewStatus = document.getElementById("reviewStatusBar");
 const $reviewStatusText = document.getElementById("reviewStatusText");
 
 /** Cache for full-resolution images loaded from Storypark (blob URLs). */
+const MAX_LIGHTBOX_CACHE = 15;
 const _fullImageCache = new Map();
 
 /**
@@ -1038,6 +1044,13 @@ function openLightbox(thumbnailSrc, originalUrl) {
       })
       .then(blob => {
         const blobUrl = URL.createObjectURL(blob);
+
+        if (_fullImageCache.size >= MAX_LIGHTBOX_CACHE) {
+          const oldestKey = _fullImageCache.keys().next().value;
+          URL.revokeObjectURL(_fullImageCache.get(oldestKey));
+          _fullImageCache.delete(oldestKey);
+        }
+
         _fullImageCache.set(originalUrl, blobUrl);
         // Only update if lightbox is still open showing this image
         if ($lightbox.classList.contains("open")) {

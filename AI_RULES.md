@@ -438,6 +438,35 @@ chrome.storage.session.get(["_requestCount", "_coffeeBreakAt", "lastReviewAction
 chrome.storage.session.set({ isScanning: false, cancelRequested: false }).catch(() => {});
 ```
 
+### Missing yieldForGC() in triggerOfflineScan (OOM Risk)
+**Bug:** `triggerOfflineScan()` in `dashboard.js` iterated over `imageFiles` running face detection but never called `await yieldForGC()`. This violated the OOM rule and could crash the worker on large folders.
+
+**Fix:** Add `await yieldForGC(i + 1, imageFiles.length, $progressText)` immediately after `updateProgressBar()` in every face-detection loop, including `triggerOfflineScan`. The rule is: **every loop that calls `detectFaces()` must call `yieldForGC()` every iteration**.
+
+### Hardcoded Path Index Ignores _sssLinked State
+**Bug:** In `triggerOfflineScan()`, the folder name was extracted with a hardcoded index `pathParts[3]`. This is only correct when the parent folder is linked. When the `Storypark Smart Saver` folder itself is linked (`_sssLinked = true`), path depth is one level shorter, so `pathParts[3]` returns the filename instead of the folder name — causing manifest lookup to silently fail for every image.
+
+**Fix:** Compute the index dynamically:
+```javascript
+const folderIdx  = _sssLinked ? 2 : 3;
+const folderName = pathParts.length >= (folderIdx + 2) ? pathParts[folderIdx] : null;
+```
+The same pattern is already applied correctly in `runCleanup()` (`_sssLinked2`) — always use `_sssLinked ? 2 : 3` when parsing paths in offline scan loops.
+
+### Lightbox Blob URL Memory Leak (_fullImageCache Unbounded)
+**Bug:** `openLightbox()` in `dashboard.js` created a `URL.createObjectURL()` Blob URL for every unique photo opened and stored it in `_fullImageCache` with no size limit and no `revokeObjectURL()` calls. Reviewing many photos would silently consume the 512 MB heap until the page crashed.
+
+**Fix:** Add a `MAX_LIGHTBOX_CACHE = 15` cap. Before inserting a new entry, evict and revoke the oldest:
+```javascript
+if (_fullImageCache.size >= MAX_LIGHTBOX_CACHE) {
+  const oldestKey = _fullImageCache.keys().next().value;
+  URL.revokeObjectURL(_fullImageCache.get(oldestKey));
+  _fullImageCache.delete(oldestKey);
+}
+_fullImageCache.set(originalUrl, blobUrl);
+```
+Note: this eviction pattern (oldest-first via `Map.keys().next().value`) relies on Maps preserving insertion order, which is guaranteed in all modern JS engines.
+
 ### cancelRequested After Finally Block
 Inside `runExtraction`, the `finally` block resets `cancelRequested = false`. Code in the EXTRACT_ALL_LATEST handler that reads `cancelRequested` after `runExtraction` returns will always see `false`. The fix: use `stats.cancelled` returned by `runExtraction`, not `cancelRequested`.
 
