@@ -13,7 +13,9 @@ This project is designed for **fully AI-driven maintenance**. The human owner re
 - **New bug discovered and fixed** → add the bug + fix to §8 Common Pitfalls
 - **New OOM pattern** → add to §1 OOM Management
 - **New anti-abuse pattern** → add to §2 Anti-Abuse
-- **New file created** → add to §5 Module Responsibilities + §4 Architecture Map
+- **New file created** → add to §5 Module Responsibilities + §4 Architecture Map + Directory Structure in ARCHITECTURE.md
+- **Root-level file added or removed** → update the Directory Structure section in ARCHITECTURE.md to reflect the change (including annotations for what the file is for)
+- **Third-party library added or removed** → update the Third-Party Libraries & Credits table in ARCHITECTURE.md + package.json if applicable
 - **New message type added** → add to §6 Message Protocol
 - **New invariant established** → add to the relevant section
 - **File size limit breached** → update §FILE-SIZES table

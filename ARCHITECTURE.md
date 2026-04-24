@@ -287,15 +287,31 @@ Model confidence is computed by `computeModelConfidence(childId)` in `lib/db.js`
 
 ---
 
+## Third-Party Libraries & Credits
+
+| Library | Version | Used as | Purpose |
+|---------|---------|---------|---------|
+| **[Human.js](https://github.com/vladmandic/human)** by Vladimir Mandić | ^3.3.6 | `extension/lib/human.js` | Face detection, landmark extraction, and embedding generation. The core AI engine behind all face recognition in this extension. Installed via npm → copied into extension by `scripts/setup-libs.js`. |
+| **[piexifjs](https://github.com/hMatoba/piexifjs)** by Hiroyuki Matoba | vendored | `extension/lib/exif.js` | EXIF and IPTC metadata writer. Stamps GPS coordinates, date/time, captions, and copyright into downloaded JPEG images. Vendored directly (not in package.json). |
+| **[acorn](https://github.com/acornjs/acorn)** | ^8.16.0 | dev script only | JavaScript parser used by `scripts/verify-imports.js` to statically check that all `import` statements reference files that exist. Not shipped in the extension. |
+| **[puppeteer-core](https://github.com/puppeteer/puppeteer)** | ^23.11.1 | dev script only | Headless browser used by `scripts/capture-storypark-api.js` to capture live Storypark API responses into `STORYPARK_API_REF.md`. Not shipped in the extension. |
+
+---
+
 ## Directory Structure
 
 ```
 Storypark-Smart-Saver/
 ├── .clinerules              ← AI agent rules (Cline auto-injects)
+├── .github/                 ← GitHub Actions / workflows
+├── .gitignore               ← Git ignore rules
+├── .human-version           ← Tracks the bundled Human.js version (used by setup-libs.js)
 ├── AI_RULES.md              ← Full AI reference
 ├── ARCHITECTURE.md          ← This file
 ├── README.md
-├── package.json
+├── STORYPARK_API_REF.md     ← Captured Storypark API response reference (used by AI agents)
+├── package.json             ← npm dev-dependency manifest (Human.js, acorn, puppeteer-core)
+├── package-lock.json        ← npm lockfile — exact pinned versions of all dev deps (auto-generated, do not edit)
 ├── scripts/
 │   ├── verify-imports.js    ← Import checker (run: node scripts/verify-imports.js)
 │   ├── generate-icons.js

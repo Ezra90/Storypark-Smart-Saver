@@ -31,6 +31,8 @@ The full rules are in AI_RULES.md. This file is just a quick pointer.
 ## STEP 3: AFTER MAKING CHANGES
 1. Run `node scripts/verify-imports.js` → must be 0 errors
 2. Update AI_RULES.md if you discovered a new pattern, bug, or rule (see §AI-SELF-MAINTENANCE)
-3. `git add -A && git commit -m "..."` with descriptive message
+3. If you added or removed any root-level files, update the **Directory Structure** section in ARCHITECTURE.md (with inline annotations)
+4. If you added or removed a third-party library, update the **Third-Party Libraries & Credits** table in ARCHITECTURE.md
+5. `git add -A && git commit -m "..."` with descriptive message
 
 ## FULL RULES → AI_RULES.md
