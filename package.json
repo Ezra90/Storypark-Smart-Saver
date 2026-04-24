@@ -1,0 +1,14 @@
+{
+  "name": "storypark-smart-saver",
+  "version": "2.1.0",
+  "description": "A private, automated tool to save your child's photos and stories from Storypark.",
+  "scripts": {
+    "setup": "node scripts/setup-libs.js",
+    "capture": "node scripts/capture-storypark-api.js"
+  },
+  "devDependencies": {
+    "@vladmandic/human": "^3.3.6",
+    "acorn": "^8.16.0",
+    "puppeteer-core": "^23.11.1"
+  }
+}

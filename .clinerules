@@ -1,0 +1,36 @@
+# Storypark Smart Saver — Cline Quick Rules (v4.0)
+# Auto-injected before every task.
+# ⚠ READ AI_RULES.md FIRST — it is the single source of truth for all rules.
+
+## STEP 1: ALWAYS READ AI_RULES.md BEFORE TOUCHING ANY CODE
+The full rules are in AI_RULES.md. This file is just a quick pointer.
+
+## STEP 2: CRITICAL INVARIANTS (the ones that break everything if violated)
+
+### Database
+- Never bypass lib/db.js or lib/data-service.js for DB access
+- Dual-write stores: centreLocations (storage.local + IDB), children (data-service only)
+- JSON files in Database/ folder are canonical source of truth
+
+### OOM & Anti-Abuse (full rules in AI_RULES.md §OOM + §ANTI-ABUSE)
+- manageMemory() every 10 loop iterations — see AI_RULES.md for code pattern
+- smartDelay("READ_STORY"|"FEED_SCROLL"|"DOWNLOAD_MEDIA") before EVERY API/download call
+- NEVER Promise.all() for API calls or downloads — always await sequentially
+- Coffee Break is mandatory — never disable, bypass, or mock
+
+### File Sizes (full table in AI_RULES.md §FILE-SIZES)
+- background.js target: 40 KB — use handler files for switch cases
+- dashboard.js target: 35 KB — split into dashboard-*.js modules
+- lib/*.js handlers: max 25 KB each
+
+### Status Bar ETA (required in all progress loops — see AI_RULES.md §ETA)
+- EVERY loop that shows a progress bar MUST also calculate and broadcast ETA
+- ETA starts after 3+ iterations: `formatETA(avgMs * remaining)` / `_fmtEta(ms)`
+- BATCH_PROGRESS, PROGRESS, and all dashboard progress bars must include eta
+
+## STEP 3: AFTER MAKING CHANGES
+1. Run `node scripts/verify-imports.js` → must be 0 errors
+2. Update AI_RULES.md if you discovered a new pattern, bug, or rule (see §AI-SELF-MAINTENANCE)
+3. `git add -A && git commit -m "..."` with descriptive message
+
+## FULL RULES → AI_RULES.md

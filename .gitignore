@@ -1,0 +1,41 @@
+# Chrome Extension – never commit OAuth client secret
+extension/client_secret.json
+
+# Bundled dependencies (if using npm/webpack build)
+node_modules/
+dist/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+
+# Face recognition model weights (large binary files – downloaded via `npm run setup`)
+# The models/ folder structure is tracked via extension/models/.gitkeep
+extension/models/*.bin
+extension/models/*.json
+extension/lib/human.js
+
+# API capture output (contains session cookies + personal data – never commit)
+captures/
+*.har
+
+# Debug capture files (personal data — never commit)
+storypark_debug_capture_*.json
+
+# Development / analysis scripts (not part of the extension)
+analyze_apis_ollama.js
+extract_apis.js
+extracted_apis.txt
+api_analysis_report.md
+
+# Temp files
+New Text Document.txt

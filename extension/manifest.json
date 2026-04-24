@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Storypark Smart Saver",
+  "short_name": "Storypark Smart Saver",
+  "version": "3.0.0",
+  "description": "A private, automated tool to save your child's photos and stories from Storypark.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "offscreen",
+    "downloads",
+    "notifications"
+  ],
+  "host_permissions": [
+    "*://app.storypark.com/*",
+    "*://assets.storypark.com/*",
+    "*://media.storypark-cdn.com/*",
+    "*://nominatim.openstreetmap.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "dashboard.html#settings",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
