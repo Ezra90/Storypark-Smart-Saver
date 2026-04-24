@@ -3179,6 +3179,11 @@ function wireSettingsEvents() {
             continue;
           }
 
+          // Re-assert running state before each child — SCAN_COMPLETE from
+          // the previous child calls setRunning(false), which would hide the
+          // progress bar. setRunning(true) here keeps it visible.
+          setRunning(true);
+
           // Send to background for API matching + manifest rebuild
           const res = await send({
             type: "REBUILD_DATABASE_FROM_DISK",

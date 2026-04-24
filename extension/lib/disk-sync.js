@@ -381,7 +381,9 @@ export async function repairManifestFromDisk(dirHandle, existingManifests, child
       }
       if (filesInFolder.length === 0) continue;
 
-      const mediaFiles = filesInFolder.filter(f => !/\.html$/.test(f));
+      // Exclude Story Card JPEGs (generated assets, not downloaded media).
+      // Pattern: "{date} - Story Card.jpg" — these should never be in approvedFilenames.
+      const mediaFiles = filesInFolder.filter(f => !/\.html$/.test(f) && !/Story Card\.jpg$/i.test(f));
       const existing = manifestByFolder.get(folderName);
 
       if (existing) {

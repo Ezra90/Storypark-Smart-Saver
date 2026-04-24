@@ -1080,8 +1080,10 @@ function buildStoryHtml({ title, date, body, childName, childAge, roomName, cent
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const childFirst = (childName || "").split(/\s+/)[0];
 
-  // Media files live alongside story.html in the same folder
-  const mediaHtml = (mediaFilenames || []).map(f => {
+  // Media files live alongside story.html in the same folder.
+  // Exclude Story Card JPEGs — generated assets for Google Photos, not gallery images.
+  const _scRe = /Story Card\.jpg$/i;
+  const mediaHtml = (mediaFilenames || []).filter(f => !_scRe.test(f)).map(f => {
     const enc = encodeURIComponent(f);
     if (/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)) {
       return `<div class="photo"><video src="./${enc}" controls preload="metadata" style="width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);"></video></div>`;

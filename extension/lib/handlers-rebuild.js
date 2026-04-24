@@ -293,7 +293,11 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
           }
         }
 
-        const mediaFiles = files.filter(f => MEDIA_EXT.test(f));
+        // Exclude Story Card JPEGs — they are generated assets for Google Photos import,
+        // not downloaded media. Including them in approvedFilenames would make them appear
+        // as gallery images in story.html and as index thumbnails.
+        const STORY_CARD_RE = /Story Card\.jpg$/i;
+        const mediaFiles = files.filter(f => MEDIA_EXT.test(f) && !STORY_CARD_RE.test(f));
 
         if (bestId && bestScore >= 0.6) {
           const manifest = {
@@ -390,6 +394,12 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
             date: formatDateDMY(m.storyDate || ""),
             eta: _eEta, childIndex: 0, childCount: 1,
           }).catch(() => {});
+          // Per-story activity log line — shows current story in the log box
+          await ctx.logger("INFO",
+            `  📖 ${_eDone}/${toEnrich.length}: ${formatDateDMY(m.storyDate || "")} — ${(m.storyTitle || "Story").substring(0, 50)}` +
+            (_eEta ? ` (⏱ ${_eEta})` : ""),
+            m.storyDate || null
+          );
 
           try {
             // Try cache first

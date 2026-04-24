@@ -55,8 +55,11 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const childFirst = (childName || "").split(/\s+/)[0];
 
-  // Media files live alongside story.html in the same folder
-  const mediaHtml = (mediaFilenames || []).map(f => {
+  // Media files live alongside story.html in the same folder.
+  // Exclude Story Card JPEGs — they are generated assets for Google Photos
+  // import and should NOT appear as gallery images in the HTML page.
+  const STORY_CARD_RE = /Story Card\.jpg$/i;
+  const mediaHtml = (mediaFilenames || []).filter(f => !STORY_CARD_RE.test(f)).map(f => {
     const enc = encodeURIComponent(f);
     if (/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)) {
       return `<div class="photo"><video src="./${enc}" controls preload="metadata" style="width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);"></video></div>`;
@@ -235,16 +238,25 @@ export function buildChildStoriesIndex(childName, manifests) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const sorted = [...manifests].sort((a, b) => (b.storyDate || "").localeCompare(a.storyDate || ""));
 
+  // Story Card filter for index thumbnails and photo counts
+  const _scRe = /Story Card\.jpg$/i;
+
   const cards = sorted.map(m => {
-    const thumb = m.thumbnailFilename
-      ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(m.thumbnailFilename)}" alt="" loading="lazy">`
+    // Use thumbnailFilename only if it's a real photo (not a Story Card).
+    // Fall back to the first non-Story-Card approved filename.
+    const safeThumbnail = m.thumbnailFilename && !_scRe.test(m.thumbnailFilename)
+      ? m.thumbnailFilename
+      : (m.approvedFilenames || []).find(f => !_scRe.test(f)) || null;
+    const thumb = safeThumbnail
+      ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(safeThumbnail)}" alt="" loading="lazy">`
       : `<div class="no-thumb">📸</div>`;
     const date = formatDateDMY(m.storyDate) || m.storyDate || "";
     const meta = [
       m.educatorName ? `${escHtml(m.educatorName)}` : "",
       m.roomName     ? `${escHtml(m.roomName)}`     : "",
     ].filter(Boolean).join(" · ");
-    const photoCount = (m.approvedFilenames || []).length;
+    // Photo count excludes Story Cards (generated assets, not downloaded photos)
+    const photoCount = (m.approvedFilenames || []).filter(f => !_scRe.test(f)).length;
 
     return `<a href="./${encodeURIComponent(m.folderName)}/story.html" class="story-card">
       <div class="card-thumb">${thumb}</div>
