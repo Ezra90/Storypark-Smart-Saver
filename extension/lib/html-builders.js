@@ -1,65 +1,49 @@
 /**
- * html-builders.js — Story HTML + index page generators
- *
- * All exports are pure functions: they take data and return HTML strings.
- * No side effects, no Chrome API calls, no I/O.
- *
- * Exported functions:
- *   buildStoryPage           — Print-friendly story HTML page (one story)
- *   buildChildrenIndex       — Root children index (links to each child's stories)
- *   buildChildStoriesIndex   — Per-child story grid index (all stories for one child)
- *
- * NAMING CONVENTION:
- *   These functions build HTML STRING content only — no file I/O.
- *   "Page" = one story page   "Index" = navigation/listing page
- *
- * Usage (background.js):
- *   import { buildStoryPage, buildChildrenIndex, buildChildStoriesIndex } from './lib/html-builders.js';
+ * html-builders.js — Smart Template HTML Generation
+ * 
+ * Generates responsive, offline-first HTML artifacts:
+ * • story.html — full story page with photos, videos, routine, metadata
+ * • index.html (root) — children grid
+ * • index.html (per-child) — story card grid
+ * 
+ * All templates use native emoji, CSS Grid, and work offline.
  */
-
-import { formatDateDMY, sanitizeName } from "./metadata-helpers.js";
-
-/* ================================================================== */
-/*  Story page                                                         */
-/* ================================================================== */
 
 /**
- * Build a print-friendly HTML page for a story.
- *
- * Layout:
- *   Story body / blurb
- *   ────────────────── (only when routine exists)
- *   Child's Routine
- *   9:11am - Toilet Nappy Full
- *   ────────────────── (only when routine exists)
- *   Child Name @ 1 year 2 months   ← always shown
- *   Nursery One
- *   Centre Name
- *   Storypark / Storypark Smart Saver
- *
- * @param {object} opts
- * @param {string} opts.title
- * @param {string} opts.date            YYYY-MM-DD
- * @param {string} opts.body            HTML or plain text story body
- * @param {string} opts.childName
- * @param {string} [opts.childAge]      e.g. "1 year 5 months"
- * @param {string} [opts.roomName]
- * @param {string} [opts.centreName]
- * @param {string} [opts.educatorName]
- * @param {string} [opts.routineText]   Plain text routine (newlines = <br>)
- * @param {string[]} [opts.mediaFilenames]  Filenames of approved photos/videos
- * @returns {string} Complete HTML document string
+ * Build a complete story HTML page.
+ * 
+ * @param {Object} params
+ * @param {string} params.title - Story title
+ * @param {string} params.date - Story date (YYYY-MM-DD)
+ * @param {string} params.body - Story text content
+ * @param {string} params.childName - Child's name
+ * @param {string} params.childAge - Formatted age (e.g. "2 years 3 months")
+ * @param {string} params.roomName - Classroom/room name
+ * @param {string} params.centreName - Daycare centre name
+ * @param {string} params.educatorName - Educator who created the story
+ * @param {string} params.routineText - Daily routine summary
+ * @param {string[]} params.mediaFilenames - Array of photo/video filenames
+ * @returns {string} Complete HTML document
  */
-export function buildStoryPage({ title, date, body, childName, childAge, roomName, centreName, educatorName, routineText, mediaFilenames }) {
-  const dateDisplay = formatDateDMY(date) || date || "Unknown date";
+export function buildStoryPage({
+  title,
+  date,
+  body,
+  childName,
+  childAge,
+  roomName,
+  centreName,
+  educatorName,
+  routineText,
+  mediaFilenames,
+}) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const childFirst = (childName || "").split(/\s+/)[0];
-
-  // Media files live alongside story.html in the same folder.
-  // Exclude Story Card JPEGs — they are generated assets for Google Photos
-  // import and should NOT appear as gallery images in the HTML page.
-  const STORY_CARD_RE = /Story Card\.jpg$/i;
-  const mediaHtml = (mediaFilenames || []).filter(f => !STORY_CARD_RE.test(f)).map(f => {
+  const dateDisplay = formatDateDMY(date) || date || "Unknown date";
+  
+  // Story Card JPEGs are generated assets for Google Photos, not gallery images
+  const _scRe = /Story Card\.jpg$/i;
+  const mediaHtml = (mediaFilenames || []).filter(f => !_scRe.test(f)).map(f => {
     const enc = encodeURIComponent(f);
     if (/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)) {
       return `<div class="photo"><video src="./${enc}" controls preload="metadata" style="width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);"></video></div>`;
@@ -67,7 +51,7 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
     return `<div class="photo"><img src="./${enc}" alt="Story photo" loading="lazy"></div>`;
   }).join("\n      ");
 
-  // Attribution block — always shown (with or without routine)
+  // Attribution block
   const attributionLines = [
     childAge
       ? `${escHtml(childName || "")} @ ${escHtml(childAge)}`
@@ -94,16 +78,15 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
   // Story body — placeholder when empty
   const bodyHtml = body
     ? `<div class="body">${escHtml(body).replace(/\n/g, "<br>")}</div>`
-    : `<div class="body empty">Story text not yet available — run a scan to restore the full story.</div>`;
+    : `<div class="body empty">📄 Story text not yet available — run a scan to restore the full story.</div>`;
 
-  // Card preview: thumbnail + date + title + educator + excerpt + photo count
-  // Shows a Storypark-style card at the top so you see the summary at a glance.
-  const firstPhoto = (mediaFilenames || []).filter(f => !STORY_CARD_RE.test(f) && !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f))[0];
+  // Preview card: thumbnail + date + title + educator + excerpt + photo count
+  const firstPhoto = (mediaFilenames || []).filter(f => !_scRe.test(f) && !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f))[0];
   const previewThumb = firstPhoto
-    ? `<img src="./${encodeURIComponent(firstPhoto)}" alt="" class="preview-img" onclick="this.closest('.preview-card').nextElementSibling.scrollIntoView({behavior:'smooth'})" title="Click to scroll to full story">`
+    ? `<img src="./${encodeURIComponent(firstPhoto)}" alt="" class="preview-img" onclick="this.closest('.preview-card').nextElementSibling.scrollIntoView({behavior:'smooth'})">`
     : `<div class="preview-img preview-placeholder">📸</div>`;
   const previewExcerpt = (body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().substring(0, 200);
-  const displayPhotoCount = (mediaFilenames || []).filter(f => !STORY_CARD_RE.test(f)).length;
+  const displayPhotoCount = (mediaFilenames || []).filter(f => !_scRe.test(f)).length;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -117,7 +100,6 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
     nav { margin-bottom: 20px; font-size: 13px; color: #888; }
     nav a { color: #0f3460; text-decoration: none; }
     nav a:hover { text-decoration: underline; }
-    /* Card preview */
     .preview-card { background: #fff; border-radius: 14px; box-shadow: 0 2px 16px rgba(0,0,0,0.10); overflow: hidden; display: flex; margin-bottom: 32px; cursor: pointer; transition: box-shadow 0.15s; }
     .preview-card:hover { box-shadow: 0 6px 28px rgba(0,0,0,0.14); }
     .preview-img { width: 220px; min-width: 220px; height: 200px; object-fit: cover; flex-shrink: 0; border: none; display: block; }
@@ -128,7 +110,6 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
     .preview-educator { font-size: 13px; color: #666; }
     .preview-excerpt { font-size: 13px; color: #555; line-height: 1.5; margin-top: 4px; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
     .preview-photos { font-size: 13px; color: #4a90d9; font-weight: 600; margin-top: 6px; }
-    /* Full content */
     .full-content { background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 32px; margin-bottom: 24px; }
     .full-content h2 { font-size: 20px; color: #0f3460; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #e8edf3; font-family: Georgia, serif; }
     .body { font-size: 15px; margin-bottom: 20px; white-space: pre-wrap; font-family: Georgia, 'Times New Roman', serif; }
@@ -157,55 +138,46 @@ export function buildStoryPage({ title, date, body, childName, childAge, roomNam
 </head>
 <body>
   <nav>
-    <a href="../index.html">&larr; Back to all stories</a> &middot;
-    <a href="../../../index.html">&larr; All children</a>
+    <a href="../index.html">← Back to all stories</a> ·
+    <a href="../../../index.html">← All children</a>
   </nav>
 
-  <!-- Card preview — click to scroll to full content -->
   <div class="preview-card" onclick="document.querySelector('.full-content').scrollIntoView({behavior:'smooth'})">
     ${previewThumb}
     <div class="preview-info">
-      <div class="preview-date">${dateDisplay}</div>
+      <div class="preview-date">📅 ${dateDisplay}</div>
       <div class="preview-title">${escHtml(title || "Story")}</div>
-      ${educatorName ? `<div class="preview-educator">${escHtml(educatorName)}</div>` : ""}
-      <div class="preview-excerpt">${escHtml(previewExcerpt)}${previewExcerpt.length >= 200 ? "&hellip;" : ""}</div>
+      ${educatorName ? `<div class="preview-educator">👩‍🏫 ${escHtml(educatorName)}</div>` : ""}
+      <div class="preview-excerpt">${escHtml(previewExcerpt)}${previewExcerpt.length >= 200 ? "…" : ""}</div>
       <div class="preview-photos">${displayPhotoCount} photo${displayPhotoCount !== 1 ? "s" : ""}</div>
     </div>
   </div>
 
-  <!-- Full story content -->
   <div class="full-content">
     <h2>${escHtml(title || "Story")}</h2>
-
     ${bodyHtml}
-
     ${mediaHtml ? `<div class="photos">\n      ${mediaHtml}\n    </div>` : ""}
-
     ${routineSection}
   </div>
 
   <div class="footer">
-    Saved from Storypark by Storypark Smart Saver &mdash; ${new Date().toISOString().split("T")[0]}
+    Saved from Storypark by Storypark Smart Saver — ${new Date().toISOString().split("T")[0]}
   </div>
 </body>
 </html>`;
 }
 
-/* ================================================================== */
-/*  Root children index                                                */
-/* ================================================================== */
-
 /**
  * Build the root-level children index HTML page.
- * Shows all children with links to their story grids.
- *
  * @param {Array<{id: string, name: string}>} children
- * @returns {string} HTML document string
+ * @returns {string} HTML document
  */
-export function buildChildrenIndex(children) {
+export function buildChildrenIndexHtml(children) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const sanitize = (s) => (s || "Unknown").replace(/[/\\:*?"<>|]/g, "_").trim() || "Unknown";
+  
   const cards = (children || []).map(c => {
-    const safeName = sanitizeName(c.name);
+    const safeName = sanitize(c.name);
     return `<a href="./${encodeURIComponent(safeName)}/Stories/index.html" class="child-card">
       <div class="child-emoji">👶</div>
       <div class="child-name">${escHtml(c.name)}</div>
@@ -236,64 +208,51 @@ export function buildChildrenIndex(children) {
 </head>
 <body>
   <div class="container">
-    <h1>Storypark Smart Saver</h1>
+    <h1>📸 Storypark Smart Saver</h1>
     <p class="subtitle">Choose a child to browse their stories</p>
     <div class="children-grid">
     ${cards}
     </div>
     <div class="footer">
-      Saved from Storypark &mdash; ${new Date().toISOString().split("T")[0]}
+      Saved from Storypark — ${new Date().toISOString().split("T")[0]}
     </div>
   </div>
 </body>
 </html>`;
 }
 
-/* ================================================================== */
-/*  Per-child story index                                              */
-/* ================================================================== */
-
 /**
- * Build the per-child master story index HTML page.
- * Shows all downloaded stories as a responsive card grid.
- *
+ * Build the per-child story index HTML page.
  * @param {string} childName
- * @param {Array} manifests  From getDownloadedStories()
- * @returns {string} HTML document string
+ * @param {Array} manifests - Story manifests from getDownloadedStories()
+ * @returns {string} HTML document
  */
-export function buildChildStoriesIndex(childName, manifests) {
+export function buildMasterIndexHtml(childName, manifests) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  // Story Card filter + dedup by storyId (keep manifest with most approved photos).
-  // Prevents duplicate index cards when IDB has both old em-dash and new hyphen folder
-  // manifests for the same story (different folder names, same storyId).
   const _scRe = /Story Card\.jpg$/i;
-  const _dedup = new Map();
+  
+  // Dedup by storyId
+  const _dd = new Map();
   for (const m of (manifests || [])) {
-    const sid = m.storyId || m.folderName; // fallback for recovered_ entries
-    const existing = _dedup.get(sid);
-    const cnt  = (m.approvedFilenames || []).filter(f => !_scRe.test(f)).length;
-    const eCnt = existing ? (existing.approvedFilenames || []).filter(f => !_scRe.test(f)).length : -1;
-    if (!existing || cnt > eCnt) _dedup.set(sid, m);
+    const sid = m.storyId || m.folderName;
+    const ex = _dd.get(sid);
+    const cnt = (m.approvedFilenames || []).filter(f => !_scRe.test(f)).length;
+    if (!ex || cnt > (ex.approvedFilenames || []).filter(f => !_scRe.test(f)).length) _dd.set(sid, m);
   }
-  const sorted = [..._dedup.values()].sort((a, b) => (b.storyDate || "").localeCompare(a.storyDate || ""));
+  const sorted = [..._dd.values()].sort((a, b) => (b.storyDate || "").localeCompare(a.storyDate || ""));
 
   const cards = sorted.map(m => {
-    // Use thumbnailFilename only if it's a real photo (not a Story Card).
-    // Fall back to the first non-Story-Card approved filename.
-    const safeThumbnail = m.thumbnailFilename && !_scRe.test(m.thumbnailFilename)
-      ? m.thumbnailFilename
-      : (m.approvedFilenames || []).find(f => !_scRe.test(f)) || null;
-    const thumb = safeThumbnail
-      ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(safeThumbnail)}" alt="" loading="lazy">`
-      : `<div class="no-thumb">📸</div>`;
+    const thumb = m.thumbnailFilename && !_scRe.test(m.thumbnailFilename)
+      ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(m.thumbnailFilename)}" alt="" loading="lazy">`
+      : ((m.approvedFilenames || []).find(f => !_scRe.test(f))
+          ? `<img src="./${encodeURIComponent(m.folderName)}/${encodeURIComponent((m.approvedFilenames).find(f => !_scRe.test(f)))}" alt="" loading="lazy">`
+          : `<div class="no-thumb">📸</div>`);
     const date = formatDateDMY(m.storyDate) || m.storyDate || "";
     const meta = [
-      m.educatorName ? `${escHtml(m.educatorName)}` : "",
-      m.roomName     ? `${escHtml(m.roomName)}`     : "",
+      m.educatorName ? `👩‍🏫 ${escHtml(m.educatorName)}` : "",
+      m.roomName ? `🏠 ${escHtml(m.roomName)}` : "",
     ].filter(Boolean).join(" · ");
-    // Photo count excludes Story Cards (generated assets, not downloaded photos)
-    const photoCount = (m.approvedFilenames || []).filter(f => !_scRe.test(f)).length;
+    const photoCount = (m.approvedFilenames || []).length;
 
     return `<a href="./${encodeURIComponent(m.folderName)}/story.html" class="story-card">
       <div class="card-thumb">${thumb}</div>
@@ -301,7 +260,7 @@ export function buildChildStoriesIndex(childName, manifests) {
         <div class="card-date">${date}</div>
         <div class="card-title">${escHtml(m.storyTitle)}</div>
         ${meta ? `<div class="card-meta">${meta}</div>` : ""}
-        <div class="card-excerpt">${escHtml((m.excerpt || "").substring(0, 120))}${(m.excerpt || "").length > 120 ? "&hellip;" : ""}</div>
+        <div class="card-excerpt">${escHtml((m.excerpt || "").substring(0, 120))}${(m.excerpt || "").length > 120 ? "…" : ""}</div>
         <div class="card-photos">${photoCount} photo${photoCount !== 1 ? "s" : ""}</div>
       </div>
     </a>`;
@@ -309,7 +268,7 @@ export function buildChildStoriesIndex(childName, manifests) {
 
   const totalPhotos = sorted.reduce((sum, m) => sum + (m.approvedFilenames || []).length, 0);
   const dateRange = sorted.length > 0
-    ? `${formatDateDMY(sorted[sorted.length - 1].storyDate) || "?"} &mdash; ${formatDateDMY(sorted[0].storyDate) || "?"}`
+    ? `${formatDateDMY(sorted[sorted.length - 1].storyDate) || "?"} — ${formatDateDMY(sorted[0].storyDate) || "?"}`
     : "";
 
   return `<!DOCTYPE html>
@@ -317,7 +276,7 @@ export function buildChildStoriesIndex(childName, manifests) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escHtml(childName)} &mdash; Stories</title>
+  <title>${escHtml(childName)} — Stories</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; padding: 40px 20px; }
@@ -344,9 +303,9 @@ export function buildChildStoriesIndex(childName, manifests) {
 </head>
 <body>
   <div class="container">
-    <nav><a href="../../index.html">&larr; All children</a></nav>
-    <h1>${escHtml(childName)}'s Stories</h1>
-    <p class="stats">${sorted.length} stories &middot; ${totalPhotos} photos${dateRange ? ` &middot; ${dateRange}` : ""} &middot; Last updated ${new Date().toISOString().split("T")[0]}</p>
+    <nav><a href="../../index.html">← All children</a></nav>
+    <h1>📸 ${escHtml(childName)}'s Stories</h1>
+    <p class="stats">${sorted.length} stories · ${totalPhotos} photos${dateRange ? ` · ${dateRange}` : ""} · Last updated ${new Date().toISOString().split("T")[0]}</p>
     <div class="grid">
     ${cards}
     </div>
@@ -356,3 +315,16 @@ export function buildChildStoriesIndex(childName, manifests) {
 </html>`;
 }
 
+/** Format date string from YYYY-MM-DD to DD/MM/YYYY */
+function formatDateDMY(dateStr) {
+  if (!dateStr || typeof dateStr !== "string") return "";
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateStr;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+// Compatibility aliases for background.js (which uses buildStoryHtml)
+// and scan-engine.js (which may also use the old names)
+export const buildStoryHtml = buildStoryPage;
+export const buildChildrenIndex = buildChildrenIndexHtml;
+export const buildChildStoriesIndex = buildMasterIndexHtml;

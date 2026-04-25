@@ -1,5 +1,5 @@
 /**
- * download-pipe.js — OOM-safe download pipeline
+ * download-pipe.js — OOM-safe download pipeline + Smart Template Engine
  *
  * Implements the 3-slot download semaphore that prevents service worker OOM
  * during large scans.  All chrome.downloads calls must route through this
@@ -14,6 +14,10 @@
  *   • The download slot is released inside handleDownloadChanged(), not when
  *     chrome.downloads.download() returns.
  *
+ * Smart Template Engine (AI_RULES.md Rule 14):
+ *   • sanitizeFilename(name) — strict Windows filesystem sanitization
+ *   • buildDynamicName(template, data, index) — parse [Token] templates
+ *
  * Setup (call once in background.js, before any downloads):
  *   import { initDownloadPipe, handleDownloadChanged } from './lib/download-pipe.js';
  *   initDownloadPipe({ sendToOffscreen });
@@ -27,6 +31,8 @@
  *   downloadDataUrl(url, path)— download a data: URL string to disk
  *   downloadHtmlFile(url, path) — alias of downloadDataUrl (same pipeline)
  *   downloadVideoFromOffscreen(video) — download a video using pre-made blob URL
+ *   sanitizeFilename(name)    — strict Windows filename sanitization
+ *   buildDynamicName(template, data, index) — Smart Template Engine
  */
 
 import { sanitizeSavePath } from "./metadata-helpers.js";
@@ -75,6 +81,139 @@ const _pendingDownloadIds = new Map();
  */
 export function initDownloadPipe({ sendToOffscreen }) {
   _sendToOffscreenFn = sendToOffscreen;
+}
+
+/* ================================================================== */
+/*  Smart Template Engine (AI_RULES.md Rule 14)                       */
+/* ================================================================== */
+
+/**
+ * Strict Windows filename sanitization.
+ * 
+ * Rule 14 requirements:
+ *   1. Replace illegal Windows characters (< > : " / \ | ? *) with dash
+ *   2. Strip all emojis and non-standard unicode that break Windows indexing
+ *   3. Truncate to maximum 100 characters
+ *   4. Trim leading/trailing spaces and dots
+ *
+ * @param {string} name  Raw filename or folder name
+ * @returns {string}  Sanitized, Windows-safe filename
+ */
+export function sanitizeFilename(name) {
+  if (!name) return "untitled";
+  
+  // 1. Replace illegal Windows characters (< > : " / \ | ? *) and control chars
+  let sanitized = name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "-");
+  
+  // 2. Strip emojis and problematic unicode
+  //    Emoji ranges: \u{1F300}-\u{1FAFF} (main emoji blocks)
+  //                  \u{2600}-\u{27BF}   (miscellaneous symbols)
+  //                  \u{FE00}-\u{FE0F}   (variation selectors)
+  //                  \u{200D}            (zero-width joiner)
+  //                  \u{20E3}            (combining enclosing keycap)
+  //                  \u{E0020}-\u{E007F} (tag characters)
+  sanitized = sanitized.replace(
+    /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu,
+    ""
+  );
+  
+  // 3. Collapse multiple spaces/dashes into single dash
+  sanitized = sanitized.replace(/\s+/g, " ");
+  sanitized = sanitized.replace(/-{2,}/g, "-");
+  
+  // 4. Trim leading/trailing spaces and dots (Windows doesn't allow trailing dots)
+  sanitized = sanitized.replace(/^[\s.]+|[\s.]+$/g, "");
+  
+  // 5. Truncate to 100 characters max
+  if (sanitized.length > 100) {
+    sanitized = sanitized.substring(0, 100);
+  }
+  
+  // 6. Final trim in case truncation left trailing space/dot
+  sanitized = sanitized.replace(/^[\s.]+|[\s.]+$/g, "");
+  
+  // 7. Fallback if we stripped everything
+  if (!sanitized || sanitized === "") {
+    sanitized = "untitled";
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Smart Template Engine — parse [Token] templates and replace with API data.
+ *
+ * Rule 14.2 — Smart Token Filtering:
+ *   If a token's data is missing (e.g., [Class] when story has no classroom),
+ *   the engine MUST cleanly filter it out and prevent dangling dashes.
+ *
+ * Example:
+ *   Template: "[Date] - [Child] - [Class] - [Title]"
+ *   Data: { date: "2025-09-04", childName: "Hugo", roomName: null, title: "Art Day" }
+ *   Output: "2025-09-04 - Hugo - Art Day"  (no dangling dashes for missing [Class])
+ *
+ * @param {string} templateString  e.g., "[Date] - [Child] - [Class] - [Title]"
+ * @param {object} apiStoryData    Story data from Storypark API
+ * @param {number} [index]         Optional media index (appended as suffix)
+ * @returns {string}  Sanitized, fully-resolved filename
+ */
+export function buildDynamicName(templateString, apiStoryData, index) {
+  if (!templateString || typeof templateString !== "string") {
+    templateString = "[Date] - [Child] - [Title]"; // sensible default
+  }
+  
+  const data = apiStoryData || {};
+  
+  // Token map — maps [Token] to actual data field
+  const tokenMap = {
+    "[Date]":        data.storyDate || data.date || "",
+    "[Child]":       data.childName || "",
+    "[ChildName]":   data.childName || "",
+    "[Class]":       data.roomName || data.room || "",
+    "[Room]":        data.roomName || data.room || "",
+    "[Title]":       data.storyTitle || data.title || "",
+    "[Daycare]":     data.centreName || data.centre || "",
+    "[Centre]":      data.centreName || data.centre || "",
+    "[Educator]":    data.educatorName || data.educator || "",
+    "[OriginalName]": data.originalFilename || "",
+  };
+  
+  // Replace all tokens with their values
+  let resolved = templateString;
+  for (const [token, value] of Object.entries(tokenMap)) {
+    // Preserve rich display data (emojis, unicode) at this stage
+    // Sanitization happens at the end
+    resolved = resolved.replace(new RegExp(escapeRegex(token), "g"), value || "");
+  }
+  
+  // Smart Token Filtering (Rule 14.2):
+  // Split by common delimiters, filter out empty segments, rejoin
+  // This prevents "Hugo - - 2025-09-04" from missing [Class]
+  const parts = resolved
+    .split(/\s*[-_/]\s*/)  // split on dash, underscore, slash
+    .map(p => p.trim())
+    .filter(p => p.length > 0);  // remove empty segments
+  
+  resolved = parts.join(" - ");
+  
+  // Append [Index] if provided (for multi-media stories)
+  if (typeof index === "number" && index >= 0) {
+    resolved = `${resolved}_${String(index).padStart(2, "0")}`;
+  }
+  
+  // Final sanitization (Rule 14.4) — strip emojis, illegal chars, truncate
+  return sanitizeFilename(resolved);
+}
+
+/**
+ * Escape special regex characters in a string.
+ * Used by buildDynamicName to safely match [Token] literals.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /* ================================================================== */

@@ -10,7 +10,7 @@
  * └─────────────────────────────────────────────────────────────┘
  */
 
-import { linkFolder, getLinkedFolder, clearLinkedFolder, reconcileWithCache } from "./lib/disk-sync.js";
+import { linkFolder, getLinkedFolder, clearLinkedFolder, reconcileWithCache, syncDiskToDatabase } from "./lib/disk-sync.js";
 import { deleteActivityLogFromDisk, flushActivityLogToDisk, ACTIVITY_LOG_FILENAME } from "./lib/log-manager.js";
 
 let _activityLogFollowing = true;
@@ -76,14 +76,29 @@ export function initToolsTab(helpers) {
   });
 
   $btnVerifyDirectory?.addEventListener("click", async () => {
+    const handle = await getLinkedFolder();
+    if (!handle) {
+      toast("Please link a folder first", "error");
+      return;
+    }
+
     $btnVerifyDirectory.disabled = true;
-    $btnVerifyDirectory.textContent = "⏳ Verifying…";
+    $btnVerifyDirectory.textContent = "⏳ Syncing…";
+    
+    let verified = 0;
     try {
-      await reconcileWithCache();
-      toast("✓ Directory verified", "success");
+      const result = await syncDiskToDatabase(handle, (processed, total, title) => {
+        $btnVerifyDirectory.textContent = `⏳ ${processed} verified…`;
+        console.log(`[Verify] ${processed}: ${title}`);
+      });
+      
+      verified = result.verified;
+      toast(`✓ ${verified} stories verified on disk`, "success");
+      updateDbInfo();
     } catch (e) {
       toast(`❌ ${e.message}`, "error");
     }
+    
     $btnVerifyDirectory.disabled = false;
     $btnVerifyDirectory.textContent = "✅ Verify Directory";
   });

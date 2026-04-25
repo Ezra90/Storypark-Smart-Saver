@@ -108,6 +108,14 @@ import {
   MAX_CONCURRENT_DOWNLOADS, handleDownloadChanged, initDownloadPipe, getDownloadStats,
 } from "./lib/download-pipe.js";
 
+// ── Scan Engine (Rule 12: Strict UI Decoupling) ──────────────────────
+// All scan logic lives in lib/scan-engine.js. Background.js routes messages
+// to runExtraction() but NEVER executes business logic directly.
+import { runExtraction, initScanEngine, _rebuildIndexPages } from "./lib/scan-engine.js";
+
+// ── HTML Builders ──────────────────────────────────────────────────────
+import { buildStoryHtml, buildChildrenIndexHtml, buildMasterIndexHtml } from "./lib/html-builders.js";
+
 // Wire up lib modules with runtime context.
 // Function declarations (_diagLog, logger, sendToOffscreen) are hoisted so calling them
 // here is safe.  The () => cancelRequested closure defers the read until scan time,
@@ -118,6 +126,13 @@ initApiClient({
   getCancelRequested: () => cancelRequested,
 });
 initDownloadPipe({ sendToOffscreen });
+initScanEngine({
+  logger,
+  getCancelRequested: () => cancelRequested,
+  sendToOffscreen,
+  diagLog: _diagLog,
+  getDebugMode: () => debugCaptureMode,
+});
 
 // ── Message handler modules (domain-specific, imported for thin router) ─
 import {
@@ -713,17 +728,6 @@ async function _fetchAndDiscoverInstitutions(institutions) {
 
 // geocodeCentre, discoverCentres → lib/api-client.js (imported above)
 
-/* ================================================================== */
-/*  Story feed pagination — local copy for runExtraction              */
-/* ================================================================== */
-// NOTE: fetchStorySummaries and all scan helpers below are called by
-// the LOCAL runExtraction function. They will be removed when
-// runExtraction is fully moved to lib/scan-engine.js.
-// TODO: Remove this entire section in the next refactoring pass.
-
-/* ================================================================== */
-/*  Story feed pagination                                              */
-/* ================================================================== */
 
 /**
  * Fetch story summaries for a child, paginating until either the end of
@@ -1033,47 +1037,16 @@ function _storyBasePath(childName, folderName) {
   return `Storypark Smart Saver/${sanitizeName(childName)}/Stories/${folderName}`;
 }
 
-/**
- * Regenerate root children index + each child's per-story index HTML page.
- * Called from BUILD_HTML_STRUCTURE, AUDIT_AND_REPAIR, and REGENERATE_FROM_DISK handlers.
- */
-async function _rebuildIndexPages(children) {
-  try {
-    const rootHtml = buildChildrenIndexHtml(children);
-    const rootRes  = await sendToOffscreen({
-      type: "DOWNLOAD_TEXT", text: rootHtml,
-      savePath: "Storypark Smart Saver/index.html", mimeType: "text/html",
-    });
-    if (rootRes.dataUrl && rootRes.savePath) await downloadHtmlFile(rootRes.dataUrl, rootRes.savePath);
+// All scan helpers (runExtraction, _rebuildIndexPages) are imported from lib/scan-engine.js above.
+// All HTML builders (buildStoryHtml, buildChildrenIndexHtml, buildMasterIndexHtml) are imported from lib/html-builders.js above.
+// All metadata helpers (sanitizeName, stripHtml, stripEmojis, calculateAge, buildExifMetadata, sanitiseForExif, 
+// sanitiseForIptcCaption) are imported from lib/metadata-helpers.js above.
 
-    for (const child of children) {
-      const manifests = await getDownloadedStories(child.id).catch(() => []);
-      if (manifests.length === 0) continue;
-      const childIndexHtml = buildMasterIndexHtml(child.name, manifests);
-      const childPath = `Storypark Smart Saver/${sanitizeName(child.name)}/Stories/index.html`;
-      const ciRes = await sendToOffscreen({
-        type: "DOWNLOAD_TEXT", text: childIndexHtml,
-        savePath: childPath, mimeType: "text/html",
-      });
-      if (ciRes.dataUrl && ciRes.savePath) await downloadHtmlFile(ciRes.dataUrl, ciRes.savePath);
-    }
-  } catch (err) {
-    console.warn("[_rebuildIndexPages] Failed:", err.message);
-  }
-}
+/* ================================================================== */
+/*  Review approve handler                                             */
+/* ================================================================== */
 
-// buildStoryHtml, buildChildrenIndexHtml, buildMasterIndexHtml → lib/html-builders.js (imported above)
-// extractRoomFromTitle, buildRoomMap → lib/scan-engine.js (imported above)
-// sanitizeName, stripHtml, stripEmojis, calculateAge, buildExifMetadata, sanitiseForExif, sanitiseForIptcCaption → lib/metadata-helpers.js (imported above)
-
-// DUMMY to avoid "function not found" - these are needed ONLY by the local runExtraction below
-// They work via the imports at the top of this file.
-function buildStoryHtml({ title, date, body, childName, childAge, roomName, centreName, educatorName, routineText, mediaFilenames }) {
-  const dateDisplay = formatDateDMY(date) || date || "Unknown date";
-  const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const childFirst = (childName || "").split(/\s+/)[0];
-
-  // Media files live alongside story.html in the same folder.
+async function handleReviewApprove(id, selectedFaceIndex = 0) {
   // Exclude Story Card JPEGs — generated assets for Google Photos, not gallery images.
   const _scRe = /Story Card\.jpg$/i;
   const mediaHtml = (mediaFilenames || []).filter(f => !_scRe.test(f)).map(f => {
