@@ -715,3 +715,20 @@ if (msg.type === "BATCH_PROGRESS") {
 | Offline Facial Scan (Scan tab) | ✅ | `triggerOfflineScan()` in dashboard.js |
 | Offline Smart Scan (Settings) | ✅ | `runOfflineScan()` in dashboard.js |
 | Clean Up Folder | ✅ | `runCleanup()` in dashboard.js |
+
+
+### 12. Strict UI Decoupling (Manifest V3 Invariant)
+1. No Background Logic in UI: The dashboard UI (`dashboard.js` and sub-modules) is strictly a view layer. It must NEVER execute database logic, file system syncs, or API fetches directly. It only sends `chrome.runtime.sendMessage` commands.
+2. Decoupled Workflows: The automated scan engine (`scan-engine.js`) must ONLY download raw media (JPG/MP4) and save JSON data. It is strictly forbidden from generating HTML, Story Cards, or rewriting EXIF metadata during the core scan loop.
+3. Manual Post-Processing: HTML generation, Story Card generation, and Metadata Application (EXIF/GPS/IPTC) are independent, user-triggered batch processes executed after raw downloads are complete.
+
+## 13. "Disk is Truth" (No Custom Backups)
+1. No Import/Export: The extension does not use custom JSON backup export/import functions. The user's local `Storypark Smart Saver/Database/` folder is the canonical backup.
+2. State Synchronization: The "Link Folder" / "Verify Disk" functions must reliably read the on-disk JSON files and populate IndexedDB so the background worker knows what has already been downloaded.
+
+## 14. Smart File & Folder Naming (Template Engine)
+1. Dynamic Templates: The extension must use a user-defined template system for naming folders, media files, HTML, and Story Cards (e.g., `[Child] - [Class] - [Date]`).
+2. Smart Token Filtering: When parsing the template, if a data token (like Class or Routine) is missing or null, the system MUST cleanly remove it and format the delimiters to prevent dangling dashes. 
+3. Display Data Preservation: The original, rich text from the Storypark API (including emojis) MUST be preserved in the IndexedDB and JSON files for HTML generation.
+4. Strict Filesystem Sanitization: Before writing to disk, the final dynamic string MUST be sanitized to remove illegal Windows characters (`< > : " / \ | ? *`), emojis, and control characters.
+5. Length Limits: The final filename string must be truncated to a maximum of 100 characters.

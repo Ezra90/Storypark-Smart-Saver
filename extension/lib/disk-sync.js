@@ -16,6 +16,7 @@
  *   walkFolder(dirHandle, prefix)           – recursively list all files
  *   fileExists(dirHandle, relativePath)     – check if a specific file exists
  *   reconcileWithCache(dirHandle, stories)  – compare manifests vs disk
+ *   syncDiskToDatabase(dirHandle)           – COUNT-BASED VERIFICATION (Rule 13)
  *
  * File operation helpers (for Clean Up Folder feature):
  *   readFileAsDataUrl(dirHandle, relativePath)           – read image as data URL
@@ -29,6 +30,7 @@ import {
   getLinkedFolderHandle,
   clearLinkedFolderHandle,
   migrateLargeStoresToFiles,
+  addDownloadedStory,
 } from "./db.js";
 
 /* ================================================================== */
@@ -172,6 +174,120 @@ export async function fileExists(dirHandle, relativePath) {
   } catch {
     return false;
   }
+}
+
+/* ================================================================== */
+/*  COUNT-BASED DISK VERIFICATION (AI_RULES.md Rule 13)               */
+/* ================================================================== */
+
+/**
+ * "Disk is Truth" sync strategy — recursively walk the local filesystem,
+ * find folders containing metadata.json, extract storyId, count raw media
+ * files (excluding generated artifacts), and update IndexedDB with
+ * localMediaCount and status VERIFIED_ON_DISK.
+ *
+ * This eliminates the amnesia bug: if a story folder exists on disk with
+ * the correct number of media files, the scan engine will skip re-downloading it.
+ *
+ * @param {FileSystemDirectoryHandle} dirHandle  Root linked folder
+ * @param {Function} [onProgress]  Optional callback (processed, total, storyTitle)
+ * @returns {Promise<{verified: number, errors: number, skipped: number}>}
+ */
+export async function syncDiskToDatabase(dirHandle, onProgress = null) {
+  const MEDIA_EXT = /\.(jpg|jpeg|png|gif|webp|mp4|mov|avi|webm|m4v|3gp|mkv)$/i;
+  const STORY_CARD_RE = /Story Card\.jpg$/i;
+  
+  let verified = 0, errors = 0, skipped = 0;
+
+  /**
+   * Recursively walk directories looking for metadata.json files.
+   * When found, parse it, count media files, and update IDB.
+   */
+  async function walkAndVerify(handle, pathPrefix = "") {
+    for await (const [name, entry] of handle.entries()) {
+      if (name.startsWith(".")) continue;
+      if (name === "Database") continue; // Skip Database folder
+      if (name.endsWith(" Rejected Matches")) continue;
+
+      const currentPath = pathPrefix ? `${pathPrefix}/${name}` : name;
+
+      if (entry.kind === "directory") {
+        // Check if this directory contains metadata.json
+        try {
+          const metadataFileHandle = await entry.getFileHandle("metadata.json");
+          const metadataFile = await metadataFileHandle.getFile();
+          const text = await metadataFile.text();
+          const metadata = JSON.parse(text);
+          
+          const storyId = metadata.storyId;
+          if (!storyId) {
+            console.warn(`[disk-sync] metadata.json missing storyId in ${currentPath}`);
+            errors++;
+            continue;
+          }
+
+          // Count raw media files in this folder
+          let mediaCount = 0;
+          for await (const [fname, fentry] of entry.entries()) {
+            if (fentry.kind === "file" && MEDIA_EXT.test(fname)) {
+              // Exclude Story Card JPEGs and HTML files
+              if (!STORY_CARD_RE.test(fname) && !/\.html$/i.test(fname)) {
+                mediaCount++;
+              }
+            }
+          }
+
+          // Build minimal manifest for IDB update
+          const manifest = {
+            storyId: metadata.storyId,
+            childId: metadata.childId || "",
+            childName: metadata.childName || "",
+            storyTitle: metadata.storyTitle || "",
+            storyDate: metadata.storyDate || "",
+            folderName: metadata.folderName || name,
+            localMediaCount: mediaCount,
+            status: "VERIFIED_ON_DISK",
+            verifiedAt: new Date().toISOString(),
+            // Preserve other fields if they exist in metadata.json
+            approvedFilenames: metadata.approvedFilenames || [],
+            thumbnailFilename: metadata.thumbnailFilename || "",
+            excerpt: metadata.excerpt || "",
+            storyBody: metadata.storyBody || "",
+            storyRoutine: metadata.storyRoutine || "",
+            educatorName: metadata.educatorName || "",
+            roomName: metadata.roomName || "",
+            centreName: metadata.centreName || "",
+            childAge: metadata.childAge || "",
+          };
+
+          // Update IndexedDB
+          await addDownloadedStory(manifest);
+          verified++;
+
+          if (onProgress) {
+            onProgress(verified + errors + skipped, null, metadata.storyTitle || name);
+          }
+
+        } catch (err) {
+          // No metadata.json in this folder - recursively check subdirectories
+          if (err.name !== "NotFoundError") {
+            console.warn(`[disk-sync] Error processing ${currentPath}:`, err.message);
+            errors++;
+          }
+          // Recurse into subdirectories
+          try {
+            await walkAndVerify(entry, currentPath);
+          } catch (e) {
+            // Skip unreadable subdirectories
+          }
+        }
+      }
+    }
+  }
+
+  await walkAndVerify(dirHandle);
+
+  return { verified, errors, skipped };
 }
 
 /* ================================================================== */

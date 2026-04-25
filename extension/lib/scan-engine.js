@@ -537,7 +537,7 @@ export async function runExtraction(childId, childName, mode, {
 
   await logger("INFO", `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`);
 
-  let approved = 0, queued = 0, rejected = 0, skippedAbsent = 0;
+  let approved = 0, queued = 0, rejected = 0, skippedAbsent = 0, skippedAlreadyDownloaded = 0;
   let scanCancelled = false, scanCompletedFully = false, scanAbortReason = null;
 
   const abortAndCheckpoint = async (si, totalStories, summariesArr, reason) => {
@@ -781,6 +781,30 @@ export async function runExtraction(childId, childName, mode, {
         }
         await logger("WARNING", `  Story ${summary.id} fetch failed: ${err.message}`);
         continue;
+      }
+
+      // ── COUNT-BASED DISK VERIFICATION (AI_RULES.md Rule 13) ─────────────
+      // "Disk is Truth" strategy: if this story is verified on disk with the
+      // correct number of media files, skip the entire download process.
+      const apiMediaCount = (story.media || story.attachments || []).length;
+      if (apiMediaCount > 0) {
+        try {
+          const existingManifest = await getDownloadedStories(childId).then(manifests => 
+            manifests.find(m => m.storyId === String(summary.id))
+          ).catch(() => null);
+          
+          if (existingManifest && 
+              existingManifest.status === "VERIFIED_ON_DISK" &&
+              existingManifest.localMediaCount >= apiMediaCount) {
+            await logger("INFO", `  ✓ Skipped — ${existingManifest.localMediaCount}/${apiMediaCount} media verified on disk`, dateStr);
+            await markStoryProcessed(summary.id, summary.created_at, childId);
+            skippedAlreadyDownloaded++;
+            continue;
+          }
+        } catch (err) {
+          // Non-fatal — if verification check fails, proceed with download
+          console.warn("[scan-engine] Disk verification check failed:", err.message);
+        }
       }
 
       const createdAt    = story.created_at || summary.created_at || "";

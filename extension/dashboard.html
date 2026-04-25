@@ -5,908 +5,537 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Storypark Smart Saver</title>
   <link rel="stylesheet" href="dashboard.css">
-  <style>
-    :root {
-      --bg:      #1a1a2e;
-      --surface: #16213e;
-      --primary: #0f3460;
-      --accent:  #e94560;
-      --text:    #eaeaea;
-      --muted:   #9a9aaf;
-      --success: #4ade80;
-      --warning: #fbbf24;
-      --sidebar-w: 220px;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      display: flex;
-      overflow: hidden;
-    }
-
-    /* ---- Sidebar ---- */
-    .sidebar {
-      width: var(--sidebar-w);
-      min-width: var(--sidebar-w);
-      background: var(--surface);
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid rgba(255,255,255,0.06);
-      height: 100vh;
-      position: sticky;
-      top: 0;
-    }
-    .sidebar-header {
-      padding: 20px 16px 16px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-    }
-    .sidebar-header h1 { font-size: 16px; margin-bottom: 4px; }
-    .sidebar-header .open-sp {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 4px 10px; border: none; border-radius: 5px;
-      background: var(--primary); color: var(--muted); font-size: 11px;
-      text-decoration: none; cursor: pointer; margin-top: 6px;
-    }
-    .sidebar-header .open-sp:hover { color: var(--text); }
-
-    .sidebar-nav { flex: 1; padding: 12px 0; display: flex; flex-direction: column; gap: 2px; }
-    .nav-btn {
-      display: flex; align-items: center; gap: 10px;
-      padding: 11px 16px; border: none; background: none;
-      color: var(--muted); font-size: 14px; font-weight: 500;
-      cursor: pointer; text-align: left; border-radius: 0;
-      transition: background 0.1s, color 0.1s;
-      position: relative;
-    }
-    .nav-btn:hover { background: rgba(255,255,255,0.04); color: var(--text); }
-    .nav-btn.active {
-      background: rgba(15,52,96,0.6); color: var(--text); font-weight: 600;
-      border-left: 3px solid var(--success);
-    }
-    .nav-btn .nav-icon { font-size: 16px; width: 22px; text-align: center; }
-    .nav-badge {
-      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-      background: var(--warning); color: #000; border-radius: 8px;
-      font-size: 10px; font-weight: 700; padding: 1px 6px; min-width: 18px; text-align: center;
-    }
-    .sidebar-footer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; color: var(--muted); }
-
-    /* ---- Main content ---- */
-    /* padding-bottom reserves space so content is never hidden behind the fixed bottom banner */
-    .main { flex: 1; overflow-y: auto; padding: 28px 32px 80px; }
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-
-    /* ---- Shared components ---- */
-    .btn-primary {
-      border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
-      background: var(--primary); color: var(--text); padding: 12px 20px; font-size: 14px;
-      transition: opacity 0.15s;
-    }
-    .btn-primary:hover:not(:disabled) { opacity: 0.85; }
-    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-secondary {
-      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: none;
-      color: var(--muted); padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    .btn-secondary:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
-    .btn-danger {
-      border: 1px solid var(--accent); border-radius: 8px; background: none;
-      color: var(--accent); padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    .btn-danger:hover { background: rgba(233,69,96,0.1); }
-
-    .card {
-      background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 20px;
-    }
-    .card h2 { font-size: 16px; margin-bottom: 14px; color: var(--success); }
-    .card label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
-    .card input[type="text"], .card input[type="number"]:not(.threshold-num), .card select {
-      width: 100%; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px; font-size: 14px; margin-bottom: 12px;
-      background: var(--bg); color: var(--text);
-    }
-    .card input:focus, .card select:focus { outline: none; border-color: var(--success); }
-    .help { font-size: 11px; color: var(--muted); line-height: 1.5; margin-bottom: 10px; }
-
-    /* ---- Scan tab ---- */
-    .child-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
-    .child-row select { flex: 1; padding: 9px 12px; border: none; border-radius: 8px; background: var(--surface); color: var(--text); font-size: 14px; }
-    .phase-badge {
-      display: none; padding: 3px 8px; border-radius: 8px; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: help;
-    }
-    .phase-badge.phase-1 { background: rgba(96,165,250,0.2); color: #60a5fa; }
-    .phase-badge.phase-2 { background: rgba(74,222,128,0.2); color: var(--success); }
-    .phase-badge.phase-3 { background: rgba(168,85,247,0.2); color: #a855f7; }
-    .phase-badge.phase-4 { background: rgba(245,158,11,0.2); color: #f59e0b; }
-    .btn-icon {
-      width: 36px; height: 36px; border: none; border-radius: 8px;
-      background: var(--surface); color: var(--muted); font-size: 16px;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-    }
-    .btn-icon:hover { color: var(--text); }
-    .action-btns { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
-    #btnStopScan {
-      display: none; padding: 12px 20px; border: none; border-radius: 8px;
-      font-size: 14px; font-weight: 600; cursor: pointer; background: #dc2626; color: #fff;
-    }
-    #btnStopScan:hover { opacity: 0.85; }
-    .status-bar {
-      display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-      border-radius: 8px; background: var(--surface); font-size: 13px; margin-bottom: 10px;
-    }
-    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
-    .dot.green { background: var(--success); } .dot.yellow { background: var(--warning); } .dot.red { background: var(--accent); }
-    #progressBar {
-      width: 100%; height: 6px; border-radius: 3px; appearance: none; -webkit-appearance: none; display: none; margin-bottom: 4px;
-    }
-    #progressBar::-webkit-progress-bar { background: var(--surface); border-radius: 3px; }
-    #progressBar::-webkit-progress-value { background: var(--success); border-radius: 3px; }
-    #progressText { font-size: 11px; color: var(--muted); margin-bottom: 8px; display: none; }
-    .log-container {
-      background: #0d1117; border-radius: 8px; padding: 10px 12px;
-      min-height: 120px; height: 200px; overflow-y: auto; resize: vertical;
-      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-      font-size: 11px; line-height: 1.7; color: var(--muted);
-    }
-    .log-container p { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
-    .log-container p.level-SUCCESS { color: var(--success); }
-    .log-container p.level-WARNING { color: var(--warning); }
-    .log-container p.level-ERROR { color: var(--accent); }
-
-    /* ---- Review tab ---- */
-    .review-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-    .review-header h2 { font-size: 20px; }
-    .review-header .count { font-size: 14px; color: var(--muted); }
-    .review-actions-bar { display: flex; gap: 8px; }
-    .review-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    .review-card {
-      background: var(--surface); border-radius: 12px; padding: 20px;
-      display: grid; grid-template-columns: auto 1fr auto; gap: 20px; align-items: start;
-      transition: opacity 0.3s ease, transform 0.3s ease, max-height 0.3s ease;
-      opacity: 1; transform: scale(1);
-    }
-    .review-card.removing {
-      opacity: 0; transform: scale(0.95); max-height: 0 !important;
-      padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0;
-      overflow: hidden; pointer-events: none;
-    }
-    .review-card.appearing {
-      animation: cardAppear 0.3s ease forwards;
-    }
-    @keyframes cardAppear {
-      from { opacity: 0; transform: translateY(12px) scale(0.97); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
-    }
-    .card-image {
-      width: 400px; min-height: 300px; border-radius: 10px; overflow: hidden;
-      background: var(--primary); cursor: zoom-in; position: relative;
-    }
-    .card-image img { width: 100%; height: auto; display: block; object-fit: contain; }
-    .face-selector { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-    .face-btn {
-      width: 104px; height: 104px; border-radius: 6px; cursor: pointer;
-      border: 3px solid transparent; padding: 0; background: none; overflow: hidden;
-    }
-    .face-btn img { width: 100%; height: 100%; object-fit: cover; }
-    .face-btn.selected { border-color: var(--success); }
-    .card-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 120px; }
-    .card-info .child-name { font-size: 18px; font-weight: 700; }
-    .card-info .match-pct { font-size: 16px; font-weight: 600; color: var(--warning); }
-    .card-info .match-pct.high { color: var(--success); }
-    .card-info .match-pct.low { color: var(--accent); }
-    .card-info .post-date { font-size: 13px; color: var(--muted); }
-    .card-info .filename { font-size: 12px; color: var(--muted); word-break: break-all; }
-    .card-info .bootstrap-badge {
-      display: inline-block; padding: 3px 10px; border-radius: 6px;
-      font-size: 11px; font-weight: 600; background: rgba(96,165,250,0.15); color: #60a5fa; margin-top: 4px;
-    }
-    .card-actions { display: flex; flex-direction: column; gap: 8px; align-self: center; }
-    .btn-review {
-      padding: 12px 20px; border: none; border-radius: 8px; font-size: 15px;
-      font-weight: 600; cursor: pointer; white-space: nowrap; min-width: 140px; text-align: center;
-    }
-    .btn-review:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-approve { background: rgba(74,222,128,0.15); color: var(--success); }
-    .btn-approve:hover:not(:disabled) { background: rgba(74,222,128,0.3); }
-    .btn-reject { background: rgba(233,69,96,0.15); color: var(--accent); }
-    .btn-reject:hover:not(:disabled) { background: rgba(233,69,96,0.3); }
-    #reviewEmpty { text-align: center; padding: 60px 0; font-size: 16px; color: var(--muted); display: none; }
-    .keyboard-hints {
-      position: fixed; bottom: 16px; right: 24px; font-size: 11px; color: var(--muted);
-      background: var(--surface); padding: 8px 14px; border-radius: 8px; line-height: 1.6; display: none;
-    }
-    .keyboard-hints kbd {
-      display: inline-block; padding: 1px 6px; border-radius: 4px;
-      background: var(--primary); font-size: 11px; font-family: inherit; margin: 0 2px;
-    }
-
-    /* ---- Lightbox ---- */
-    .lightbox {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.9); z-index: 1000; display: none;
-      align-items: center; justify-content: center; cursor: zoom-out;
-    }
-    .lightbox.open { display: flex; }
-    .lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 12px; }
-
-    /* ---- Settings tab ---- */
-    .settings-section { margin-bottom: 24px; }
-    .threshold-controls { display: flex; align-items: center; gap: 8px; margin-top: 4px; margin-bottom: 6px; }
-    .threshold-controls input[type="range"] { flex: 1; height: 6px; accent-color: var(--success); }
-    .threshold-num {
-      width: 60px; min-width: 60px; max-width: 60px; flex-shrink: 0;
-      padding: 6px 8px; border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px; font-size: 14px; text-align: center; background: var(--bg); color: var(--text);
-      margin-bottom: 0;
-    }
-    .centre-row { display: flex; gap: 6px; align-items: flex-end; margin-bottom: 10px; flex-wrap: wrap; }
-    .centre-row .centre-field { display: flex; flex-direction: column; gap: 2px; }
-    .centre-row .centre-field label { font-size: 11px; margin-bottom: 0; }
-    .centre-row .centre-field input { margin-bottom: 0; }
-    .centre-row .centre-name-field { flex: 2; min-width: 140px; }
-    .centre-row .centre-maps-field { flex: 3; min-width: 160px; }
-    .centre-row .btn-remove-centre {
-      padding: 8px 10px; border: 1px solid var(--accent); border-radius: 6px;
-      background: none; color: var(--accent); cursor: pointer; font-size: 13px;
-    }
-    .centre-row .btn-remove-centre:hover { background: rgba(233,69,96,0.1); }
-    .match-preview {
-      display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-      background: var(--bg); border-radius: 6px; font-size: 13px; min-height: 40px; margin-bottom: 8px;
-    }
-    .match-preview img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
-    .match-badge { font-weight: 700; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-    .match-badge.good { background: rgba(74,222,128,0.15); color: var(--success); }
-    .match-badge.ok { background: rgba(251,191,36,0.15); color: var(--warning); }
-    .match-badge.bad { background: rgba(233,69,96,0.15); color: var(--accent); }
-    .match-badge.none { background: rgba(255,255,255,0.05); color: var(--muted); }
-    .training-card-wrapper { position: relative; }
-    .btn-remove-training {
-      position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
-      border: none; border-radius: 50%; background: var(--accent); color: #fff;
-      font-size: 11px; line-height: 1; cursor: pointer; display: flex;
-      align-items: center; justify-content: center; padding: 0;
-    }
-    .settings-face-selector { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
-    .settings-face-btn {
-      padding: 2px 8px; font-size: 11px; border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 4px; cursor: pointer; background: var(--bg); color: var(--text);
-    }
-    .settings-face-btn.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
-    .phase-indicator {
-      display: none; padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; line-height: 1.5;
-    }
-    .phase-indicator.phase-1 { background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.2); }
-    .phase-indicator.phase-2 { background: rgba(74,222,128,0.1); color: var(--success); border: 1px solid rgba(74,222,128,0.2); }
-    .phase-indicator.phase-3 { background: rgba(168,85,247,0.1); color: #a855f7; border: 1px solid rgba(168,85,247,0.2); }
-    .phase-indicator.phase-4 { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
-    .checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
-    .checkbox-row input[type="checkbox"] { width: auto; margin: 3px 0 0; flex-shrink: 0; }
-    .checkbox-row label { color: var(--text); font-weight: 600; font-size: 13px; margin-bottom: 2px; }
-
-    /* ---- Toast ---- */
-    #toast {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600;
-      pointer-events: none; opacity: 0; transition: opacity 0.25s ease; z-index: 999; white-space: nowrap;
-    }
-    #toast.show { opacity: 1; }
-    #toast.success { background: var(--success); color: #000; }
-    #toast.error { background: var(--accent); color: #fff; }
-
-    /* ---- Tutorial panel ---- */
-    .scan-layout {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
-      height: calc(100vh - 120px); align-items: stretch;
-    }
-    .scan-layout.tutorial-hidden { grid-template-columns: 1fr; }
-    .scan-layout > .scan-controls {
-      overflow-y: auto; padding-right: 8px;
-      display: flex; flex-direction: column;
-    }
-    .scan-layout > .scan-controls > .log-wrapper {
-      flex: 1; min-height: 120px; position: relative; display: flex; flex-direction: column;
-    }
-    .scan-layout > .scan-controls > .log-wrapper > .log-container {
-      flex: 1; height: auto;
-    }
-    .tutorial-card {
-      background: var(--surface); border-radius: 12px; padding: 20px;
-      overflow-y: auto;
-    }
-    .tutorial-card h3 { font-size: 15px; margin-bottom: 14px; color: var(--success); }
-    .tutorial-step {
-      display: flex; gap: 10px; margin-bottom: 14px; font-size: 13px; line-height: 1.6;
-    }
-    .tutorial-step .step-num {
-      width: 24px; height: 24px; min-width: 24px; border-radius: 50%;
-      background: var(--primary); color: var(--text); font-size: 11px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center; margin-top: 1px;
-    }
-    .tutorial-step strong { color: var(--text); }
-    .tutorial-step p { margin: 0; color: var(--muted); }
-    .tutorial-tip {
-      background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);
-      border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--warning);
-      line-height: 1.6; margin-top: 6px; margin-bottom: 14px;
-    }
-    .btn-dismiss-tutorial {
-      display: block; width: 100%; padding: 8px; border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px; background: none; color: var(--muted); font-size: 12px;
-      cursor: pointer; text-align: center;
-    }
-    .btn-dismiss-tutorial:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
-
-    /* ---- Nominatim picker ---- */
-    .nominatim-picker {
-      grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px;
-      margin-top: 6px; background: var(--bg); border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 8px; padding: 10px;
-    }
-    .nominatim-result {
-      display: block; width: 100%; text-align: left; padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
-      background: var(--surface); color: var(--muted); font-size: 12px;
-      cursor: pointer; line-height: 1.5; word-break: break-word;
-    }
-    .nominatim-result:hover { background: var(--primary); color: var(--text); }
-
-    /* ---- Show Guide button ---- */
-    #btnShowGuide {
-      display: none; align-items: center; gap: 4px;
-      padding: 6px 14px; border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px; background: none; color: var(--muted);
-      font-size: 12px; cursor: pointer; margin-left: auto;
-    }
-    #btnShowGuide:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
-
-    @media (max-width: 800px) {
-      .scan-layout { grid-template-columns: 1fr; }
-    }
-
-    #humanWarning {
-      background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); border-radius: 8px;
-      padding: 10px 14px; font-size: 12px; color: var(--warning); margin-bottom: 14px; display: none;
-    }
-  </style>
 </head>
 <body>
 
-  <!-- ======== SIDEBAR ======== -->
+  <!-- ════════════════════════════════════════════════════════
+       SIDEBAR
+  ════════════════════════════════════════════════════════ -->
   <aside class="sidebar">
+
     <div class="sidebar-header">
-      <h1>📸 Smart Saver</h1>
-      <a href="https://app.storypark.com" target="_blank" class="open-sp">🔗 Open Storypark</a>
-      <div style="margin-top:14px; display:flex; flex-direction:column; gap:6px;">
-        <label for="childSelect" style="font-size:11px; color:var(--muted); font-weight:600;">ACTIVE CHILD</label>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <select id="childSelect" style="padding:8px 10px; border:1px solid rgba(255,255,255,0.1); border-radius:6px; background:var(--bg); color:var(--text); font-size:13px; width:100%;">
+      <!-- App logo -->
+      <div class="app-logo">
+        <span class="app-logo-icon">📸</span>
+        <div>
+          <div class="app-name">Storypark Smart Saver</div>
+        </div>
+      </div>
+
+      <!-- Active child selector -->
+      <div class="child-selector-wrap">
+        <span class="sidebar-label">Active Child</span>
+        <div class="child-selector-row">
+          <select id="childSelect">
             <option value="">Loading children…</option>
           </select>
-          <button class="btn-icon" id="btnRefresh" title="Refresh children from Storypark" style="width:34px;height:34px;min-width:34px;flex-shrink:0;">↻</button>
+          <button class="btn-icon" id="btnRefresh" title="Refresh children from Storypark">↻</button>
         </div>
-        <div style="display:flex; flex-direction:column; gap:4px; margin-top:2px;">
+        <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
           <span class="phase-badge" id="phaseBadge" style="align-self:flex-start;"></span>
-          <span class="confidence-badge" id="confidenceBadge" style="display:none;font-size:11px;align-self:flex-start;"></span>
+          <span class="confidence-badge" id="confidenceBadge" style="display:none;align-self:flex-start;font-size:11px;"></span>
         </div>
       </div>
     </div>
+
+    <!-- Navigation -->
     <nav class="sidebar-nav">
-      <button class="nav-btn active" data-tab="scan">
-        <span class="nav-icon">📥</span> Scan & Download
-      </button>
-      <button class="nav-btn" data-tab="review">
-        <span class="nav-icon">👀</span> Pending Review
+      <button class="nav-btn active" data-tab="sync">
+        <span class="nav-icon">🔄</span>
+        <span class="nav-label">Sync &amp; Status</span>
         <span class="nav-badge" id="reviewBadge" style="display:none;"></span>
       </button>
-      <button class="nav-btn" data-tab="log">
-        <span class="nav-icon">📋</span> Activity Log
+      <button class="nav-btn" data-tab="download">
+        <span class="nav-icon">⬇</span>
+        <span class="nav-label">Download Engine</span>
+      </button>
+      <button class="nav-btn" data-tab="post">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Post-Processing</span>
       </button>
       <button class="nav-btn" data-tab="settings">
-        <span class="nav-icon">⚙</span> Settings
-      </button>
-      <button class="nav-btn" data-tab="tools">
-        <span class="nav-icon">🧰</span> Tools & Maintenance
+        <span class="nav-icon">🎛</span>
+        <span class="nav-label">Settings</span>
       </button>
     </nav>
+
     <div class="sidebar-footer">
-      <div id="centreInfo"></div>
+      <div id="centreInfo" style="font-size:11px;color:var(--muted);"></div>
+      <a href="https://app.storypark.com" target="_blank" class="open-sp">🔗 Open Storypark</a>
     </div>
+
   </aside>
 
-  <!-- ======== MAIN CONTENT ======== -->
-  <div class="main">
 
-    <!-- Global stop-scan banner — visible on ALL tabs when a scan is running -->
-    <div id="globalScanBanner" style="display:none; background:linear-gradient(135deg,#1a1a2e,#16213e); border-top:2px solid #e94560; padding:10px 16px; font-size:13px; position:fixed; bottom:0; left:var(--sidebar-w); right:0; z-index:1000; box-shadow:0 -2px 16px rgba(0,0,0,0.4);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-          <span class="dot yellow"></span>
-          <span id="globalScanText" style="color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Scan in progress…</span>
+  <!-- ════════════════════════════════════════════════════════
+       MAIN CONTENT
+  ════════════════════════════════════════════════════════ -->
+  <main class="main">
+
+    <!-- ────────────────────────────────────────
+         TAB: SYNC & STATUS
+    ──────────────────────────────────────── -->
+    <div id="tabSync" class="tab-panel active">
+
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔄 Sync &amp; Status</div>
+          <div class="page-subtitle">Monitor your storage target and track download telemetry.</div>
         </div>
-        <button id="btnGlobalStop" style="padding:6px 14px;border:none;border-radius:6px;background:#e94560;color:#fff;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;">🛑 Stop Scan</button>
       </div>
-      <progress id="globalScanBar" value="0" max="100" style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
-    </div>
 
-    <!-- ──── TAB: SCAN ──── -->
-    <div id="tabScan" class="tab-panel active">
-      <div style="display:flex;align-items:center;margin-bottom:16px;">
-        <h2 style="font-size:20px;">📥 Scan & Download</h2>
+      <div class="card-grid">
+
+        <!-- Storage Target card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📁 Storage Target</span>
+            <div style="display:flex;align-items:center;gap:7px;">
+              <span class="dot" id="syncStatusDot"></span>
+              <span style="font-size:12px;color:var(--muted);" id="syncStatusText">Not linked</span>
+            </div>
+          </div>
+
+          <div class="storage-path-box">
+            <span class="storage-path-icon">📂</span>
+            <span class="storage-path-text" id="syncFolderPath">
+              No folder linked. Click Link Folder to get started.
+            </span>
+          </div>
+
+          <div class="storage-btn-row">
+            <button class="btn-primary btn-muted" id="btnLinkFolder">📁 Link Folder</button>
+            <button class="btn-primary" id="btnVerifyDirectory" disabled>✅ Verify Directory</button>
+            <button class="btn-secondary" id="btnUnlinkFolder" style="display:none;">✕ Unlink</button>
+            <button class="btn-secondary" id="btnReconcileFolder" style="display:none;">🔍 Verify Files on Disk</button>
+          </div>
+
+          <!-- JS writes folder path/status here -->
+          <div id="linkedFolderStatus" style="display:none;font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;"></div>
+          <p id="linkedFolderInfo" style="font-size:12px;color:var(--muted);margin-top:6px;min-height:16px;"></p>
+        </div>
+
+        <!-- Telemetry card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📊 Telemetry</span>
+            <button class="btn-secondary" id="btnTestConnection" style="font-size:11px;padding:5px 12px;">🔌 Test Connection</button>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat-box">
+              <div class="stat-value green" id="telTotalStories">—</div>
+              <div class="stat-label">Total Stories</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value blue" id="telMediaCount">—</div>
+              <div class="stat-label">Media Count</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value yellow" id="telFaceApproved">—</div>
+              <div class="stat-label">Face Approved</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value red" id="telPending">—</div>
+              <div class="stat-label">Pending Review</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn-secondary" id="btnRefreshDbInfo" style="font-size:12px;padding:6px 14px;">↻ Refresh Stats</button>
+            <button class="btn-secondary" id="btnOpenDbFolderHint" style="font-size:12px;padding:6px 14px;" title="Copy path to clipboard">📋 Copy DB Path</button>
+          </div>
+        </div>
+
+      </div><!-- end card-grid -->
+
+      <!-- Active Database panel -->
+      <div class="card" id="activeDatabaseCard" style="margin-top:20px;">
+        <div class="card-header">
+          <span class="card-title">📂 Active Database</span>
+        </div>
+        <div id="activeDatabasePanel" style="background:var(--bg);border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;color:var(--muted);min-height:60px;">
+          <em>Link a folder to see database info…</em>
+        </div>
+      </div>
+
+    </div>
+    <!-- end tabSync -->
+
+
+    <!-- ────────────────────────────────────────
+         TAB: DOWNLOAD ENGINE
+    ──────────────────────────────────────── -->
+    <div id="tabDownload" class="tab-panel">
+
+      <div class="page-header">
+        <div>
+          <div class="page-title">⬇ Download Engine</div>
+          <div class="page-subtitle">Scan Storypark for new or missing media and download it to your linked folder.</div>
+        </div>
+        <!-- btnShowGuide — JS shows/hides this -->
         <button id="btnShowGuide">📖 Show Guide</button>
       </div>
 
-      <div class="scan-layout" id="scanLayout">
-        <!-- Left column: scan controls -->
-        <div class="scan-controls">
-          <div class="action-btns">
-            <button class="btn-primary" id="btnExtractLatest" disabled>⬇ Scan Latest</button>
-            <button class="btn-primary" id="btnDeepRescan" disabled>🔁 Scan All Stories</button>
-            <button class="btn-primary" id="btnOfflineScanMain" disabled style="background:#0f3460;" title="Smart Sort: runs face AI on your downloaded photos. High-confidence = kept, uncertain = Review tab, low-confidence = moved to Rejected Matches. No internet needed.">🧠 Smart Sort</button>
-            <button class="btn-primary" id="btnResumeScan" disabled style="display:none;background:#a855f7;">▶ Resume Scan</button>
-            <button class="btn-secondary" id="btnTestConnection">🔌 Test Connection</button>
-            <button id="btnStopScan">🛑 Stop Scan</button>
-          </div>
-          <!-- All-children confidence panel — visible only when "All Children" is selected -->
-          <div id="allChildrenPanel" style="display:none;background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.08);"></div>
-          <div id="resumeInfo" style="display:none;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:8px;padding:8px 12px;font-size:12px;color:#a855f7;margin-bottom:10px;"></div>
-          <!-- Download All Media toggle — applies to both scan modes -->
-          <div id="downloadAllMediaRow" style="background:rgba(96,165,250,0.05);border:1px solid rgba(96,165,250,0.15);border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:0;">
-              <input type="checkbox" id="chkSkipFaceRecMain" style="width:auto;margin:4px 0 0;flex-shrink:0;">
-              <div>
-                <strong style="font-size:13px;color:var(--text);">📥 Download All Media</strong><br>
-                <span style="font-size:11px;color:var(--muted);line-height:1.5;">
-                  All photos and videos download immediately — no face matching, no reviewing.<br>
-                  Works with both <strong style="color:var(--text);">Scan Latest</strong> (new stories only) and <strong style="color:var(--text);">Scan All Stories</strong> (full history).
-                </span>
-              </div>
-            </label>
-            <div id="downloadAllMediaWarning" style="display:none;margin-top:8px;padding:6px 10px;background:rgba(251,191,36,0.08);border-radius:6px;font-size:11px;color:var(--warning);line-height:1.5;">
-              ⚠ <strong>Downloads everything</strong> — group photos and other children included. Not just your child's photos.<br>
-              Use <strong>Offline Facial Scan</strong> afterwards to sort your child's photos from the rest.
-            </div>
-            <div style="margin-top:8px;font-size:11px;color:var(--muted);line-height:1.5;">
-              📍 <strong style="color:var(--text);">Set up your daycare location before downloading</strong> — GPS is embedded at download time and cannot be added to photos afterwards.
-              <a href="#" id="linkToSettingsGps" style="color:#60a5fa;text-decoration:none;margin-left:4px;">→ Open Settings → Centre Locations</a>
-            </div>
-          </div>
-
-          <!-- Date range selector — limits how far back the scan fetches stories -->
-          <div id="scanDateRangeRow" style="background:rgba(96,165,250,0.05);border:1px solid rgba(96,165,250,0.15);border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:8px;">📅 Date range to scan</label>
-
-            <!-- Radio: All time -->
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:8px;">
-              <input type="radio" name="scanDateMode" id="scanDateModeAll" value="all" checked style="width:auto;margin:0;">
-              <span>🗓 <strong>All time</strong> — full history (may take 6+ hours)</span>
-            </label>
-
-            <!-- Radio: Custom range -->
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:6px;">
-              <input type="radio" name="scanDateMode" id="scanDateModeCustom" value="custom" style="width:auto;margin:0;">
-              <span>📅 <strong>Custom date range:</strong></span>
-            </label>
-
-            <!-- Date pickers — enabled only when Custom is selected -->
-            <div id="scanDatePickerRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-left:26px;margin-bottom:8px;">
-              <div style="display:flex;align-items:center;gap:6px;">
-                <label style="font-size:11px;color:var(--muted);white-space:nowrap;">From:</label>
-                <input type="date" id="scanFromDate" disabled
-                  style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);opacity:0.5;">
-              </div>
-              <span style="font-size:12px;color:var(--muted);">→</span>
-              <div style="display:flex;align-items:center;gap:6px;">
-                <label style="font-size:11px;color:var(--muted);white-space:nowrap;">To:</label>
-                <input type="date" id="scanToDate" disabled
-                  style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);opacity:0.5;">
-                <span style="font-size:11px;color:var(--muted);">(blank = today)</span>
-              </div>
-            </div>
-
-            <p id="scanDateRangeNote" style="font-size:11px;color:var(--muted);margin:0;line-height:1.5;">
-              ⚠️ <strong>All time</strong> — may take 6+ hours. Keep this tab open and don't let your computer sleep.
-            </p>
-          </div>
-
-          <p class="help">
-            <strong>Scan Latest:</strong> Check for new stories since your last scan. &nbsp;
-            <strong>Scan All Stories:</strong> Re-process your entire history.
-          </p>
-
-          <div class="status-bar">
+      <!-- Delta Scan card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">⚡ Delta Scan</span>
+          <div style="display:flex;align-items:center;gap:8px;">
             <span class="dot" id="statusDot"></span>
-            <span id="statusText">Ready</span>
+            <span style="font-size:13px;color:var(--muted);" id="statusText">Ready</span>
           </div>
+        </div>
 
+        <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6;">
+          Scans Storypark for stories not yet saved to your linked folder and downloads
+          all missing media — photos, videos, story pages, and story cards. Select a child
+          from the sidebar, then click <strong style="color:var(--text);">Scan for Missing Media</strong> to begin.
+        </p>
+
+        <!-- Primary scan action row -->
+        <div class="scan-actions">
+          <button class="btn-primary" id="btnScanMissing" disabled style="min-width:220px;">
+            🔍 Scan for Missing Media
+          </button>
+          <button id="btnStopScan">🛑 Stop Scan</button>
+          <button class="btn-secondary" id="btnResumeScan" disabled
+            style="display:none;background:rgba(168,85,247,0.15);color:#a855f7;border-color:rgba(168,85,247,0.3);">
+            ▶ Resume Scan
+          </button>
+        </div>
+
+        <!-- Resume info panel (shown by JS when checkpoint exists) -->
+        <div id="resumeInfo"
+          style="display:none;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:8px;padding:8px 12px;font-size:12px;color:#a855f7;margin-bottom:12px;line-height:1.5;">
+        </div>
+
+        <!-- All-children confidence panel (shown by JS when "All Children" selected) -->
+        <div id="allChildrenPanel"
+          style="display:none;background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:12px;border:1px solid var(--border);">
+        </div>
+
+        <!-- ── Large central progress bar ── -->
+        <div class="progress-large-wrap">
+          <div class="progress-large-header">
+            <span class="progress-large-label">Download Progress</span>
+            <span class="progress-large-pct" id="progressLargePct">0 / 0</span>
+          </div>
+          <!-- #progressBar: JS reads value, sets value, and sets display -->
           <progress id="progressBar" value="0" max="100"></progress>
-          <div id="progressText"></div>
+        </div>
+        <div id="progressText"></div>
 
-          <div class="log-wrapper">
-            <div class="log-container" id="scanLogBox">
-              <p>Waiting for action…</p>
-            </div>
-            <button id="btnFollowScanLog" style="display:none;position:absolute;bottom:10px;right:18px;padding:5px 12px;border:none;border-radius:12px;background:rgba(96,165,250,0.18);color:#60a5fa;font-size:11px;font-weight:600;cursor:pointer;">↓ Follow Log</button>
+        <!-- ── Dark terminal-style log output ── -->
+        <div style="position:relative;margin-top:4px;">
+          <div class="terminal log-container" id="scanLogBox">
+            <p>Waiting for action…</p>
           </div>
-
-          <!-- Persistent error banner — stays visible until user dismisses -->
-          <div id="lastErrorBanner" style="display:none;background:rgba(233,69,96,0.1);border:1px solid rgba(233,69,96,0.3);border-radius:8px;padding:8px 12px;margin-top:8px;font-size:12px;color:#f87171;align-items:flex-start;gap:8px;">
-            <span style="flex:1;line-height:1.5;" id="lastErrorText"></span>
-            <button onclick="this.closest('#lastErrorBanner').style.display='none';" style="border:none;background:none;color:#f87171;cursor:pointer;font-size:16px;line-height:1;padding:0;flex-shrink:0;" title="Dismiss">✕</button>
-          </div>
+          <button id="btnFollowScanLog"
+            style="display:none;position:absolute;bottom:10px;right:14px;padding:4px 12px;border:none;border-radius:10px;background:rgba(96,165,250,0.18);color:var(--info);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
+            ↓ Follow Log
+          </button>
         </div>
 
-        <!-- Right column: User Guide + Changelog (loaded dynamically from userguide.md + changelog.md) -->
-        <div class="tutorial-card" id="tutorialPanel">
+        <!-- Persistent error banner -->
+        <div id="lastErrorBanner"
+          style="display:none;background:rgba(233,69,96,0.1);border:1px solid rgba(233,69,96,0.3);border-radius:8px;padding:8px 12px;margin-top:12px;font-size:12px;color:#f87171;display:none;align-items:flex-start;gap:8px;">
+          <span style="flex:1;line-height:1.5;" id="lastErrorText"></span>
+          <button onclick="this.parentElement.style.display='none';"
+            style="border:none;background:none;color:#f87171;cursor:pointer;font-size:16px;line-height:1;padding:0;flex-shrink:0;" title="Dismiss">✕</button>
+        </div>
 
-          <!-- ── Tab switcher ── -->
-          <div class="guide-tabs">
-            <button class="guide-tab-btn active" data-guide-tab="guide">📖 Guide</button>
-            <button class="guide-tab-btn" data-guide-tab="changelog">📋 What's New</button>
+        <!-- ══════════════════════════════════════════════════
+             HIDDEN LEGACY SCAN CONTROLS
+             All elements below are wired by dashboard.js.
+             They live here so JS can find them by ID.
+             They will be surfaced in the Step 2 JS refactor.
+        ══════════════════════════════════════════════════ -->
+        <div id="legacyScanControls" style="display:none;position:absolute;left:-9999px;" aria-hidden="true">
+
+          <!-- Original scan buttons -->
+          <button id="btnExtractLatest" disabled>⬇ Scan Latest</button>
+          <button id="btnDeepRescan" disabled>🔁 Scan All Stories</button>
+          <button id="btnOfflineScanMain" disabled>🧠 Smart Sort</button>
+
+          <!-- Download All Media toggle -->
+          <div id="downloadAllMediaRow">
+            <label>
+              <input type="checkbox" id="chkSkipFaceRecMain">
+              📥 Download All Media
+            </label>
+            <div id="downloadAllMediaWarning" style="display:none;"></div>
+            <a href="#" id="linkToSettingsGps">→ Open Settings → Centre Locations</a>
           </div>
 
-          <!-- ── Scrollable tab content (filled by dashboard.js loadUserGuide / loadChangelog) ── -->
-          <div class="guide-tab-content active" id="guideTabGuide">
-            <p class="guide-loading">⏳ Loading guide…</p>
-          </div>
-          <div class="guide-tab-content" id="guideTabChangelog">
-            <p class="guide-loading">⏳ Loading changelog…</p>
-          </div>
-
-          <!-- ── Legacy static content (hidden — replaced by dynamic loading) ── -->
-          <div style="display:none" id="tutorialOldContent">
-          <h3>📖 User Guide</h3>
-          <p style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5;">A guide for mums and dads — no tech knowledge needed!</p>
-
-          <!-- ── Which approach? ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">🤔 Which approach is right for you?</h4>
-          <div style="font-size:12px;line-height:1.6;margin-bottom:14px;">
-            <div style="padding:8px 10px;border-radius:6px;background:rgba(74,222,128,0.06);border-left:3px solid var(--success);margin-bottom:6px;">
-              <strong style="color:var(--success);">🅰 Smart Download</strong> — scans and filters as it goes, only saves your child's photos.<br>
-              <span style="color:var(--muted);">Takes longer to start downloading (need to approve ~100 photos first), but photos are already sorted when they arrive.</span>
+          <!-- Date range selector -->
+          <div id="scanDateRangeRow">
+            <label>
+              <input type="radio" name="scanDateMode" id="scanDateModeAll" value="all" checked>
+              All time
+            </label>
+            <label>
+              <input type="radio" name="scanDateMode" id="scanDateModeCustom" value="custom">
+              Custom date range:
+            </label>
+            <div id="scanDatePickerRow">
+              <input type="date" id="scanFromDate" disabled>
+              <input type="date" id="scanToDate" disabled>
             </div>
-            <div style="padding:8px 10px;border-radius:6px;background:rgba(96,165,250,0.06);border-left:3px solid #60a5fa;">
-              <strong style="color:#60a5fa;">🅱 Download Everything First</strong> — saves every photo immediately, sort by face later (optional).<br>
-              <span style="color:var(--muted);">Fast! Everything downloads in one run. Great for getting a complete backup quickly.</span>
-            </div>
+            <p id="scanDateRangeNote"></p>
           </div>
 
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
+        </div>
+        <!-- end legacyScanControls -->
 
-          <!-- ── Option A ── -->
-          <h4 style="font-size:13px;color:var(--success);margin-bottom:10px;">🅰 Smart Download — Step by Step</h4>
+      </div>
+      <!-- end Delta Scan card -->
 
-          <div class="tutorial-step">
-            <span class="step-num">1</span>
-            <div>
-              <p><strong>One-time Chrome setup</strong></p>
-              <p>Go to <strong>Chrome Settings → Downloads</strong> and turn <strong>OFF</strong> "Ask where to save each file". This stops the save-file popup appearing for every photo.</p>
-            </div>
-          </div>
+    </div>
+    <!-- end tabDownload -->
 
-          <div class="tutorial-step">
-            <span class="step-num">2</span>
-            <div>
-              <p><strong>Log in to Storypark</strong></p>
-              <p>Open <a href="https://app.storypark.com" target="_blank" style="color:var(--success);text-decoration:none;">app.storypark.com</a> in another tab and sign in as normal.</p>
-            </div>
-          </div>
 
-          <div class="tutorial-step">
-            <span class="step-num">3</span>
-            <div>
-              <p><strong>Select your child and run Full History Scan</strong></p>
-              <p>Choose your child from the dropdown, then click <strong>🔁 Full History Scan</strong>. The extension starts working through all stories. You'll see "☕ Coffee Break" pauses — totally normal!</p>
-            </div>
-          </div>
+    <!-- ────────────────────────────────────────
+         TAB: POST-PROCESSING
+    ──────────────────────────────────────── -->
+    <div id="tabPost" class="tab-panel">
 
-          <div class="tutorial-step">
-            <span class="step-num">4</span>
-            <div>
-              <p><strong>Teach the AI your child's face</strong></p>
-              <p>Photos appear in the <strong>👀 Pending Review</strong> tab as the scan runs. For each one:<br>
-              • <strong>✅ "This is my child"</strong> — saves the face + trains the AI<br>
-              • <strong>✗ Reject</strong> — not your child (also teaches the AI)<br>
-              The more you approve, the smarter it gets! You don't have to review everything right away.</p>
-            </div>
-          </div>
-
-          <div class="tutorial-step">
-            <span class="step-num">5</span>
-            <div>
-              <p><strong>Photos download automatically after ~100 approvals</strong></p>
-              <p>Once the AI is confident, photos start downloading on their own. Find them in your <strong>Downloads → Storypark Smart Saver → [Child's Name]</strong> folder.</p>
-            </div>
-          </div>
-
-          <div class="tutorial-tip">
-            💡 <strong>Optional head start:</strong> Before scanning, go to <strong>Settings → 🧠 Face Training</strong> and upload 10+ clear photos of your child from your phone or computer. The AI learns faster with a head start — but it's not required!
-          </div>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Option B ── -->
-          <h4 style="font-size:13px;color:#60a5fa;margin-bottom:10px;">🅱 Download Everything — Step by Step</h4>
-
-          <div class="tutorial-step">
-            <span class="step-num">1</span>
-            <div>
-              <p><strong>Turn on "Download all photos"</strong></p>
-              <p>Go to <strong>⚙ Settings → 📂 Download Settings</strong> and turn on <strong>"Download all photos (skip face recognition)"</strong>.</p>
-            </div>
-          </div>
-
-          <div class="tutorial-step">
-            <span class="step-num">2</span>
-            <div>
-              <p><strong>Run a Full History Scan</strong></p>
-              <p>Every photo downloads immediately — no reviewing needed. Each photo has full metadata embedded: original date, story text, classroom name, daycare routine (feeds, naps, nappies), GPS location of the daycare, and your child's age.</p>
-            </div>
-          </div>
-
-          <div class="tutorial-step">
-            <span class="step-num">3</span>
-            <div>
-              <p><strong>Sort by face later (optional — works completely offline!)</strong></p>
-              <p>1. <strong>Settings → 🧠 Face Training</strong> → upload photos of your child from your computer<br>
-              2. <strong>Settings → 📁 Link Download Folder</strong> → select your Downloads folder<br>
-              3. <strong>Settings → 🧹 Clean Up Folder</strong> → moves non-matching photos to a _rejected folder<br>
-              <em style="color:var(--success);">The AI model is bundled inside the extension (~7.5MB). No internet needed — runs 100% on your computer!</em></p>
-            </div>
-          </div>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Offline Facial Scan ── -->
-          <h4 style="font-size:13px;color:#0f3460;margin-bottom:10px;background:#0f3460;color:var(--text);padding:6px 10px;border-radius:6px;display:flex;align-items:center;gap:6px;">🔍 Offline Facial Scan — Re-scan Without Internet</h4>
-          <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:8px;">In the Scan tab, alongside <strong>Download Latest</strong> and <strong>Full History Scan</strong>, there's a third button: <strong style="color:var(--text);">🔍 Offline Facial Scan</strong>. This reads your already-downloaded photos directly from your hard drive — no internet needed.</p>
-          <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:10px;">
-            <p style="margin-bottom:4px;">✅ <strong style="color:var(--text);">High confidence</strong> → face model learns automatically</p>
-            <p style="margin-bottom:4px;">👀 <strong style="color:var(--text);">Uncertain matches</strong> → go to Review tab for your decision</p>
-            <p style="margin-bottom:4px;">❌ <strong style="color:var(--text);">Low confidence</strong> → model learns what NOT to match</p>
-            <p style="margin-bottom:4px;">⤴ <strong style="color:#a855f7;">Also rescans Rejected Matches folder</strong> — photos the AI rejected early may now score better! They appear in Review tab marked "approve to rescue"</p>
-            <p>⚡ <strong style="color:var(--text);">Saves fingerprint cache</strong> → next online scan skips re-downloading photos already analysed offline (up to 20x faster)</p>
-          </div>
-          <div class="tutorial-tip" style="margin-top:0;">
-            💡 <strong>Great for the "Download Everything, Then Sort" approach:</strong> After downloading everything, upload 10 training photos from your phone → run Offline Facial Scan → model improves → photos in Rejected Matches folder get re-evaluated automatically.
-          </div>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Interrupted scans ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">⏸ If the Scan Gets Interrupted</h4>
-          <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:6px;">Storypark occasionally slows things down for large accounts. Don't worry:</p>
-          <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:14px;">
-            <p>• Progress is saved automatically every 5 stories</p>
-            <p>• A purple <strong style="color:#a855f7;">▶ Resume from story X (Y remaining)</strong> button will appear</p>
-            <p>• Click it and the scan picks up exactly where it stopped — even after closing Chrome</p>
-          </div>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Getting photos ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">📥 Getting Your Photos (Smart Download mode)</h4>
-          <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px;">
-            In Smart mode, approved photos are held in a queue. When you're ready, click the <strong style="color:var(--success);">📥 Download N Approved</strong> button in the Review tab to save them all at once — including story pages with the educator's text.
-          </p>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── AI Phases ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">🧠 The 4 AI Phases (Smart mode)</h4>
-          <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:8px;">The AI locks downloads at first to protect against downloading the wrong child's photos. Each time you approve a photo, it gets smarter:</p>
-          <div style="font-size:12px;line-height:1.7;margin-bottom:6px;">
-            <div style="margin-bottom:6px;padding:5px 9px;border-radius:6px;background:rgba(96,165,250,0.08);border-left:3px solid #60a5fa;">
-              <strong style="color:#60a5fa;">Phase 1</strong> (0–10 approvals) — Learning mode. All photos go to review. No downloads yet.
-            </div>
-            <div style="margin-bottom:6px;padding:5px 9px;border-radius:6px;background:rgba(74,222,128,0.08);border-left:3px solid var(--success);">
-              <strong style="color:var(--success);">Phase 2</strong> (10–50 approvals) — Getting better. Most still go to review. No downloads yet.
-            </div>
-            <div style="margin-bottom:6px;padding:5px 9px;border-radius:6px;background:rgba(168,85,247,0.08);border-left:3px solid #a855f7;">
-              <strong style="color:#a855f7;">Phase 3</strong> (50–100 approvals) — Almost there. Fewer reviews needed. No downloads yet.
-            </div>
-            <div style="padding:5px 9px;border-radius:6px;background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;">
-              <strong style="color:#f59e0b;">Phase 4</strong> (100+ approvals) — 🎉 Fully confident! Photos download automatically from now on.
-            </div>
-          </div>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Backup ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">💾 Save a Backup (Highly Recommended!)</h4>
-          <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px;">
-            Your face model and approval history are stored inside Chrome. If Chrome is ever reinstalled, you'd lose them. <strong style="color:var(--text);">Go to Settings → 💾 Full Backup → Export Full Backup</strong> and save the file somewhere safe (cloud storage or USB drive). You can restore everything in seconds.
-          </p>
-
-          <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;">
-
-          <!-- ── Tips ── -->
-          <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">💡 Quick Tips</h4>
-          <div style="font-size:12px;color:var(--muted);line-height:1.7;">
-            <p style="margin-bottom:5px;">• <strong style="color:var(--text);">Full History Scan</strong> = first time (or re-doing everything). <strong style="color:var(--text);">Download Latest</strong> = check for new photos each week.</p>
-            <p style="margin-bottom:5px;">• Training photos work best when they're <strong style="color:var(--text);">clear, well-lit, and show different angles</strong> of your child's face.</p>
-            <p style="margin-bottom:5px;">• Use <strong style="color:var(--text);">keyboard shortcuts</strong> in the Review tab: <strong>A</strong> = Approve, <strong>R</strong> = Reject, <strong>Z</strong> = Undo.</p>
-            <p style="margin-bottom:5px;">• Photos land in <strong style="color:var(--text);">Downloads → Storypark Smart Saver → [Child's Name] → Stories</strong>. Each story has its own date-named folder.</p>
-            <p style="margin-bottom:0;">• Open the <strong style="color:var(--text);">index.html</strong> file in your browser for a beautiful gallery of all your child's stories — works offline!</p>
-          </div>
-
-          </div><!-- end tutorialOldContent (hidden legacy content) -->
-
-          <!-- Dismiss button — always visible at the bottom of the guide panel -->
-          <button class="btn-dismiss-tutorial" id="btnDismissTutorial" style="margin-top:16px;flex-shrink:0;">✕ Hide this guide</button>
-        </div><!-- end tutorialPanel -->
-      </div><!-- end scan-layout -->
-    </div><!-- end tabScan -->
-
-    <!-- ──── TAB: REVIEW ──── -->
-    <div id="tabReview" class="tab-panel">
-      <div class="review-header">
+      <div class="page-header">
         <div>
-          <h2>👀 Pending Review</h2>
-          <span class="count" id="reviewCount">Loading…</span>
-        </div>
-        <div class="review-actions-bar">
-          <button class="btn-secondary" id="btnBatchDownload" style="display:none;background:rgba(74,222,128,0.15);color:var(--success);">📥 Download Approved</button>
-          <button class="btn-secondary" id="btnBuildHtml" style="display:none;background:rgba(96,165,250,0.15);color:#60a5fa;" title="Regenerates all story.html pages, Story Card JPEGs, and index pages from stored data. No photos are re-downloaded.">🔄 Rebuild Pages &amp; Cards</button>
-
-
-          <button class="btn-secondary" id="btnFinalVerify" style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);" title="Re-check all pending photos against the mature face model">✅ Final Verification</button>
-          <button class="btn-secondary" id="btnUndo" disabled style="opacity:0.4;">⤺ Undo Last</button>
-          <button class="btn-secondary" id="btnRefreshReview">↻ Refresh</button>
+          <div class="page-title">⚙ Post-Processing</div>
+          <div class="page-subtitle">
+            Enrich and organise downloaded media with face filtering, embedded metadata, and HTML artifacts.
+            Run these after a full download is complete.
+          </div>
         </div>
       </div>
 
-      <!-- Review status indicator (replaces old duplicate progress bar) -->
-      <div id="reviewStatusBar" style="display:none;background:var(--surface);border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);align-items:center;gap:10px;">
-        <span id="reviewStatusText"></span>
-      </div>
-      <div id="reviewEmpty">
-        <p>🎉 No media pending review.</p>
-        <p style="margin-top:8px;color:var(--muted);font-size:13px;">New matches appear here during a scan — or click <strong style="color:var(--text);">📥 Download Approved</strong> above if you have approved media waiting to be saved.</p>
-      </div>
-      <div class="review-grid" id="reviewGrid"></div>
+      <div class="post-grid">
 
-      <div style="margin-top:24px;padding:16px 20px;background:var(--surface);border-radius:10px;font-size:13px;line-height:1.7;color:var(--muted);">
-        <strong style="color:var(--text);">💡 How does face matching work?</strong><br>
-        The extension learns your child's face from every photo you approve — the more you
-        approve, the smarter it gets. High-confidence matches are downloaded automatically;
-        photos it's less sure about appear here for you to check.
+        <!-- Facial Recognition card -->
+        <div class="card">
+          <span class="post-card-icon">🧠</span>
+          <div class="post-card-title">Facial Recognition</div>
+          <div class="post-card-desc">
+            Analyse all downloaded photos against your trained face model. High-confidence matches are kept;
+            uncertain photos go to the review queue; low-confidence matches are moved to the Rejected Matches
+            folder. Runs entirely offline — no internet required.
+          </div>
+          <button class="btn-primary btn-full" id="btnInitFaceFilter" disabled>
+            🧠 Initialize Face Filter
+          </button>
+          <div class="post-card-status" id="initFaceFilterStatus"></div>
+        </div>
+
+        <!-- Metadata card -->
+        <div class="card">
+          <span class="post-card-icon">🏷️</span>
+          <div class="post-card-title">Metadata</div>
+          <div class="post-card-desc">
+            Embed rich EXIF metadata directly into each JPEG — GPS coordinates of the daycare, the original
+            story date, educator text, child name, room, and centre name. Metadata is written permanently into
+            each file and is visible in Apple Photos, Google Photos, and Windows Explorer.
+          </div>
+          <button class="btn-primary btn-full" id="btnEmbedExif" disabled>
+            🏷️ Embed EXIF
+          </button>
+          <div class="post-card-status" id="embedExifStatus"></div>
+        </div>
+
+        <!-- Artifacts card -->
+        <div class="card">
+          <span class="post-card-icon">🗂️</span>
+          <div class="post-card-title">Artifacts</div>
+          <div class="post-card-desc">
+            Generate all HTML story pages, Story Card JPEGs (1200 px, teal header), and child index pages
+            from stored story data. No re-downloading required. Use this after updating GPS coordinates,
+            educator text, naming templates, or page layouts.
+          </div>
+          <button class="btn-primary btn-full" id="btnGenerateArtifacts" disabled>
+            🗂️ Generate HTML / Cards
+          </button>
+          <div class="post-card-status" id="generateArtifactsStatus"></div>
+        </div>
+
       </div>
+      <!-- end post-grid -->
+
     </div>
+    <!-- end tabPost -->
 
-    <!-- ──── TAB: ACTIVITY LOG ──── -->
-    <div id="tabLog" class="tab-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <h2 style="font-size:20px;">📋 Activity Log</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-secondary" id="btnClearLog">🗑 Clear in-app log</button>
-          <button class="btn-secondary" id="btnDeleteLogFile" style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent);" title="Delete Database/activity_log.jsonl from your linked folder. Also clears the in-app log. Requires a linked folder.">🗑 Delete log file</button>
-          <button class="btn-secondary" id="btnExportLog" style="background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.3);color:#60a5fa;" title="Export the current activity log as a JSON file for AI analysis of issues">📤 Export for AI</button>
-        </div>
-      </div>
-      <div id="logTabInfo" style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,0.06);border-radius:6px;border:1px solid rgba(96,165,250,0.15);">
-        📁 Log saved to: <span id="logFilePath" style="font-family:monospace;color:#60a5fa;"></span>
-      </div>
-      <div style="position:relative;height:calc(100vh - 180px);">
-        <div class="log-container" id="activityLogBox" style="height:100%;">
-          <p class="level-INFO">No activity yet.</p>
-        </div>
-        <button id="btnFollowActivityLog" style="display:none;position:absolute;bottom:10px;right:18px;padding:5px 12px;border:none;border-radius:12px;background:rgba(96,165,250,0.18);color:#60a5fa;font-size:11px;font-weight:600;cursor:pointer;">↓ Follow Log</button>
-      </div>
-    </div>
 
-    <!-- ──── TAB: SETTINGS ──── -->
+    <!-- ────────────────────────────────────────
+         TAB: SETTINGS
+    ──────────────────────────────────────── -->
     <div id="tabSettings" class="tab-panel">
-      <h2 style="font-size:20px;margin-bottom:4px;">⚙ Settings</h2>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Configure how the extension downloads, organises, and protects your photos.</p>
 
-      <div id="humanWarning">
-        ⚠ <strong>human.js not found.</strong> Face recognition is disabled.
-      </div>
-
-      <!-- ═══ Section 1: Account & Safety ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:8px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">🔐</span>
+      <div class="page-header">
         <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);">Account &amp; Safety</div>
-          <div style="font-size:12px;color:var(--muted);">Verify your account is connected and protect your face model with a backup.</div>
+          <div class="page-title">🎛 Settings</div>
+          <div class="page-subtitle">Configure naming conventions, download behaviour, face recognition, and GPS metadata.</div>
         </div>
       </div>
 
-      <!-- Children -->
+      <!-- ══ NEW: Naming Conventions card ══ -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">✏️ Naming Conventions</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.6;">
+          Define how folders and files are named when stories are saved to disk. Use the tokens below — if a
+          token's data is not available for a story it is removed cleanly, with no dangling dashes or empty
+          segments. Illegal Windows characters and emojis are stripped automatically. File names are
+          truncated to a maximum of 100 characters.
+        </p>
+
+        <!-- Folder Template -->
+        <div class="form-group">
+          <label class="form-label">Folder Template</label>
+          <input
+            type="text"
+            class="form-input"
+            id="folderTemplate"
+            value="[ChildName]/Stories/[Date] - [Title]"
+            placeholder="e.g. [ChildName]/[Daycare]/[Date] - [Title]"
+          >
+          <div class="form-help">
+            Controls how story folders are structured inside your download directory. Slash characters
+            (<code>/</code>) create sub-folders. If a token is not available for a story, it is removed
+            automatically along with its surrounding delimiter.
+          </div>
+          <div class="token-list">
+            <span class="token-chip" title="Child's full name">[ChildName]</span>
+            <span class="token-chip" title="Daycare / centre name">[Daycare]</span>
+            <span class="token-chip" title="Classroom / room name">[Class]</span>
+            <span class="token-chip" title="Story date (YYYY-MM-DD)">[Date]</span>
+            <span class="token-chip" title="Story title from Storypark">[Title]</span>
+          </div>
+        </div>
+
+        <!-- File Template -->
+        <div class="form-group">
+          <label class="form-label">File Template</label>
+          <input
+            type="text"
+            class="form-input"
+            id="fileTemplate"
+            value="[Date]_[ChildName]_[Class]_[OriginalName]"
+            placeholder="e.g. [Date]_[ChildName]_[Class]_[OriginalName]"
+          >
+          <div class="form-help">
+            Controls how individual media files (photos and videos) are named. The original file extension
+            (<code>.jpg</code>, <code>.mp4</code>, etc.) is always preserved. Works for all media types.
+          </div>
+          <div class="token-list">
+            <span class="token-chip" title="Child's full name">[ChildName]</span>
+            <span class="token-chip" title="Daycare / centre name">[Daycare]</span>
+            <span class="token-chip" title="Classroom / room name">[Class]</span>
+            <span class="token-chip" title="Story date (YYYY-MM-DD)">[Date]</span>
+            <span class="token-chip" title="Story title from Storypark">[Title]</span>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+          <button class="btn-primary" id="btnApplyTemplate" disabled>
+            🔄 Retroactively Apply Template to Existing Files
+          </button>
+        </div>
+        <p id="applyTemplateStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+
+      <div class="section-divider">Account &amp; Safety</div>
+
+      <!-- Human.js warning (shown by JS if face AI not loaded) -->
+      <div id="humanWarning">
+        ⚠ <strong>human.js not found.</strong> Face recognition is disabled. Ensure
+        <code>lib/human.js</code> is present in the extension folder.
+      </div>
+
+      <!-- Children card -->
       <div class="card">
         <h2>👶 Children</h2>
-        <p class="help">Automatically fetched from your Storypark account.</p>
+        <p class="help">Automatically fetched from your Storypark account. Children appear here after
+          you log in to Storypark in another tab.</p>
         <div id="childrenListSettings"></div>
         <button class="btn-secondary" id="btnRefreshChildren" style="margin-top:8px;">↻ Refresh from Storypark</button>
       </div>
 
-      <!-- 🔄 Rebuild Pages & Cards — mirrors the Review tab button -->
+      <!-- Rebuild Pages & Cards -->
       <div class="card">
         <h2>🔄 Rebuild Pages &amp; Cards</h2>
-        <p class="help">Regenerate all <code>story.html</code> pages, Story Card JPEGs, and index pages from stored data. Same as the button in the Review tab — no photos are re-downloaded. Handy after updating GPS coordinates, educator text, or the page layout.</p>
+        <p class="help">
+          Regenerate all <code>story.html</code> pages, Story Card JPEGs, and index pages from stored data.
+          No photos are re-downloaded. Handy after updating GPS coordinates, educator text, or naming templates.
+        </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn-primary" id="btnGenerateStoryCardsAll" style="background:#0f3460;">🔄 Rebuild Pages &amp; Cards</button>
+          <button class="btn-primary btn-muted" id="btnGenerateStoryCardsAll">🔄 Rebuild Pages &amp; Cards</button>
         </div>
         <p id="storyCardsStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <!-- ═══ Section 2: Download Settings ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:24px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">📥</span>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);">Download Settings</div>
-          <div style="font-size:12px;color:var(--muted);">Control what gets downloaded during a scan and what metadata is saved with each photo.</div>
-        </div>
-      </div>
+      <div class="section-divider">Download Settings</div>
 
-      <!-- What Gets Downloaded (checkboxes) -->
+      <!-- What Gets Downloaded -->
       <div class="card">
         <h2>📂 What Gets Downloaded</h2>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkSkipFaceRec">
           <div>
             <label for="chkSkipFaceRec">Download all photos (skip face recognition)</label>
-            <p class="help" style="margin:0;">Downloads every photo without face matching. Useful if you just want everything.</p>
+            <p class="help" style="margin:0;">Downloads every photo without face matching. Useful if you just want a complete backup quickly.</p>
           </div>
         </div>
-        <div id="skipFaceWarning" style="display:none;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--warning);line-height:1.5;margin-bottom:14px;">
+        <div id="skipFaceWarning"
+          style="display:none;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--warning);line-height:1.5;margin-bottom:14px;">
           ⚠ Face recognition is disabled — <strong>all</strong> photos from stories will download, not just your child's.
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkAttendanceFilter">
           <div>
             <label for="chkAttendanceFilter">Skip days without routine records</label>
-            <p class="help" style="margin:0;">Only enable if your daycare <strong>consistently submits daily routine records</strong> (feeds, naps, nappies). Leave this <strong>off</strong> if any of these apply:<br>
-            • Your daycare doesn't use the routine feature<br>
-            • Your child attends or has attended two daycares and one doesn't use routines<br>
-            • You recently changed daycares and the new one has different practices<br>
-            • You're not sure — stories from days without routine records will be silently skipped if this is on.<br>
-            When off, face recognition filters your child's photos without relying on attendance records.</p>
+            <p class="help" style="margin:0;">Only enable if your daycare <strong>consistently submits daily routine records</strong> (feeds, naps, nappies). Leave this <strong>off</strong> if unsure — stories from days without routine records will be silently skipped if this is on.</p>
           </div>
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkFillGapsOnly">
           <div>
             <label for="chkFillGapsOnly">Download missing content only</label>
-            <p class="help" style="margin:0;">When on, scans only process stories that don't have any saved photos yet — skipping everything you've already downloaded.<br><br>
-            <strong>When to use:</strong><br>
-            • You had "Skip days without routine records" turned on and want to retrieve those missed stories<br>
-            • Your child changed daycares and some stories were skipped by the old settings<br>
-            • Your child attends two daycares with different practices and some days were filtered out<br><br>
-            <strong>How to use:</strong> (1) Fix the setting that was causing skips, (2) tick this option, (3) run Scan All Stories — only the gaps get filled. Then untick for normal scanning.</p>
+            <p class="help" style="margin:0;">Only processes stories that don't have any saved photos yet — skipping everything already downloaded. Use after fixing a setting that was causing stories to be skipped.</p>
           </div>
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkSaveStoryHtml" checked>
           <div>
             <label for="chkSaveStoryHtml">Save story pages (HTML archive)</label>
-            <p class="help" style="margin:0;">Print-friendly HTML page per story with educator text + photos.</p>
+            <p class="help" style="margin:0;">Print-friendly HTML page per story with educator text + photos. Opens offline in any browser.</p>
           </div>
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkSaveStoryCard" checked>
           <div>
             <label for="chkSaveStoryCard">Save story cards (JPEG image)</label>
-            <p class="help" style="margin:0;">Canvas-rendered 1200 px JPEG per story — teal header, full educator text, routine, EXIF stamped. Saved alongside photos.</p>
+            <p class="help" style="margin:0;">Canvas-rendered 1200 px JPEG per story — teal header, full educator text, routine, EXIF stamped. Great for Google Photos import.</p>
           </div>
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkKeepScenarioPhotos">
           <div>
             <label for="chkKeepScenarioPhotos">📷 Auto-keep scenario photos (no face detected)</label>
-            <p class="help" style="margin:0;">During Offline Facial Scan, photos with no face (group shots, artworks, pets) are automatically kept instead of going to Review. Leave off to decide each one yourself.</p>
+            <p class="help" style="margin:0;">During Offline Facial Scan, photos with no face (group shots, artworks, pets) are automatically kept instead of going to Review.</p>
           </div>
         </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="chkDownloadVideos">
           <div>
             <label for="chkDownloadVideos">🎬 Download video files (.mp4, .mov, .webm, …)</label>
-            <p class="help" style="margin:0;">Download video files from stories (e.g. <code style="font-size:10px;">story_video_abc123_720_high.mp4</code>). Videos can be 50–200 MB each — leave <strong>off</strong> if you only want photos or have limited disk space.</p>
+            <p class="help" style="margin:0;">Videos can be 50–200 MB each — leave <strong>off</strong> if you only want photos or have limited disk space.</p>
           </div>
         </div>
       </div>
@@ -914,19 +543,21 @@
       <!-- Centre Locations -->
       <div class="card">
         <h2>📍 Centre Locations</h2>
-        <p class="help">GPS coordinates embedded in EXIF metadata at download time — set this up <strong style="color:var(--text);">before</strong> scanning so every photo is location-tagged automatically.</p>
+        <p class="help">GPS coordinates embedded in EXIF metadata at download time — set this up
+          <strong style="color:var(--text);">before</strong> scanning so every photo is location-tagged automatically.
+          Visible in Apple Photos, Google Photos, and Windows Explorer.</p>
         <div id="centreList"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
           <button class="btn-secondary" id="btnAddCentre">＋ Add Centre</button>
           <button class="btn-secondary" id="btnDiscoverCentres">🔍 Discover from Storypark</button>
         </div>
-        <button class="btn-primary" id="btnSaveLocations" style="margin-top:10px;">💾 Save Locations</button>
+        <button class="btn-primary btn-muted" id="btnSaveLocations" style="margin-top:10px;">💾 Save Locations</button>
       </div>
 
       <!-- Face Recognition Thresholds -->
       <div class="card">
         <h2>🎯 Face Recognition Thresholds</h2>
-        <p class="help">Fine-tune how the AI decides which photos to download automatically.</p>
+        <p class="help">Fine-tune how the AI decides which photos to download automatically vs. send to the Review queue.</p>
         <div>
           <label>Auto-Approve Threshold</label>
           <div class="threshold-controls">
@@ -947,25 +578,19 @@
         </div>
       </div>
 
-      <!-- Save button — for thresholds + locations (checkboxes auto-save on tick) -->
       <div style="display:flex;gap:12px;margin-bottom:8px;">
-        <button class="btn-primary" id="btnSaveSettings">💾 Save Thresholds &amp; Locations</button>
+        <button class="btn-primary btn-muted" id="btnSaveSettings">💾 Save Thresholds &amp; Locations</button>
       </div>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:24px;">Checkboxes above save automatically on change. This button saves threshold sliders and GPS locations.</p>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:24px;">
+        Checkboxes above save automatically on change. This button saves threshold sliders and GPS locations.
+      </p>
 
-      <!-- ═══ Section 3: Face Recognition ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:8px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">🧠</span>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);">Face Recognition</div>
-          <div style="font-size:12px;color:var(--muted);">Train the AI to recognise your child, manage its decisions, reset if needed.</div>
-        </div>
-      </div>
+      <div class="section-divider">Face Recognition</div>
 
-      <!-- Face Training -->
+      <!-- Face Training card -->
       <div class="card" id="trainingCard">
         <h2>🧠 Face Training Data</h2>
-        <p class="help">Upload 10+ clear face photos per child. More photos = better recognition.</p>
+        <p class="help">Upload 10+ clear, well-lit face photos per child from different angles. More photos = better recognition accuracy.</p>
         <div style="margin-bottom:12px;">
           <label for="trainingChildSelect">Training for child:</label>
           <select id="trainingChildSelect"><option value="">— select a child —</option></select>
@@ -973,7 +598,7 @@
         <div class="phase-indicator" id="phaseIndicator"></div>
         <p id="trainingStatus" style="font-size:13px;margin-bottom:10px;min-height:18px;"></p>
         <input type="file" id="trainingFileInput" accept="image/*" multiple>
-        <div id="trainingPreviews" style="margin-top:10px;"></div>
+        <div id="trainingPreviews" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;"></div>
         <p id="trainingProgress" style="font-size:13px;color:var(--muted);margin-top:8px;min-height:18px;"></p>
         <button class="btn-secondary" id="btnSaveTraining" style="margin-top:4px;width:100%;" disabled>💾 Save training photos</button>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
@@ -984,7 +609,7 @@
         <button class="btn-danger" id="btnResetFaceData" style="margin-top:12px;">🗑 Reset Face Data</button>
       </div>
 
-      <!-- Reset Rejections — lives next to face training (same workflow: retrain → reset → rescan) -->
+      <!-- Reset Rejections card -->
       <div class="card" style="border:1px solid rgba(233,69,96,0.2);">
         <h2>🔄 Reset Rejected Images</h2>
         <p class="help">Clears all "rejected" image records so previously-skipped photos will be re-evaluated on the next scan. Use this after retraining the face model — your improved model may now recognise photos it previously rejected.</p>
@@ -992,33 +617,17 @@
         <p id="clearRejectionsStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <!-- ═══ Section 4: Folder Management ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:24px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">📁</span>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);">Folder Management</div>
-          <div style="font-size:12px;color:var(--muted);">Link your download folder to verify files, clean up non-matches, and fix photo metadata.</div>
-        </div>
-      </div>
+      <div class="section-divider">Developer</div>
 
-      <!-- ═══ Section 5: Developer ═══ -->
-      <div style="display:flex;align-items:center;gap:12px;margin:24px 0 14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <span style="font-size:22px;">🛠</span>
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--warning);">Developer</div>
-          <div style="font-size:12px;color:var(--muted);">Advanced debugging tools — leave these off during normal use.</div>
-        </div>
-      </div>
-
-      <!-- Debug -->
+      <!-- Debug card -->
       <div class="card" style="border:1px solid rgba(251,191,36,0.3);">
         <h2 style="color:var(--warning);">🛠 Developer / Debug</h2>
-        <p class="help">⚠ Temporary debug feature. Disable during normal use.</p>
+        <p class="help">⚠ Advanced debugging tools. Disable during normal use — keeping these on impacts performance.</p>
         <div class="checkbox-row">
           <input type="checkbox" id="chkDebugCaptureMode">
           <div>
             <label for="chkDebugCaptureMode">Enable Debug Capture Mode</label>
-            <p class="help" style="margin:0;">Captures all API responses in memory for export.</p>
+            <p class="help" style="margin:0;">Captures all API responses in memory for export. Used for diagnosing API issues.</p>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1027,55 +636,166 @@
         </div>
         <p id="debugLogStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
-    </div><!-- end tabSettings -->
 
-    <!-- ──── TAB: TOOLS & MAINTENANCE ──── -->
-    <div id="tabTools" class="tab-panel">
-      <h2 style="font-size:20px;margin-bottom:4px;">🧰 Tools & Maintenance</h2>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;">Advanced operations for managing your downloaded files and database.</p>
+    </div>
+    <!-- end tabSettings -->
+
+  </main>
+  <!-- end .main -->
 
 
-      <!-- 📂 Active Database panel (Phase 5B) — shows where the source-of-truth JSON files live. -->
-      <div class="card" id="activeDatabaseCard">
-        <h2>📂 Active Database</h2>
-        <p class="help">All scan progress, rejections, face data, and story manifests are stored as portable JSON files inside your linked folder. Copy the folder to any computer to carry your data with you.</p>
-        <div id="activeDatabasePanel" style="background:var(--bg);border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12px;line-height:1.7;color:var(--muted);min-height:60px;">
-          <em>Loading…</em>
+  <!-- ════════════════════════════════════════════════════════
+       HIDDEN LEGACY PANELS
+       These panels are off-screen and invisible to the user.
+       All element IDs inside are wired by dashboard.js and
+       will be migrated to the new visible UI in Step 2.
+  ════════════════════════════════════════════════════════ -->
+  <div aria-hidden="true"
+    style="display:none!important;position:fixed;left:-9999px;top:-9999px;pointer-events:none;overflow:hidden;width:0;height:0;">
+
+    <!-- Legacy nav compatibility — JS uses data-tab and .nav-btn selectors -->
+    <nav id="legacyNavCompat">
+      <button class="nav-btn" data-tab="scan"></button>
+      <button class="nav-btn" data-tab="review"></button>
+      <button class="nav-btn" data-tab="log"></button>
+      <button class="nav-btn" data-tab="tools"></button>
+    </nav>
+
+    <!-- ── OLD TAB: SCAN ── -->
+    <div id="tabScan" class="tab-panel">
+      <div class="scan-layout" id="scanLayout">
+        <div class="scan-controls">
+          <!-- Original scan action buttons — scanLogBox and progressBar live in tabDownload -->
+          <div class="action-btns">
+            <!-- Stubs; real buttons are in tabDownload -->
+          </div>
+          <div class="log-wrapper">
+            <!-- scanLogBox lives in tabDownload for real-time visibility -->
+          </div>
         </div>
+        <!-- Tutorial / User Guide panel -->
+        <div class="tutorial-card" id="tutorialPanel">
+          <div class="guide-tabs">
+            <button class="guide-tab-btn active" data-guide-tab="guide">📖 Guide</button>
+            <button class="guide-tab-btn" data-guide-tab="changelog">📋 What's New</button>
+          </div>
+          <div class="guide-tab-content active" id="guideTabGuide">
+            <p class="guide-loading">⏳ Loading guide…</p>
+          </div>
+          <div class="guide-tab-content" id="guideTabChangelog">
+            <p class="guide-loading">⏳ Loading changelog…</p>
+          </div>
+          <button class="btn-dismiss-tutorial" id="btnDismissTutorial" style="margin-top:16px;flex-shrink:0;">
+            ✕ Hide this guide
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- end tabScan (legacy) -->
+
+
+    <!-- ── OLD TAB: REVIEW ── -->
+    <div id="tabReview" class="tab-panel">
+      <div class="review-header">
+        <div>
+          <h2>👀 Pending Review</h2>
+          <span class="count" id="reviewCount">Loading…</span>
+        </div>
+        <div class="review-actions-bar">
+          <button class="btn-secondary" id="btnBatchDownload"
+            style="display:none;background:rgba(74,222,128,0.15);color:var(--success);">
+            📥 Download Approved
+          </button>
+          <button class="btn-secondary" id="btnBuildHtml"
+            style="display:none;background:rgba(96,165,250,0.15);color:var(--info);"
+            title="Regenerates all story.html pages, Story Card JPEGs, and index pages from stored data.">
+            🔄 Rebuild Pages &amp; Cards
+          </button>
+          <button class="btn-secondary" id="btnFinalVerify"
+            style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);"
+            title="Re-check all pending photos against the mature face model">
+            ✅ Final Verification
+          </button>
+          <button class="btn-secondary" id="btnUndo" disabled style="opacity:0.4;">⤺ Undo Last</button>
+          <button class="btn-secondary" id="btnRefreshReview">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="reviewStatusBar"
+        style="display:none;background:var(--surface);border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);align-items:center;gap:10px;">
+        <span id="reviewStatusText"></span>
+      </div>
+      <div id="reviewEmpty">
+        <p>🎉 No media pending review.</p>
+        <p style="margin-top:8px;color:var(--muted);font-size:13px;">New matches appear here during a scan.</p>
+      </div>
+      <div class="review-grid" id="reviewGrid"></div>
+    </div>
+    <!-- end tabReview (legacy) -->
+
+
+    <!-- ── OLD TAB: ACTIVITY LOG ── -->
+    <div id="tabLog" class="tab-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <h2 style="font-size:20px;">📋 Activity Log</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-secondary" id="btnRefreshDbInfo">↻ Refresh</button>
-          <button class="btn-secondary" id="btnOpenDbFolderHint" title="Copy the folder path — paste into File Explorer to open.">📋 Copy Path</button>
+          <button class="btn-secondary" id="btnClearLog">🗑 Clear in-app log</button>
+          <button class="btn-secondary" id="btnDeleteLogFile"
+            style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent);"
+            title="Delete Database/activity_log.jsonl from your linked folder.">
+            🗑 Delete log file
+          </button>
+          <button class="btn-secondary" id="btnExportLog"
+            style="background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.3);color:var(--info);"
+            title="Export the current activity log as a JSON file for AI analysis">
+            📤 Export for AI
+          </button>
         </div>
-      </div><!-- Link Download Folder -->
+      </div>
+      <div id="logTabInfo"
+        style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,0.06);border-radius:6px;border:1px solid rgba(96,165,250,0.15);">
+        📁 Log saved to: <span id="logFilePath" style="font-family:monospace;color:var(--info);"></span>
+      </div>
+      <div style="position:relative;">
+        <div class="log-container" id="activityLogBox" style="height:500px;">
+          <p class="level-INFO">No activity yet.</p>
+        </div>
+        <button id="btnFollowActivityLog"
+          style="display:none;position:absolute;bottom:10px;right:18px;padding:5px 12px;border:none;border-radius:12px;background:rgba(96,165,250,0.18);color:var(--info);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
+          ↓ Follow Log
+        </button>
+      </div>
+    </div>
+    <!-- end tabLog (legacy) -->
+
+
+    <!-- ── OLD TAB: TOOLS & MAINTENANCE ── -->
+    <div id="tabTools" class="tab-panel">
+
+      <!-- Link Download Folder card (legacy, tools tab version) -->
       <div class="card">
         <h2>📁 Link Download Folder</h2>
-
-        <div style="background:rgba(96,165,250,0.06);border:1px solid rgba(96,165,250,0.2);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.6;color:var(--muted);">
-          <strong style="color:var(--text);">📁 How to link your folder:</strong><br>
-          Select the <strong style="color:#60a5fa;">"Storypark Smart Saver"</strong> folder (not your Downloads folder).<br>
-          Chrome doesn't allow selecting root library folders like Downloads directly — only subfolders. Your Storypark Smart Saver folder is the correct choice.<br>
-          <span style="color:var(--muted);font-size:11px;">Files are matched relative to this folder, e.g. <em>Hugo Hill/Stories/2024-04-17 — Story/photo.jpg</em></span>
+        <!-- JS writes folder status here -->
+        <div id="linkedFolderStatus2"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);">
         </div>
-
-        <div id="linkedFolderStatus" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <button class="btn-primary" id="btnLinkFolder" style="background:#0f3460;">📁 Link Folder</button>
-          <button class="btn-secondary" id="btnUnlinkFolder" style="display:none;">✕ Unlink</button>
-          <button class="btn-secondary" id="btnReconcileFolder" style="display:none;">🔍 Verify Files on Disk</button>
-          <button class="btn-secondary" id="btnRepairManifest" style="display:none;background:rgba(251,191,36,0.12);color:var(--warning);border-color:rgba(251,191,36,0.3);"
-            title="After a backup restore, scan your disk to recover what's already downloaded and update your tracking database. Select a child first using the dropdown in the Clean Up Folder section below.">
+          <button class="btn-secondary" id="btnRepairManifest"
+            style="display:none;background:rgba(251,191,36,0.12);color:var(--warning);border-color:rgba(251,191,36,0.3);">
             🔧 Repair Database from Disk
           </button>
-          <button class="btn-secondary" id="btnRebuildDatabase" style="display:none;background:rgba(99,102,241,0.12);color:var(--accent);border-color:rgba(99,102,241,0.3);"
-            title="Missing or old Database/ files? This fetches your story list from Storypark and matches on-disk story folders to real story IDs — so the next scan skips all already-downloaded stories. Use this if you downloaded everything on an older version of the extension.">
+          <button class="btn-secondary" id="btnRebuildDatabase"
+            style="display:none;background:rgba(99,102,241,0.12);color:var(--accent);border-color:rgba(99,102,241,0.3);"
+            title="Missing or old Database/ files? Fetches your story list from Storypark and matches on-disk folders to real story IDs.">
             🔄 Rebuild Database from Disk (API)
           </button>
-          <button class="btn-secondary" id="btnRewriteMetadata" style="display:none;background:rgba(74,155,143,0.1);color:#4A9B8F;border-color:rgba(74,155,143,0.3);"
-            title="Re-stamp EXIF Artist, GPS, date and IPTC keywords on all downloaded photos using your saved story data. Useful after enabling metadata for the first time.">
+          <button class="btn-secondary" id="btnRewriteMetadata"
+            style="display:none;background:rgba(74,155,143,0.1);color:#4A9B8F;border-color:rgba(74,155,143,0.3);"
+            title="Re-stamp EXIF Artist, GPS, date and IPTC keywords on all downloaded photos.">
             🏷️ Fix Photo Metadata
           </button>
         </div>
-        <!-- Rebuild Database enrichment option — shown when folder is linked -->
+
+        <!-- Rebuild enrichment toggle -->
         <div id="enrichStoriesRow" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:8px;font-size:12px;">
           <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:0;">
             <input type="checkbox" id="chkEnrichStories" checked style="width:auto;margin:3px 0 0;flex-shrink:0;">
@@ -1083,43 +803,31 @@
               <strong style="color:var(--accent);font-size:12px;">🔄 Fetch full story data</strong>
               <p style="margin:2px 0 0;color:var(--muted);font-size:11px;line-height:1.5;">
                 After matching story IDs, fetch each story's text, educator name, classroom, centre, and daily routine —
-                then rebuild <code style="font-size:10px;">story.html</code> + Story Cards with complete information.<br>
-                <em style="color:var(--warning);">⏱ ~45–60 min for 500 stories</em> · Stop button works between stories.
+                then rebuild <code style="font-size:10px;">story.html</code> + Story Cards with complete information.
+                <em style="color:var(--warning);">⏱ ~45–60 min for 500 stories</em>
               </p>
             </div>
           </label>
         </div>
 
-        <!-- Repair child selector — shown only when a folder is linked -->
+        <!-- Repair child selector -->
         <div id="repairChildRow" style="display:none;align-items:center;gap:8px;margin-top:6px;">
           <label style="font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;">Repair for child:</label>
-          <select id="repairChildSelect" style="flex:1;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
+          <select id="repairChildSelect"
+            style="flex:1;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
             <option value="__ALL__">👨‍👩‍👧‍👦 All Children</option>
           </select>
         </div>
-        <p id="linkedFolderInfo" style="font-size:12px;color:var(--muted);min-height:16px;margin:0;"></p>
 
-        <!-- Fix Photo Metadata options — shown when folder is linked -->
-        <div id="rewriteMetadataConfig" style="display:none;background:rgba(74,155,143,0.05);border:1px solid rgba(74,155,143,0.2);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:12px;">
-
+        <!-- Fix Photo Metadata config panel -->
+        <div id="rewriteMetadataConfig"
+          style="display:none;background:rgba(74,155,143,0.05);border:1px solid rgba(74,155,143,0.2);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:12px;">
           <div style="font-weight:600;color:#4A9B8F;margin-bottom:8px;font-size:13px;">🏷️ Fix Photo Metadata</div>
-
-          <!-- What each field does -->
-          <div style="background:rgba(255,255,255,0.04);border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.8;color:var(--muted);font-size:11px;">
-            Embeds data permanently into each JPEG file:<br>
-            <span style="color:var(--text);">📍 GPS</span> — daycare location (visible in Apple Photos, Google Photos, Finder)<br>
-            <span style="color:var(--text);">📅 Date</span> — story date as photo date (so photos sort by when they happened)<br>
-            <span style="color:var(--text);">🏷️ Artist+IPTC</span> — educator text, child name, room, centre (searchable in Windows/macOS)
-          </div>
-
-          <!-- Child selector -->
           <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;">Apply to:</label>
-          <select id="rewriteChildSelect" style="width:100%;margin-bottom:10px;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
+          <select id="rewriteChildSelect"
+            style="width:100%;margin-bottom:10px;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
             <option value="">All children</option>
           </select>
-
-          <!-- Field checkboxes -->
-          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px;">Fields to update:</div>
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
             <input type="checkbox" id="chkRewriteGps" checked style="width:auto;margin:0;"> 📍 GPS coordinates
           </label>
@@ -1129,29 +837,28 @@
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
             <input type="checkbox" id="chkRewriteIptc" checked style="width:auto;margin:0;"> 🏷️ Artist + story text
           </label>
-
-          <!-- Verify accuracy after writing -->
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-top:6px;margin-bottom:4px;">
             <input type="checkbox" id="chkVerifyMetadata" style="width:auto;margin:0;"> ✅ Verify metadata accuracy after writing
           </label>
-          <p style="font-size:11px;color:var(--muted);margin:0 0 10px 22px;line-height:1.5;">Re-reads each photo after writing to confirm EXIF fields (Artist, GPS) were stored correctly. Logs mismatches as warnings. Adds ~5% time.</p>
-
-          <!-- Progress area (shown during run) -->
+          <p style="font-size:11px;color:var(--muted);margin:0 0 10px 22px;line-height:1.5;">Re-reads each photo after writing to confirm EXIF fields were stored correctly. Adds ~5% time.</p>
           <div id="metadataFixProgress" style="display:none;">
             <div id="metadataFixProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
-            <progress id="metadataFixProgressBar" value="0" max="100" style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;margin-bottom:6px;accent-color:#4A9B8F;"></progress>
-            <button id="btnStopMetadataFix" style="padding:3px 10px;border:none;border-radius:5px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">🛑 Stop</button>
+            <progress id="metadataFixProgressBar" value="0" max="100"
+              style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;margin-bottom:6px;accent-color:#4A9B8F;"></progress>
+            <button id="btnStopMetadataFix"
+              style="padding:3px 10px;border:none;border-radius:5px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
+              🛑 Stop
+            </button>
           </div>
-
-          <!-- Report (shown after completion) -->
-          <div id="metadataFixReport" style="display:none;background:var(--bg);border-radius:5px;padding:7px 10px;margin-top:6px;font-size:11px;line-height:1.7;color:var(--muted);"></div>
+          <div id="metadataFixReport"
+            style="display:none;background:var(--bg);border-radius:5px;padding:7px 10px;margin-top:6px;font-size:11px;line-height:1.7;color:var(--muted);">
+          </div>
         </div>
       </div>
 
-      <!-- Clean Up Folder + Offline Smart Scan — requires linked folder + face model -->
+      <!-- Clean Up Folder card -->
       <div class="card" id="cleanupFolderCard">
         <h2>🧹 Clean Up Folder</h2>
-        <p class="help">Scan your linked download folder and remove photos that don't match your child's face. Requires a linked folder and a trained face model (Phase 3+).</p>
         <div style="margin-bottom:12px;">
           <label for="cleanupChildSelect">Clean up for child:</label>
           <select id="cleanupChildSelect"><option value="">— select a child —</option></select>
@@ -1160,67 +867,81 @@
           <label>Mode</label>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
             <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="dry-run" checked style="width:auto;margin:0;"> 🔍 Dry-run (preview only — no files changed)
+              <input type="radio" name="cleanupMode" value="dry-run" checked style="width:auto;margin:0;"> 🔍 Dry-run (preview only)
             </label>
             <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="safe" style="width:auto;margin:0;"> 🛡 Safe (move to _rejected/ — undoable)
+              <input type="radio" name="cleanupMode" value="safe" style="width:auto;margin:0;"> 🛡 Safe (move to _rejected/)
             </label>
             <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="destructive" style="width:auto;margin:0;"> 🗑 Destructive (permanently delete — cannot undo)
+              <input type="radio" name="cleanupMode" value="destructive" style="width:auto;margin:0;"> 🗑 Destructive (permanent delete)
             </label>
           </div>
         </div>
         <div style="margin-bottom:12px;">
           <label>Keep threshold — photos with a face match score above this % are kept</label>
           <div class="threshold-controls" style="margin-top:4px;">
-            <input type="range" id="cleanupThresholdRange" min="0" max="100" value="40" style="flex:1;height:6px;accent-color:var(--warning);">
+            <input type="range" id="cleanupThresholdRange" min="0" max="100" value="40"
+              style="flex:1;height:6px;accent-color:var(--warning);">
             <input type="number" id="cleanupThresholdNumber" min="0" max="100" value="40" class="threshold-num">
             <span style="font-size:14px;color:var(--muted);">%</span>
           </div>
-          <p class="help" style="margin:0;">Photos below this threshold (likely not your child) will be moved/deleted.</p>
+          <p class="help" style="margin:0;">Photos below this threshold will be moved or deleted.</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
           <button class="btn-primary" id="btnRunCleanup" style="background:#a855f7;" disabled>🧹 Run Clean Up</button>
-          <button class="btn-primary" id="btnOfflineScan" style="background:#0f3460;display:none;" disabled>🔍 Offline Smart Scan</button>
-          <button class="btn-secondary" id="btnReEvaluateAll" style="display:none;background:rgba(96,165,250,0.1);color:#60a5fa;border-color:rgba(96,165,250,0.3);" title="Re-run face matching on all your downloaded photos using the current improved model. Photos that changed score go to Review tab.">🔄 Re-evaluate All</button>
-          <button class="btn-secondary" id="btnUndoCleanup" style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);">⤺ Undo (removing in <span id="cleanupUndoTimer">60</span>s)</button>
+          <button class="btn-primary" id="btnOfflineScan" style="background:var(--primary);display:none;" disabled>🔍 Offline Smart Scan</button>
+          <button class="btn-secondary" id="btnReEvaluateAll"
+            style="display:none;background:rgba(96,165,250,0.1);color:var(--info);border-color:rgba(96,165,250,0.3);"
+            title="Re-run face matching on all downloaded photos using the current improved model.">
+            🔄 Re-evaluate All
+          </button>
+          <button class="btn-secondary" id="btnUndoCleanup"
+            style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);">
+            ⤺ Undo (removing in <span id="cleanupUndoTimer">60</span>s)
+          </button>
         </div>
-        <p class="help" id="offlineScanHelp" style="display:none;">🔍 <strong>Offline Smart Scan</strong> reads photos from your linked folder, runs face detection locally, and sends uncertain matches to the Review tab — same self-improving AI as the online scan, but reads from disk instead of Storypark. No internet needed!</p>
+        <p class="help" id="offlineScanHelp" style="display:none;">🔍 <strong>Offline Smart Scan</strong> reads photos from your linked folder and runs face detection locally. No internet needed.</p>
         <div id="cleanupProgress" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);">
           <div id="cleanupProgressText">Preparing…</div>
-          <progress id="cleanupProgressBar" value="0" max="100" style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+          <progress id="cleanupProgressBar" value="0" max="100"
+            style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
         </div>
-        <div id="cleanupReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
+        <div id="cleanupReport"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);">
+        </div>
       </div>
 
-      
-
-      <!-- 🛠 Audit & Repair panel (Phase 3D) — scan disk, classify every story, repair missing files. -->
+      <!-- Audit & Repair card -->
       <div class="card" id="auditRepairCard" style="border:1px solid rgba(96,165,250,0.2);">
         <h2>🛠 Audit &amp; Repair Stories</h2>
-        <p class="help">Scan your linked folder and classify every story as <strong>complete</strong>, <strong>missing photos</strong>, <strong>missing HTML/Card</strong>, or <strong>DB-only</strong> (no files on disk). Then repair the broken ones by re-downloading the missing media. Uses existing download semaphore + 429 back-off.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-          <button class="btn-primary" id="btnAuditStories" style="background:#0f3460;">🔍 1. Audit Stories</button>
+          <button class="btn-primary" id="btnAuditStories" style="background:var(--primary);">🔍 1. Audit Stories</button>
           <button class="btn-primary" id="btnRepairAll" style="display:none;background:#a855f7;">🛠 2. Repair Broken Stories</button>
-          <button class="btn-secondary" id="btnSyncProcessed" title="Mark every downloaded story as processed so Scan Latest only fetches NEW stories. Safe to run anytime.">🔄 Sync Scan Progress</button>
-          <button class="btn-secondary" id="btnRebuildRejections" title="Walk the Rejected Matches/ folders on disk and rebuild Database/rejections.json. Use after restoring a folder-only backup.">🔄 Rebuild Rejections</button>
+          <button class="btn-secondary" id="btnSyncProcessed" title="Mark every downloaded story as processed so Scan Latest only fetches NEW stories.">🔄 Sync Scan Progress</button>
+          <button class="btn-secondary" id="btnRebuildRejections" title="Walk the Rejected Matches/ folders and rebuild Database/rejections.json.">🔄 Rebuild Rejections</button>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px;">
           <input type="checkbox" id="chkRepairSkipFaceRec" checked style="width:auto;margin:0;">
           Match my scan settings (bypass face recognition — don't re-download files that already exist)
         </label>
-        <div id="auditProgress" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;line-height:1.7;color:var(--muted);">
+        <div id="auditProgress"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;line-height:1.7;color:var(--muted);">
           <div id="auditProgressText">Preparing…</div>
-          <progress id="auditProgressBar" value="0" max="100" style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+          <progress id="auditProgressBar" value="0" max="100"
+            style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
         </div>
-        <div id="auditReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
+        <div id="auditReport"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:var(--muted);">
+        </div>
       </div>
 
-      <!-- Full Backup -->
+      <!-- Full Backup card -->
       <div class="card">
         <h2>💾 Full Backup</h2>
         <p class="help">Export everything (all children's face data, scan progress, settings) to a single file. Import after reinstalling Chrome or on another computer to pick up exactly where you left off.</p>
-        <div id="backupMeta" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);"></div>
+        <div id="backupMeta"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);">
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-primary" id="btnFullBackupExport" style="background:#a855f7;">📤 Export Full Backup</button>
           <button class="btn-secondary" id="btnFullBackupImport">📥 Import Full Backup</button>
@@ -1238,81 +959,55 @@
         <p id="backupStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <!-- ✏️ Fix Story Metadata — correct centre/room for multi-daycare children -->
+      <!-- Fix Story Metadata card -->
       <div class="card" id="fixMetadataCard" style="border:1px solid rgba(251,191,36,0.2);">
         <h2 style="color:var(--warning);">✏️ Fix Story Metadata</h2>
-        <p class="help">Correct the <strong>centre name</strong> or <strong>room name</strong> on stories where the wrong value was assigned — for example, when a child attended two daycares and room/centre was incorrectly inferred. After fixing, story HTML pages and Story Cards are regenerated automatically.</p>
-
-        <!-- Child selector — uses the universal sidebar selector -->
         <div style="margin-bottom:10px;">
           <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">Apply to child:</label>
-          <select id="fixMetaChildSelect" style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:13px;">
+          <select id="fixMetaChildSelect"
+            style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:13px;">
             <option value="">Loading children…</option>
           </select>
         </div>
-
-        <!-- Date range (optional) -->
-        <div style="margin-bottom:10px;">
-          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">Date range (optional — leave blank to apply to all stories):</label>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <div style="display:flex;align-items:center;gap:4px;">
-              <label style="font-size:11px;color:var(--muted);">From:</label>
-              <input type="date" id="fixMetaFromDate" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
-            </div>
-            <span style="font-size:12px;color:var(--muted);">→</span>
-            <div style="display:flex;align-items:center;gap:4px;">
-              <label style="font-size:11px;color:var(--muted);">To:</label>
-              <input type="date" id="fixMetaToDate" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
-            </div>
-          </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <input type="date" id="fixMetaFromDate"
+            style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
+          <span style="font-size:12px;color:var(--muted);">→</span>
+          <input type="date" id="fixMetaToDate"
+            style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
         </div>
-
-        <!-- New centre name -->
-        <div style="margin-bottom:8px;">
-          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">New centre name <em style="font-weight:400;">(leave blank to keep existing)</em>:</label>
-          <input type="text" id="fixMetaCentreName" placeholder="e.g. Sunshine Early Learning" style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;">
-        </div>
-
-        <!-- New room name -->
-        <div style="margin-bottom:12px;">
-          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">New room name <em style="font-weight:400;">(leave blank to keep existing, enter "-" to clear)</em>:</label>
-          <input type="text" id="fixMetaRoomName" placeholder='e.g. Nursery One  (use "-" to clear room name)' style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;">
-        </div>
-
-        <!-- Regenerate option -->
+        <input type="text" id="fixMetaCentreName" placeholder="New centre name (leave blank to keep existing)"
+          style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;margin-bottom:8px;">
+        <input type="text" id="fixMetaRoomName" placeholder='New room name (use "-" to clear room)'
+          style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;margin-bottom:12px;">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px;font-size:12px;">
           <input type="checkbox" id="chkFixMetaRegenerate" checked style="width:auto;margin:0;">
           <span style="color:var(--text);">Regenerate story HTML + Story Cards after patching</span>
         </label>
-
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-primary" id="btnFixMetadata" style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.4);color:var(--warning);">✏️ Apply Metadata Fix</button>
-        </div>
+        <button class="btn-primary" id="btnFixMetadata"
+          style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.4);color:var(--warning);">
+          ✏️ Apply Metadata Fix
+        </button>
         <p id="fixMetadataStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <!-- 🔢 Story Numbers — assign oldest=1 numbering -->
+      <!-- Story Numbers card -->
       <div class="card" id="storyNumbersCard">
         <h2>🔢 Story Numbers</h2>
-        <p class="help">Assign sequential numbers to all stories — oldest story gets number 1, newest gets the highest number. This runs automatically after every scan and rebuild, but you can trigger it manually here. Story numbers are stored in the database and shown in future index pages.</p>
+        <p class="help">Assign sequential numbers to all stories — oldest story gets number 1. Runs automatically after every scan and rebuild, but you can trigger it manually here.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn-primary" id="btnAssignStoryNumbers" style="background:#0f3460;">🔢 Number Stories (Oldest=1)</button>
+          <button class="btn-primary btn-muted" id="btnAssignStoryNumbers">🔢 Number Stories (Oldest=1)</button>
         </div>
         <p id="storyNumbersStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <!-- ✏️ Custom Filename & Mass Renamer -->
+      <!-- Mass Renamer card -->
       <div class="card" id="renamerCard">
         <h2>✏️ Custom Filename &amp; Mass Renamer</h2>
-        <p class="help">Build a filename template using tokens, preview changes, then rename all downloaded photos and videos for a child. Extension (.jpg, .mp4, etc.) is always preserved. Works on both photos and videos (e.g. <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;">story_video_abc123_720_high.mp4</code>).</p>
-
-        <!-- Child selector -->
         <div style="margin-bottom:12px;">
           <label for="renamerChildSelect">Rename files for child:</label>
           <select id="renamerChildSelect"><option value="">— select a child —</option></select>
         </div>
-
-        <!-- Template builder -->
         <label>Filename Template</label>
         <div style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.8;">
           Available tokens:
@@ -1324,46 +1019,81 @@
         <input type="text" id="renamerTemplate" value="{StoryDate}_{ChildName}_{Room}_{OriginalName}"
           placeholder="e.g. {StoryDate}_{ChildName}_{Room}_{OriginalName}"
           style="width:100%;padding:8px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:13px;margin-bottom:4px;background:var(--bg);color:var(--text);font-family:monospace;">
-        <p class="help" style="margin:0 0 12px;">Windows-illegal characters are stripped automatically. Works for photos (.jpg, .png, .webp) and videos (.mp4, .mov, .avi, .webm, etc.)</p>
-
-        <!-- Live preview -->
+        <p class="help" style="margin:0 0 12px;">Windows-illegal characters are stripped automatically.</p>
         <label>Live Preview</label>
-        <div id="renamerPreview" style="background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;font-family:monospace;min-height:44px;margin-bottom:12px;word-break:break-all;line-height:1.8;">
+        <div id="renamerPreview"
+          style="background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;font-family:monospace;min-height:44px;margin-bottom:12px;word-break:break-all;line-height:1.8;color:var(--muted);">
           Enter a template above to see a preview…
         </div>
-
-        <!-- Action buttons -->
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <button class="btn-primary" id="btnPreviewRename" style="background:#0f3460;" disabled>🔍 Preview Rename</button>
+          <button class="btn-primary btn-muted" id="btnPreviewRename" disabled>🔍 Preview Rename</button>
           <button class="btn-primary" id="btnApplyRename" style="background:#a855f7;" disabled>✅ Apply Rename</button>
         </div>
-
-        <!-- Progress (shown while running) -->
         <div id="renamerProgress" style="display:none;margin-bottom:8px;">
           <div id="renamerProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
-          <progress id="renamerProgressBar" value="0" max="100" style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;accent-color:#a855f7;"></progress>
+          <progress id="renamerProgressBar" value="0" max="100"
+            style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;accent-color:#a855f7;"></progress>
         </div>
+        <div id="renamerReport"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;line-height:1.8;color:var(--muted);max-height:320px;overflow-y:auto;">
+        </div>
+      </div>
 
-        <!-- Dry-run preview list / completion report -->
-        <div id="renamerReport" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;line-height:1.8;color:var(--muted);max-height:320px;overflow-y:auto;"></div>
-      </div><!-- end renamerCard -->
+    </div>
+    <!-- end tabTools (legacy) -->
 
-    </div><!-- end tabTools -->
-  </div><!-- end .main -->
+  </div>
+  <!-- end hidden legacy panels -->
 
-<!-- Lightbox -->
-  <div class="lightbox" id="lightbox"><img id="lightboxImg" src="" alt="Full size preview"></div>
 
-  <!-- Toast -->
+  <!-- ════════════════════════════════════════════════════════
+       GLOBAL: SCAN PROGRESS BANNER (fixed, bottom)
+       Visible on ALL tabs during an active scan.
+  ════════════════════════════════════════════════════════ -->
+  <div id="globalScanBanner" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+        <span class="dot yellow"></span>
+        <span id="globalScanText"
+          style="color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;">
+          Scan in progress…
+        </span>
+      </div>
+      <button id="btnGlobalStop"
+        style="padding:6px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;font-family:inherit;">
+        🛑 Stop Scan
+      </button>
+    </div>
+    <progress id="globalScanBar" value="0" max="100"
+      style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════
+       GLOBAL: TOAST NOTIFICATION
+  ════════════════════════════════════════════════════════ -->
   <div id="toast"></div>
 
-  <!-- Keyboard hints (review tab only) -->
+
+  <!-- ════════════════════════════════════════════════════════
+       GLOBAL: LIGHTBOX (full-size photo preview)
+  ════════════════════════════════════════════════════════ -->
+  <div class="lightbox" id="lightbox">
+    <img id="lightboxImg" src="" alt="Full size preview">
+  </div>
+
+
+  <!-- ════════════════════════════════════════════════════════
+       GLOBAL: KEYBOARD HINTS (shown in review tab)
+  ════════════════════════════════════════════════════════ -->
   <div class="keyboard-hints" id="keyboardHints">
     <kbd>A</kbd> Approve &nbsp; <kbd>R</kbd> Reject &nbsp; <kbd>Z</kbd> Undo
   </div>
 
-  <!-- human.js for face training in settings -->
+
+  <!-- Scripts — do not modify -->
   <script src="lib/human.js"></script>
   <script type="module" src="dashboard.js"></script>
+
 </body>
 </html>
