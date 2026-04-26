@@ -36,7 +36,7 @@ import {
 } from "./db.js";
 import { apiFetch, smartDelay, STORYPARK_BASE, AuthError, RateLimitError } from "./api-client.js";
 import { downloadDataUrl, downloadHtmlFile, downloadVideoFromOffscreen } from "./download-pipe.js";
-import { buildStoryPage } from "./html-builders.js";
+import { buildStoryPage, getStoryHtmlFilenames, getStoryCardFilename } from "./html-builders.js";
 import { sanitizeName, formatDateDMY, formatETA } from "./metadata-helpers.js";
 import { extractFilenameFromUrl } from "./storypark-api.js";
 
@@ -117,7 +117,7 @@ export async function handleAuditStories(msg, ctx) {
       }
 
       const htmlName = m.storyHtmlFilename || "story.html";
-      const cardName = m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "");
+      const cardName = m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName);
       const hasHtml  = onDiskSet.has(`${storyBase}/${htmlName}`);
       const hasCard  = !cardName || onDiskSet.has(`${storyBase}/${cardName}`);
 
@@ -224,7 +224,7 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
     const approved = (m.approvedFilenames || []).filter(f => !(m.rejectedFilenames || []).includes(f));
     const missing  = approved.filter(f => !onDiskSet.has(`${base}/${f}`));
     const htmlName = m.storyHtmlFilename || "story.html";
-    const cardName = m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "");
+    const cardName = m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName);
     const hasHtml  = onDiskSet.has(`${base}/${htmlName}`);
     const hasCard  = !cardName || onDiskSet.has(`${base}/${cardName}`);
     const needsAssets = !hasHtml || !hasCard;
@@ -361,10 +361,22 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
           educatorName: m.educatorName || "", routineText: routineStr,
           mediaFilenames: approvedAfter,
         });
-        const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${m.storyHtmlFilename || "story.html"}`, mimeType: "text/html" });
-        if (htmlRes.dataUrl && htmlRes.savePath) { await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath); newlyDownloaded.add(`${storyBase}/${m.storyHtmlFilename || "story.html"}`); }
+        const htmlNames = getStoryHtmlFilenames(m.storyDate, m.storyTitle, m.folderName);
+        const primaryName = m.storyHtmlFilename || htmlNames.primary;
+        const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${primaryName}`, mimeType: "text/html" });
+        if (htmlRes.dataUrl && htmlRes.savePath) {
+          await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath);
+          newlyDownloaded.add(`${storyBase}/${primaryName}`);
+          if (htmlNames.legacy) {
+            const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+            if (namedRes.dataUrl && namedRes.savePath) {
+              await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+              newlyDownloaded.add(`${storyBase}/${htmlNames.legacy}`);
+            }
+          }
+        }
         if (saveStoryCard && storyBody && approvedAfter.length > 0) {
-          const cardName = m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg");
+          const cardName = m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName);
           const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText: routineStr, photoCount: approvedAfter.filter(f => !VIDEO_EXT.test(f)).length, gpsCoords, savePath: `${storyBasePath}/${cardName}` });
           if (cr.ok && cr.dataUrl) { await downloadDataUrl(cr.dataUrl, `${storyBasePath}/${cardName}`); newlyDownloaded.add(`${storyBase}/${cardName}`); }
         }
@@ -392,7 +404,7 @@ export async function runAuditAndRepair(msg, ctx, rebuildIndexPages) {
     const approved = (m.approvedFilenames || []).filter(f => !(m.rejectedFilenames || []).includes(f));
     const missing  = approved.filter(f => !postRepairSet.has(`${base}/${f}`));
     const htmlName = m.storyHtmlFilename || "story.html";
-    const cardName = m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "");
+    const cardName = m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName);
     if (approved.length === 0) continue;
     if (missing.length === approved.length) { reDbOnly++; reMissing += missing.length; }
     else if (missing.length > 0) { rePartial++; reMissing += missing.length; }
@@ -505,10 +517,19 @@ export async function handleRepairStory(msg, ctx) {
         const routineStr = typeof manifest.storyRoutine === "string" ? manifest.storyRoutine : (manifest.storyRoutine?.detailed || manifest.storyRoutine?.summary || "");
         const storyBody  = manifest.storyBody || manifest.excerpt || "";
         const htmlContent = buildStoryPage({ title: manifest.storyTitle, date: manifest.storyDate, body: storyBody, childName: manifest.childName, childAge: manifest.childAge || "", roomName: manifest.roomName || "", centreName: manifest.centreName || "", educatorName: manifest.educatorName || "", routineText: routineStr, mediaFilenames: approvedAfter });
-        const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${manifest.storyHtmlFilename || "story.html"}`, mimeType: "text/html" });
-        if (htmlRes.dataUrl && htmlRes.savePath) { await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath); assetsRegenerated = true; }
+        const htmlNames = getStoryHtmlFilenames(manifest.storyDate, manifest.storyTitle, manifest.folderName);
+        const primaryName = manifest.storyHtmlFilename || htmlNames.primary;
+        const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${primaryName}`, mimeType: "text/html" });
+        if (htmlRes.dataUrl && htmlRes.savePath) {
+          await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath);
+          if (htmlNames.legacy) {
+            const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+            if (namedRes.dataUrl && namedRes.savePath) await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+          }
+          assetsRegenerated = true;
+        }
         if (saveStoryCard && storyBody && approvedAfter.length > 0) {
-          const cardPath = `${storyBasePath}/${manifest.storyCardFilename || (manifest.storyDate ? `${manifest.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+          const cardPath = `${storyBasePath}/${manifest.storyCardFilename || getStoryCardFilename(manifest.storyDate, manifest.storyTitle, manifest.folderName)}`;
           const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: manifest.storyTitle, date: manifest.storyDate, body: storyBody, centreName: manifest.centreName || "", roomName: manifest.roomName || "", educatorName: manifest.educatorName || "", childName: manifest.childName, childAge: manifest.childAge || "", routineText: routineStr, photoCount: approvedAfter.filter(f => !VIDEO_EXT.test(f)).length, gpsCoords, savePath: cardPath });
           if (cr.ok && cr.dataUrl) await downloadDataUrl(cr.dataUrl, cardPath);
         }

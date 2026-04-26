@@ -30,10 +30,10 @@ import {
 import { manageMemory, shouldRecycleOffscreen } from "./memory-manager.js";
 import { recordFileMovement } from "./db.js";
 import {
-  buildStoryPage, buildChildrenIndex, buildChildStoriesIndex,
+  buildStoryPage, buildChildrenIndex, buildChildStoriesIndex, getStoryHtmlFilenames, getStoryCardFilename,
 } from "./html-builders.js";
 import {
-  formatDateDMY, formatETA, sanitizeName, stripHtml, calculateAge,
+  formatDateDMY, formatETA, sanitizeName, stripHtml, normaliseStoryText, calculateAge,
   buildExifMetadata, sanitiseForExif, sanitiseForIptcCaption,
 } from "./metadata-helpers.js";
 import {
@@ -51,10 +51,12 @@ import {
   addPendingDownload, getPendingDownloads, getAllPendingDownloads, removePendingDownload,
   addDownloadedStory, getDownloadedStories, getAllDownloadedStories,
   saveImageFingerprint, getImageFingerprint, getAllImageFingerprints,
+  getSyncState, getStoryCatalogRecords,
   cacheStory, getCachedStory,
   saveChildProfile, getChildProfile, isChildProfileStale,
   saveCentreProfile, getCentreGPS, updateCentreGPS,
   saveEducator, recordFileDownloaded, assignStoryNumbers,
+  ensureDatabaseWritable,
 } from "./db.js";
 
 /* ================================================================== */
@@ -537,6 +539,21 @@ export async function runExtraction(childId, childName, mode, {
 
   await logger("INFO", `Starting ${mode === "EXTRACT_LATEST" ? "incremental" : "deep"} scan for ${childName}…`);
 
+  // Guardrail: downloads must run after API metadata sync so manifests, centres,
+  // routines, and class signals are based on full API context.
+  const syncState = await getSyncState().catch(() => ({}));
+  if (!syncState?.lastSuccessAt) {
+    throw new Error("Sync from Storypark is required before downloading. Run 'Sync from Storypark' first.");
+  }
+  const catalogRows = await getStoryCatalogRecords(childId).catch(() => []);
+  if (!Array.isArray(catalogRows) || catalogRows.length === 0) {
+    throw new Error("No API catalog data found for this child. Run 'Sync from Storypark' first.");
+  }
+  const dbWritable = await ensureDatabaseWritable().catch(() => false);
+  if (!dbWritable) {
+    throw new Error("Database folder is not writable. Re-link your Storypark working directory and click Verify Directory.");
+  }
+
   let approved = 0, queued = 0, rejected = 0, skippedAbsent = 0, skippedAlreadyDownloaded = 0;
   let scanCancelled = false, scanCompletedFully = false, scanAbortReason = null;
 
@@ -808,7 +825,7 @@ export async function runExtraction(childId, childName, mode, {
       }
 
       const createdAt    = story.created_at || summary.created_at || "";
-      const body         = story.display_content || story.body || story.excerpt || story.content || "";
+      const body         = normaliseStoryText(story.display_content || story.body || story.excerpt || story.content || "");
       const centreName   = story.community_name || story.centre_name || story.service_name || story.group_name || childCentreFallback || "";
       // Prefer story.date (educator-set event date) over created_at.
       // HAR analysis: `date` field is set by educators and better reflects when the story event happened.
@@ -842,6 +859,7 @@ export async function runExtraction(childId, childName, mode, {
       // else: multiple centres, no known room for this centre → don't infer
 
       const roomName = (rawRoom && rawRoom !== centreName) ? rawRoom : (extractedRoom || inferredRoom);
+      const classSource = extractedRoom ? "story-title" : (inferredRoom ? "same-week-centre" : "none");
 
       // Record explicit room for this centre/period (for future centre-aware inference)
       if (roomName && centreName && storyDateStr) {
@@ -871,6 +889,17 @@ export async function runExtraction(childId, childName, mode, {
             discoverCentres([centreName]).catch(() => {});
           }
         } catch { /* ignore GPS fallback errors */ }
+      }
+      if (centreName) {
+        const centrePatch = {
+          centreName,
+          centreId: story?.group_id ? String(story.group_id) : null,
+        };
+        if (gpsCoords?.lat != null && gpsCoords?.lng != null) {
+          centrePatch.lat = gpsCoords.lat;
+          centrePatch.lng = gpsCoords.lng;
+        }
+        saveCentreProfile(centrePatch).catch(() => {});
       }
 
       // Collect media items
@@ -1049,10 +1078,15 @@ export async function runExtraction(childId, childName, mode, {
         try {
           const routineHtmlStr = _routineStr(routineText);
           const htmlContent = buildStoryPage({ title: storyTitle, date: storyDateStr, body, childName, childAge, roomName, centreName, educatorName, routineText: routineHtmlStr, mediaFilenames: approvedFilenames });
-          const txtRes2 = await sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/story.html`, mimeType: "text/html" });
+          const htmlNames = getStoryHtmlFilenames(storyDateStr, storyTitle, storyFolderName);
+          const txtRes2 = await sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.primary}`, mimeType: "text/html" });
           if (txtRes2.dataUrl && txtRes2.savePath) {
             await downloadHtmlFile(txtRes2.dataUrl, txtRes2.savePath);
-            await logger("INFO", `  story.html saved (${approvedFilenames.length} photos)`, storyDateStr, { childName, centreName, roomName, photoCount: approvedFilenames.length });
+            if (htmlNames.legacy) {
+              const txtResNamed = await sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+              if (txtResNamed.dataUrl && txtResNamed.savePath) await downloadHtmlFile(txtResNamed.dataUrl, txtResNamed.savePath);
+            }
+            await logger("INFO", `  ${htmlNames.primary} saved (${approvedFilenames.length} photos)${htmlNames.legacy ? ` + ${htmlNames.legacy}` : ""}`, storyDateStr, { childName, centreName, roomName, photoCount: approvedFilenames.length });
           }
         } catch (err) { console.warn("Story HTML export failed:", err.message); }
       }
@@ -1061,7 +1095,7 @@ export async function runExtraction(childId, childName, mode, {
       if (saveStoryCard && approvedFilenames.length > 0 && body) {
         try {
           const plainRoutineForCard = _routineStr(routineText);
-          const cardSavePath = `${storyBasePath}/${storyDateStr || "story"} - Story Card.jpg`;
+          const cardSavePath = `${storyBasePath}/${getStoryCardFilename(storyDateStr, storyTitle, storyFolderName)}`;
           const cardResult   = await sendToOffscreen({ type: "GENERATE_STORY_CARD", title: storyTitle, date: storyDateStr, body, centreName, roomName, educatorName, childName, childAge, routineText: plainRoutineForCard, photoCount: approvedFilenames.length, gpsCoords, exifArtist, iptcCaption, iptcKeywords, iptcByline, savePath: cardSavePath });
           if (cardResult.ok && cardResult.dataUrl) {
             await downloadDataUrl(cardResult.dataUrl, cardSavePath);
@@ -1073,7 +1107,26 @@ export async function runExtraction(childId, childName, mode, {
       // Save story manifest to IDB
       if (approvedFilenames.length > 0) {
         try {
-          await addDownloadedStory({ childId, childName, storyId: summary.id, storyTitle: storyTitle || "Story", storyDate: storyDateStr || "", educatorName: educatorName || "", roomName: roomName || "", centreName: centreName || "", folderName: storyFolderName, approvedFilenames, mediaUrls, thumbnailFilename: approvedFilenames[0] || "", excerpt: stripHtml(body).substring(0, 200), storyBody: body || "", childAge: childAge || "", storyRoutine: _routineStr(routineText) });
+          await addDownloadedStory({
+            childId,
+            childName,
+            storyId: summary.id,
+            storyTitle: storyTitle || "Story",
+            storyDate: storyDateStr || "",
+            educatorName: educatorName || "",
+            roomName: roomName || "",
+            className: roomName || "",
+            classSource,
+            centreName: centreName || "",
+            folderName: storyFolderName,
+            approvedFilenames,
+            mediaUrls,
+            thumbnailFilename: approvedFilenames[0] || "",
+            excerpt: stripHtml(body).substring(0, 200),
+            storyBody: body || "",
+            childAge: childAge || "",
+            storyRoutine: _routineStr(routineText),
+          });
         } catch (err) { console.warn("Story manifest save failed:", err.message); }
       }
 

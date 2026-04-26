@@ -12,7 +12,7 @@
  * Functions:
  *   linkFolder()                            – prompt user to pick a folder
  *   getLinkedFolder()                       – retrieve + verify the stored handle
- *   verifyPermission(dirHandle)             – check/re-request read+write permission
+ *   verifyPermission(dirHandle, options?)   – check permission (optionally request)
  *   walkFolder(dirHandle, prefix)           – recursively list all files
  *   fileExists(dirHandle, relativePath)     – check if a specific file exists
  *   reconcileWithCache(dirHandle, stories)  – compare manifests vs disk
@@ -94,16 +94,20 @@ export async function clearLinkedFolder() {
 
 /**
  * Check whether the user has granted read+write permission to a directory
- * handle. Silently re-requests permission if it was granted before but the
- * browser needs to re-confirm (e.g. after a browser restart).
+ * handle. By default this is a silent check only; opt in to prompting when
+ * the action is explicitly user-initiated.
  *
  * @param {FileSystemDirectoryHandle} dirHandle
+ * @param {Object} [options]
+ * @param {boolean} [options.request=false]  true to call requestPermission()
  * @returns {Promise<boolean>} true if permission is granted
  */
-export async function verifyPermission(dirHandle) {
+export async function verifyPermission(dirHandle, options = {}) {
+  const { request = false } = options;
   const opts = { mode: "readwrite" };
   try {
     if ((await dirHandle.queryPermission(opts)) === "granted") return true;
+    if (!request) return false;
     return (await dirHandle.requestPermission(opts)) === "granted";
   } catch {
     return false;
@@ -329,6 +333,13 @@ export async function reconcileWithCache(
   downloadedStories,
   rootFolder = "Storypark Smart Saver"
 ) {
+  if (!dirHandle || typeof dirHandle.name !== "string") {
+    throw new Error("No linked folder provided for reconciliation.");
+  }
+  if (!Array.isArray(downloadedStories)) {
+    throw new Error("Invalid manifest list for reconciliation.");
+  }
+
   // ── 1. Detect link depth ──
   // If the user linked "Storypark Smart Saver" directly (the recommended way),
   // walkFolder paths start at the child level (e.g. "Hugo Hill/Stories/...").

@@ -2501,6 +2501,13 @@ function _sanitiseAscii(text) {
     return s.trim().slice(0, 2000);
 }
 
+function _truncateEllipsis(text, maxLen) {
+    const s = String(text || "");
+    if (!maxLen || s.length <= maxLen) return s;
+    if (maxLen <= 1) return "…";
+    return `${s.slice(0, maxLen - 1)}…`;
+}
+
 /**
  * Sanitise text for the Comments field. Keeps newlines intact (Windows
  * Properties can display multi-line comments) but replaces non-ASCII
@@ -2694,9 +2701,10 @@ async function applyExif(blob, date, description, gpsCoords, structuredMeta) {
         // ── Structured metadata: title / subject / comments ──
         // structuredMeta = { exifTitle, exifSubject, exifComments }
         const meta = structuredMeta || {};
-        const shortTitle   = _sanitiseAscii(meta.exifTitle   || asciiDesc.slice(0, 120));
-        const shortSubject = _sanitiseAscii(meta.exifSubject || asciiDesc.slice(0, 200));
-        const fullComments = _sanitiseForComments(meta.exifComments || description || '');
+        const EXIF_LIMITS = { title: 120, subject: 200, comments: 1800, artist: 255 };
+        const shortTitle   = _truncateEllipsis(_sanitiseAscii(meta.exifTitle   || asciiDesc), EXIF_LIMITS.title);
+        const shortSubject = _truncateEllipsis(_sanitiseAscii(meta.exifSubject || asciiDesc), EXIF_LIMITS.subject);
+        const fullComments = _truncateEllipsis(_sanitiseForComments(meta.exifComments || description || ''), EXIF_LIMITS.comments);
 
         const exifDict = { '0th': {}, 'Exif': {}, 'GPS': {} };
         // ImageDescription → short title (Google Photos reads this)
@@ -2707,7 +2715,7 @@ async function applyExif(blob, date, description, gpsCoords, structuredMeta) {
         // Artist (tag 315) — e.g. "Storypark Smart Saver — Little Stars ELC"
         // Google Photos and Apple Photos display this as the camera/creator field.
         if (meta.exifArtist) {
-            exifDict['0th'][piexif.ImageIFD.Artist] = _sanitiseAscii(meta.exifArtist.slice(0, 255));
+            exifDict['0th'][piexif.ImageIFD.Artist] = _truncateEllipsis(_sanitiseAscii(meta.exifArtist), EXIF_LIMITS.artist);
         }
 
         // XPTitle → Windows "Title" field (UTF-16LE encoded as byte array)

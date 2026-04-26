@@ -103,7 +103,7 @@ export function initReviewTab(helpers) {
       parts.push(`⏳ ${_pendingNewCount} new items queued`);
     }
     if (_totalAutoResolved > 0) {
-      parts.push(`🧠 ${_totalAutoResolved} auto-resolved by AI`);
+      parts.push(`🧠 ${_totalAutoResolved} matched automatically`);
     }
     if (parts.length > 0) {
       $reviewStatus.style.display = "flex";
@@ -206,7 +206,7 @@ export function initReviewTab(helpers) {
     if (item.noTrainingData) {
       const badge = document.createElement("span");
       badge.className = "bootstrap-badge";
-      badge.textContent = "📚 Profile building — approve to train";
+      badge.textContent = "📚 Building recognition — confirm to improve";
       info.appendChild(badge);
     }
     card.appendChild(info);
@@ -227,13 +227,13 @@ export function initReviewTab(helpers) {
     } else {
       const btnA = document.createElement("button");
       btnA.className = "btn-review btn-approve";
-      btnA.textContent = isTrainingPhase ? "✅ This is my child" : "✓ Approve";
+      btnA.textContent = isTrainingPhase ? "✅ Yes, this is my child" : "✓ Keep for my child";
       btnA.addEventListener("click", () => handleReviewApprove(item.id, isTrainingPhase));
       actions.appendChild(btnA);
     }
     const btnR = document.createElement("button");
     btnR.className = "btn-review btn-reject";
-    btnR.textContent = isNoFacePhoto ? "✗ Skip" : "✗ Reject";
+    btnR.textContent = isNoFacePhoto ? "✗ Skip" : "✗ Not my child";
     btnR.addEventListener("click", () => handleReviewReject(item.id));
     actions.appendChild(btnR);
     card.appendChild(actions);
@@ -244,12 +244,12 @@ export function initReviewTab(helpers) {
     $reviewGrid.innerHTML = "";
     if (reviewQueue.length === 0) {
       $reviewEmpty.style.display = "block";
-      $reviewCount.textContent = "No items";
+      $reviewCount.textContent = "Pending Facial Match Review: none";
       updateReviewStatus();
       return;
     }
     $reviewEmpty.style.display = "none";
-    $reviewCount.textContent = `${reviewQueue.length} media file${reviewQueue.length !== 1 ? "s" : ""} to review`;
+    $reviewCount.textContent = `Pending Facial Match Review: ${reviewQueue.length} photo${reviewQueue.length !== 1 ? "s" : ""}`;
 
     const pageEnd = Math.min(_reviewPageStart + REVIEW_PAGE_SIZE, reviewQueue.length);
     const pageItems = reviewQueue.slice(_reviewPageStart, pageEnd);
@@ -268,10 +268,10 @@ export function initReviewTab(helpers) {
     if (reviewQueue.length > 0) {
       $reviewBadge.style.display = "";
       $reviewBadge.textContent = reviewQueue.length;
-      $reviewCount.textContent = `${reviewQueue.length} media file${reviewQueue.length !== 1 ? "s" : ""} to review`;
+      $reviewCount.textContent = `Pending Facial Match Review: ${reviewQueue.length} photo${reviewQueue.length !== 1 ? "s" : ""}`;
     } else {
       $reviewBadge.style.display = "none";
-      $reviewCount.textContent = "No items";
+      $reviewCount.textContent = "Pending Facial Match Review: none";
     }
 
     const card = $reviewGrid.querySelector(`[data-id="${id}"]`);
@@ -334,7 +334,7 @@ export function initReviewTab(helpers) {
       card.addEventListener("animationend", () => card.classList.remove("appearing"), { once: true });
     }
 
-    $reviewCount.textContent = `${reviewQueue.length} media file${reviewQueue.length !== 1 ? "s" : ""} to review`;
+    $reviewCount.textContent = `Pending Facial Match Review: ${reviewQueue.length} photo${reviewQueue.length !== 1 ? "s" : ""}`;
     if (reviewQueue.length > 0) {
       $reviewBadge.style.display = "";
       $reviewBadge.textContent = reviewQueue.length;
@@ -395,11 +395,11 @@ export function initReviewTab(helpers) {
     if (reviewQueue.length > 0) {
       $reviewBadge.style.display = "";
       $reviewBadge.textContent = reviewQueue.length;
-      $reviewCount.textContent = `${reviewQueue.length} media file${reviewQueue.length !== 1 ? "s" : ""} to review`;
+      $reviewCount.textContent = `Pending Facial Match Review: ${reviewQueue.length} photo${reviewQueue.length !== 1 ? "s" : ""}`;
       $reviewEmpty.style.display = "none";
     } else {
       $reviewBadge.style.display = "none";
-      $reviewCount.textContent = "No items";
+      $reviewCount.textContent = "Pending Facial Match Review: none";
       $reviewEmpty.style.display = "block";
     }
     updateReviewStatus();
@@ -420,7 +420,7 @@ export function initReviewTab(helpers) {
         }
       }
       if (totalApproved > 0 || totalRejected > 0) {
-        toast(`🧠 Re-evaluated: ${totalApproved} auto-approved, ${totalRejected} auto-rejected`, "success", 4000);
+        toast(`🧠 Rechecked photos: ${totalApproved} kept automatically, ${totalRejected} skipped automatically`, "success", 4000);
         await refreshReviewQueue();
       }
     } catch (e) {
@@ -619,16 +619,9 @@ export function initReviewTab(helpers) {
   });
 
   $btnBuildHtml?.addEventListener("click", async () => {
-    $btnBuildHtml.disabled = true;
-    $btnBuildHtml.textContent = "⏳ Rebuilding…";
-    const res = await send({ type: "REBUILD_HTML_ALL" });
-    $btnBuildHtml.disabled = false;
-    $btnBuildHtml.textContent = "🔄 Rebuild Pages & Cards";
-    if (res?.ok) {
-      toast(`✅ Rebuilt ${res.count} story pages`, "success");
-    } else {
-      toast("❌ " + (res?.error || "Rebuild failed"), "error");
-    }
+    const postNav = document.querySelector('.sidebar-nav .nav-btn[data-tab="post"]');
+    postNav?.click();
+    toast("↗ Opened Post-Processing", "success");
   });
 
   $btnFinalV?.addEventListener("click", async () => {
@@ -674,5 +667,3 @@ export function initReviewTab(helpers) {
   // Initial load
   refreshReviewQueue();
 }
-
-export { refreshReviewQueue as getRefreshReviewQueue };

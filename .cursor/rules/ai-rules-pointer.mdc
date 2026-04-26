@@ -1,0 +1,10 @@
+---
+description: Always read AI_RULES.md before coding
+alwaysApply: true
+---
+
+# Storypark Smart Saver AI Rules Pointer
+
+Read `AI_RULES.md` before making any code changes.
+
+`AI_RULES.md` is the single source of truth for project-specific engineering rules and constraints.

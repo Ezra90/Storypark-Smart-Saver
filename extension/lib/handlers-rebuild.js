@@ -37,7 +37,7 @@ import {
 } from "./db.js";
 import { rebuildIndexPages } from "./handlers-html.js";
 import { downloadDataUrl, downloadHtmlFile } from "./download-pipe.js";
-import { buildStoryPage } from "./html-builders.js";
+import { buildStoryPage, getStoryHtmlFilenames, getStoryCardFilename } from "./html-builders.js";
 import {
   sanitizeName, formatDateDMY, formatETA, stripHtml, calculateAge,
 } from "./metadata-helpers.js";
@@ -598,12 +598,22 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
                 routineText: m.storyRoutine || "",
                 mediaFilenames: approvedOnly,
               });
+              const htmlNames = getStoryHtmlFilenames(m.storyDate, m.storyTitle, m.folderName);
               const htmlRes = await ctx.sendToOffscreen({
                 type: "DOWNLOAD_TEXT", text: htmlContent,
-                savePath: `${storyBasePath}/story.html`, mimeType: "text/html",
+                savePath: `${storyBasePath}/${htmlNames.primary}`, mimeType: "text/html",
               });
               if (htmlRes?.dataUrl && htmlRes?.savePath) {
                 await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath);
+                if (htmlNames.legacy) {
+                  const namedRes = await ctx.sendToOffscreen({
+                    type: "DOWNLOAD_TEXT", text: htmlContent,
+                    savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html",
+                  });
+                  if (namedRes?.dataUrl && namedRes?.savePath) {
+                    await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+                  }
+                }
                 htmlBuilt++;
               }
 
@@ -612,7 +622,7 @@ export async function handleRebuildDatabaseFromDisk(msg, ctx) {
                 try {
                   const gpsCoords = m.centreName
                     ? await getCentreGPS(m.centreName).catch(() => null) : null;
-                  const cardPath = `${storyBasePath}/${m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+                  const cardPath = `${storyBasePath}/${m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName)}`;
                   const cr = await ctx.sendToOffscreen({
                     type: "GENERATE_STORY_CARD",
                     title: m.storyTitle, date: m.storyDate, body: m.storyBody,

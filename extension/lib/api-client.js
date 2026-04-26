@@ -83,6 +83,7 @@ let _getCancelRequested = () => false;
  */
 let _requestCount  = 0;
 let _coffeeBreakAt = Math.floor(Math.random() * 11) + 15; // 15–25
+let _lastDelayLogAt = 0;
 
 /* ================================================================== */
 /*  Init / state sync                                                  */
@@ -165,6 +166,20 @@ export async function smartDelay(actionType) {
 
   const [minMs, maxMs] = DELAY_PROFILES[actionType] || [1000, 2000];
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  // Avoid flooding logs with every short jitter delay; keep visibility on
+  // meaningful pauses and periodic heartbeat so users know pacing is active.
+  const now = Date.now();
+  const shouldLogDelay =
+    ms >= 5000 ||             // long pacing delay
+    _requestCount % 5 === 0 ||// periodic heartbeat
+    now - _lastDelayLogAt >= 15000;
+  if (shouldLogDelay) {
+    _lastDelayLogAt = now;
+    await _loggerFn(
+      "INFO",
+      `Anti-abuse pacing active: ${actionType} delay ${(ms / 1000).toFixed(1)}s (request #${_requestCount}).`
+    );
+  }
   await new Promise((r) => {
     const handle = setTimeout(() => { clearInterval(poll); r(); }, ms);
     const poll   = setInterval(() => {

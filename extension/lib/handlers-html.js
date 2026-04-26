@@ -34,7 +34,7 @@ import {
   downloadDataUrl, downloadHtmlFile, downloadVideoFromOffscreen,
 } from "./download-pipe.js";
 import {
-  buildStoryPage, buildChildrenIndex, buildChildStoriesIndex,
+  buildStoryPage, buildChildrenIndex, buildChildStoriesIndex, getStoryHtmlFilenames, getStoryCardFilename,
 } from "./html-builders.js";
 import { sanitizeName } from "./metadata-helpers.js";
 
@@ -126,14 +126,23 @@ export async function handleBuildHtmlStructure(msg, ctx) {
             roomName: m.roomName || "", centreName: m.centreName || "",
             educatorName: m.educatorName || "", routineText, mediaFilenames: approvedOnly,
           });
-          const res = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${m.storyHtmlFilename || "story.html"}`, mimeType: "text/html" });
-          if (res.dataUrl && res.savePath) { await downloadHtmlFile(res.dataUrl, res.savePath); storyCount++; }
+          const htmlNames = getStoryHtmlFilenames(m.storyDate, m.storyTitle, m.folderName);
+          const primaryName = m.storyHtmlFilename || htmlNames.primary;
+          const res = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${primaryName}`, mimeType: "text/html" });
+          if (res.dataUrl && res.savePath) {
+            await downloadHtmlFile(res.dataUrl, res.savePath);
+            if (htmlNames.legacy) {
+              const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+              if (namedRes.dataUrl && namedRes.savePath) await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+            }
+            storyCount++;
+          }
 
           // story card
           if (saveStoryCard && storyBody && approvedOnly.length > 0) {
             try {
               const gpsCoords  = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
-              const cardPath   = `${storyBasePath}/${m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+              const cardPath   = `${storyBasePath}/${m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName)}`;
               const photoCount = approvedOnly.filter(f => !VIDEO_EXT.test(f)).length;
               const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText, photoCount, gpsCoords, savePath: cardPath });
               if (cr.ok && cr.dataUrl) { await downloadDataUrl(cr.dataUrl, cardPath); cardCount++; }
@@ -252,12 +261,19 @@ export async function handleBatchDownloadApproved(msg, ctx) {
             const routineText = manifest.storyRoutine || "";
 
             const htmlContent = buildStoryPage({ title: manifest.storyTitle, date: manifest.storyDate, body: storyBody, childName: manifest.childName, childAge: manifest.childAge || "", roomName: manifest.roomName || "", centreName: manifest.centreName || "", educatorName: manifest.educatorName || "", routineText, mediaFilenames: manifest.approvedFilenames || [] });
-            const txtRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/story.html`, mimeType: "text/html" });
-            if (txtRes.dataUrl && txtRes.savePath) await downloadHtmlFile(txtRes.dataUrl, txtRes.savePath);
+            const htmlNames = getStoryHtmlFilenames(manifest.storyDate, manifest.storyTitle, manifest.folderName);
+            const txtRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.primary}`, mimeType: "text/html" });
+            if (txtRes.dataUrl && txtRes.savePath) {
+              await downloadHtmlFile(txtRes.dataUrl, txtRes.savePath);
+              if (htmlNames.legacy) {
+                const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+                if (namedRes.dataUrl && namedRes.savePath) await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+              }
+            }
 
             if (storyBody && (manifest.approvedFilenames || []).length > 0) {
               const gpsCoords = manifest.centreName ? await getCentreGPS(manifest.centreName).catch(() => null) : null;
-              const cardPath  = `${storyBasePath}/${manifest.storyDate || "story"} - Story Card.jpg`;
+              const cardPath  = `${storyBasePath}/${manifest.storyCardFilename || getStoryCardFilename(manifest.storyDate, manifest.storyTitle, manifest.folderName)}`;
               const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: manifest.storyTitle, date: manifest.storyDate, body: storyBody, centreName: manifest.centreName || "", roomName: manifest.roomName || "", educatorName: manifest.educatorName || "", childName: manifest.childName, childAge: manifest.childAge || "", routineText, photoCount: (manifest.approvedFilenames || []).filter(f => !VIDEO_EXT.test(f)).length, gpsCoords, savePath: cardPath });
               if (cr.ok && cr.dataUrl) await downloadDataUrl(cr.dataUrl, cardPath);
             }
@@ -340,14 +356,22 @@ export async function handleRegenerateFromDisk(msg, ctx) {
 
           // Rebuild story.html
           const htmlContent = buildStoryPage({ title: m.storyTitle, date: m.storyDate, body: storyBody, childName: m.childName, childAge: m.childAge || "", roomName: m.roomName || "", centreName: m.centreName || "", educatorName: m.educatorName || "", routineText, mediaFilenames: updatedFilenames });
-          const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/story.html`, mimeType: "text/html" });
-          if (htmlRes.dataUrl && htmlRes.savePath) { await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath); rebuilt++; }
+          const htmlNames = getStoryHtmlFilenames(m.storyDate, m.storyTitle, m.folderName);
+          const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.primary}`, mimeType: "text/html" });
+          if (htmlRes.dataUrl && htmlRes.savePath) {
+            await downloadHtmlFile(htmlRes.dataUrl, htmlRes.savePath);
+            if (htmlNames.legacy) {
+              const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+              if (namedRes.dataUrl && namedRes.savePath) await downloadHtmlFile(namedRes.dataUrl, namedRes.savePath);
+            }
+            rebuilt++;
+          }
 
           // Rebuild story card
           if (saveStoryCard && storyBody && updatedFilenames.length > 0) {
             try {
               const gpsCoords  = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
-              const cardPath   = `${storyBasePath}/${m.storyDate || "story"} - Story Card.jpg`;
+              const cardPath   = `${storyBasePath}/${m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName)}`;
               const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText, photoCount: updatedFilenames.filter(f => !VIDEO_EXT.test(f)).length, gpsCoords, savePath: cardPath });
               if (cr.ok && cr.dataUrl) await downloadDataUrl(cr.dataUrl, cardPath);
             } catch { /* non-fatal */ }
@@ -394,7 +418,7 @@ export async function handleGenerateStoryCardsAll(msg, ctx) {
 
           const storyBasePath = `Storypark Smart Saver/${sanitizeName(m.childName)}/Stories/${m.folderName}`;
           const gpsCoords = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
-          const cardPath  = `${storyBasePath}/${m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+          const cardPath  = `${storyBasePath}/${m.storyCardFilename || getStoryCardFilename(m.storyDate, m.storyTitle, m.folderName)}`;
           const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText: m.storyRoutine || "", photoCount: approvedOnly.filter(f => !VIDEO_EXT.test(f)).length, gpsCoords, savePath: cardPath });
           if (cr.ok && cr.dataUrl) { await downloadDataUrl(cr.dataUrl, cardPath); generated++; }
         } catch (err) {

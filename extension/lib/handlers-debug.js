@@ -132,7 +132,7 @@ export async function handleRunAttendanceDiagnostic(msg, ctx) {
         }
         pageToken = data.next_page_token;
         if (!pageToken) break;
-        await new Promise(r => setTimeout(r, 800));
+        await smartDelay("FEED_SCROLL");
       }
 
       // Fetch routine data for each date in storyDates
@@ -155,7 +155,7 @@ export async function handleRunAttendanceDiagnostic(msg, ctx) {
           routinePageToken = rData.next_page_token;
           if (!routinePageToken) break;
           routinePages++;
-          await new Promise(r => setTimeout(r, 800));
+          await smartDelay("FEED_SCROLL");
         } catch { break; }
       }
 

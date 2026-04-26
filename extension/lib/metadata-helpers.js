@@ -98,13 +98,62 @@ export function sanitizeSavePath(path) {
 /*  Text cleaning                                                      */
 /* ================================================================== */
 
+function _decodeHtmlEntities(text) {
+  return String(text ?? "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function _normaliseRichTextInput(input) {
+  if (input == null) return "";
+  if (Array.isArray(input)) {
+    return input
+      .map((part) => {
+        if (typeof part === "string") return part;
+        return _normaliseRichTextInput(part?.text || part?.content || part?.value || "");
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (typeof input !== "string") return String(input);
+  return input;
+}
+
+/**
+ * Convert API body/rich-text input to readable plain text with paragraph breaks.
+ * Unlike stripHtml(), this preserves paragraph spacing for story rendering.
+ * @param {string|Array|Object} input
+ * @returns {string}
+ */
+export function normaliseStoryText(input) {
+  const base = _normaliseRichTextInput(input);
+  return _decodeHtmlEntities(
+    base
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<\/div>/gi, "\n\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "• ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\r\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
+}
+
 /**
  * Strip HTML tags from a string, collapse whitespace, and trim.
- * @param {string} html
+ * @param {string|Array|Object} html
  * @returns {string}
  */
 export function stripHtml(html) {
-  return (html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return normaliseStoryText(html).replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -268,4 +317,115 @@ export function sanitiseForIptcCaption(text, maxBytes = 2000) {
   } catch {
     return clean.slice(0, maxBytes);
   }
+}
+
+/* ================================================================== */
+/*  Template settings + token rendering                                */
+/* ================================================================== */
+
+export const TEMPLATE_LIMITS = Object.freeze({
+  html: 20000,
+  card: 4000,
+  exifTitle: 120,
+  exifSubject: 200,
+  exifComments: 1800,
+});
+
+/** Max rendered characters for story card title (canvas layout). */
+export const CARD_TITLE_MAX_CHARS = 220;
+
+export const DEFAULT_TEMPLATE_SETTINGS = Object.freeze({
+  html: {
+    header: "[StoryDate] | [ChildName] | [Class] | [CentreName]",
+    body: "[StoryBody]",
+    includeRoutine: true,
+    includePhotos: true,
+    footer: "[EducatorName] | [PhotoCount] photos | Storypark Smart Saver",
+    footerSpacingPx: 24,
+  },
+  card: {
+    title: "[StoryTitle]",
+    body: "[StoryBody]",
+    includeRoutine: true,
+    footerLeft: "Educator: [EducatorName] | [PhotoCount] photos",
+    footerRight: "Storypark Smart Saver",
+  },
+  exif: {
+    title: "[ChildName] - [ChildAge]",
+    subject: "[StoryBody]",
+    comments: "[StoryBody]\n---\n[Routine]\n---\n[CentreName] | [Class]",
+    includeStoryBody: true,
+    includeRoutine: true,
+  },
+});
+
+function _truncateWithEllipsis(text, maxLen) {
+  const s = String(text ?? "");
+  if (!maxLen || s.length <= maxLen) return s;
+  if (maxLen <= 1) return "…";
+  return `${s.slice(0, maxLen - 1)}…`;
+}
+
+function _cleanDelimiterRuns(text) {
+  return String(text ?? "")
+    .replace(/\s+\|\s+\|\s+/g, " | ")
+    .replace(/\s+-\s+-\s+/g, " - ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/(?:\s*[|,-]\s*)+$/g, "")
+    .replace(/^(?:\s*[|,-]\s*)+/g, "")
+    .trim();
+}
+
+export function mergeTemplateSettings(input) {
+  const inObj = input && typeof input === "object" ? input : {};
+  return {
+    html: { ...DEFAULT_TEMPLATE_SETTINGS.html, ...(inObj.html || {}) },
+    card: { ...DEFAULT_TEMPLATE_SETTINGS.card, ...(inObj.card || {}) },
+    exif: { ...DEFAULT_TEMPLATE_SETTINGS.exif, ...(inObj.exif || {}) },
+  };
+}
+
+export function sanitizeTemplateText(text, { target = "generic", maxLen = 0 } = {}) {
+  let out = String(text ?? "");
+  if (target === "exif") out = sanitiseForExif(out, Math.max(1, maxLen || 255));
+  else out = out.replace(/\r\n/g, "\n").replace(/[^\x09\x0A\x0D\x20-\uFFFF]/g, "");
+  out = _cleanDelimiterRuns(out);
+  return maxLen ? _truncateWithEllipsis(out, maxLen) : out;
+}
+
+export function buildTemplateTokenMap(data = {}) {
+  const cleanBody = normaliseStoryText(data.storyBody || data.body || "");
+  const storyDate = data.storyDate || data.date || "";
+  const storyTitle = data.storyTitle || data.title || "";
+  const centreName = data.centreName || "";
+  const childName = data.childName || "";
+  const room = data.roomName || data.className || "";
+  const educator = data.educatorName || "";
+  const photoCount = String(data.photoCount ?? 0);
+  return {
+    StoryDate: storyDate,
+    StoryTitle: storyTitle,
+    CentreName: centreName,
+    ChildName: childName,
+    ChildAge: data.childAge || "",
+    Class: room,
+    StoryBody: cleanBody,
+    Routine: data.routineText || "",
+    EducatorName: educator,
+    PhotoCount: photoCount,
+    /* Aliases — same values as disk naming tokens in buildDynamicName (see AI_RULES §9 Glossary). */
+    Date: storyDate,
+    Title: storyTitle,
+    Daycare: centreName,
+    Centre: centreName,
+    Child: childName,
+    Room: room,
+    Educator: educator,
+  };
+}
+
+export function renderTemplate(template, tokenMap, { target = "generic", maxLen = 0 } = {}) {
+  const base = String(template ?? "");
+  const rendered = base.replace(/\[([A-Za-z0-9_]+)\]/g, (_m, token) => String(tokenMap?.[token] ?? ""));
+  return sanitizeTemplateText(rendered, { target, maxLen });
 }

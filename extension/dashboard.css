@@ -288,6 +288,39 @@ body {
   display: block;
 }
 
+.settings-advanced-details {
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 14px 14px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.settings-advanced-details > summary {
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 0 8px;
+  color: var(--text);
+}
+
+.settings-advanced-details[open] > summary {
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+/* Template Commands — hover shows native tooltip (title) on narrow layouts */
+.template-command-block,
+.template-command-block .template-command-body,
+.template-command-block .template-token-code {
+  cursor: help;
+}
+
+.template-command-block .template-insert-btn {
+  cursor: pointer;
+}
+
 /* ── 7. Page header ── */
 .page-header {
   display: flex;
@@ -309,6 +342,164 @@ body {
   color: var(--muted);
   margin-top: 3px;
   line-height: 1.5;
+}
+
+/* Quick Start strip */
+.quick-start-strip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.quick-start-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.quick-start-banner {
+  margin-bottom: 10px;
+  background: rgba(96,165,250,0.12);
+  border: 1px solid rgba(96,165,250,0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--info);
+  font-weight: 600;
+}
+
+.quick-start-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.quick-step-card {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-step-card .qs-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.quick-step-btn {
+  border: 1px solid rgba(96,165,250,0.35);
+  background: rgba(96,165,250,0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.quick-step-btn:hover {
+  border-color: rgba(255,255,255,0.24);
+  background: rgba(255,255,255,0.05);
+}
+
+.quick-step-btn .qs-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.quick-step-btn .qs-state {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.quick-step-btn.is-done {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.quick-step-card.is-done {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.quick-step-card.is-done .qs-state {
+  color: var(--success);
+}
+
+.quick-step-card.is-running {
+  border-color: rgba(96,165,250,0.5);
+  background: rgba(96,165,250,0.1);
+}
+
+.quick-step-card.is-running .qs-state {
+  color: var(--info);
+}
+
+.quick-step-card.is-running .qs-state::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 2px solid rgba(96,165,250,0.3);
+  border-top-color: var(--info);
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: -1px;
+  animation: qs-spin 0.9s linear infinite;
+}
+
+@keyframes qs-spin {
+  to { transform: rotate(360deg); }
+}
+
+.quick-start-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.quick-setup-checklist {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+}
+
+.quick-setup-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.quick-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0;
+}
+
+.quick-check-item input[type="checkbox"] {
+  width: auto;
 }
 
 /* ── 8. Card system ── */
@@ -842,6 +1033,12 @@ body {
   gap: 20px;
 }
 
+.post-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 255px;
+}
+
 .post-card-icon {
   font-size: 34px;
   display: block;
@@ -860,6 +1057,7 @@ body {
   color: var(--muted);
   line-height: 1.6;
   margin-bottom: 18px;
+  flex: 1;
 }
 
 .post-card-status {
@@ -967,6 +1165,10 @@ body {
   padding: 10px 20px;
   font-size: 13px;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+}
+
+#globalScanBanner.log-open {
+  padding-bottom: 12px;
 }
 
 /* ── 19. Toast notification ── */
@@ -1130,11 +1332,17 @@ body {
 }
 
 /* Centre rows */
+.centre-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .centre-row {
   display: flex;
   gap: 6px;
   align-items: flex-end;
-  margin-bottom: 10px;
   flex-wrap: wrap;
 }
 
@@ -1155,6 +1363,18 @@ body {
 
 .centre-row .centre-name-field { flex: 2; min-width: 140px; }
 .centre-row .centre-maps-field { flex: 3; min-width: 160px; }
+
+.centre-coords-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.centre-row .btn-view-centre-map {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
 
 .centre-row .btn-remove-centre {
   padding: 8px 10px;
@@ -1257,11 +1477,11 @@ body {
 
 /* Nominatim */
 .nominatim-picker {
-  grid-column: 1 / -1;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 6px;
+  margin-top: 0;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1608,6 +1828,7 @@ body {
 
 /* ── 23. Responsive ── */
 @media (max-width: 1200px) {
+  .quick-start-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .card-grid-3 { grid-template-columns: repeat(2, 1fr); }
   .post-grid   { grid-template-columns: repeat(2, 1fr); }
 }
@@ -1621,6 +1842,7 @@ body {
   .post-grid   { grid-template-columns: 1fr; }
   .card-grid-3 { grid-template-columns: 1fr; }
   .card-grid-2 { grid-template-columns: 1fr; }
+  .quick-start-buttons { grid-template-columns: 1fr; }
   .main        { padding: 20px 16px 80px; }
 }
 

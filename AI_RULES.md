@@ -286,6 +286,19 @@ Both must be kept in sync. Do NOT change this to single-write without updating a
 - Exports: `buildStoryHtml`, `buildChildrenIndexHtml`, `buildMasterIndexHtml`
 - Depends on: `lib/metadata-helpers.js`
 
+### scripts/generate-output-examples.mjs (dev utility)
+**Owns:** Optional sample output on the Desktop for demos and template tuning
+- Reads existing `story.html` under `%USERPROFILE%\Downloads\Storypark Smart Saver\…` (override with `STORYPARK_DATA_ROOT`), copies a few real JPEGs + `*Story Card*.jpg`, regenerates `story.html` via `buildStoryPage` with default `mergeTemplateSettings`, writes `metadata-exif-preview.html` (resolved EXIF title/subject/comments from default templates)
+- Run: `npm run examples:output` or `node scripts/generate-output-examples.mjs`; output dir: `STORYPARK_EXAMPLES_OUT` or `%USERPROFILE%\Desktop\Storypark-Output-Examples`
+- Not shipped in the extension
+
+### scripts/rehydrate-manifests-from-details.mjs (one-time repair utility)
+**Owns:** One-time repair for older downloaded stories with flattened body text
+- Reads `Database/manifests.json` + `Database/story_details.json` under `STORYPARK_DATA_ROOT` (defaults to `%USERPROFILE%\Downloads\Storypark Smart Saver`)
+- Rebuilds `storyBody` using `normaliseStoryText` so paragraphs survive; updates `excerpt`; regenerates per-story `story.html` on disk without rescanning API
+- Creates timestamped backup of `manifests.json` before write
+- Run: `npm run repair:rehydrate` or `node scripts/rehydrate-manifests-from-details.mjs`
+
 ### lib/db.js (existing — do NOT restructure)
 **Owns:** All IndexedDB read/write operations
 - All functions are pure IDB wrappers with no business logic
@@ -297,6 +310,14 @@ Both must be kept in sync. Do NOT change this to single-write without updating a
 - Anti-abuse: uses `smartDelay("FEED_SCROLL")` before every feed page API call
 - Respects `ctx.getCancelRequested()` and sends PROGRESS messages with ETA
 - WHY SEPARATE FILE: `handlers-audit.js` is at its 600-line limit; rebuild is a different domain (cold-start DB repair vs ongoing audit of a populated DB)
+
+### lib/handlers-face-model.js (~450 lines)
+**Owns:** Advanced face-model lifecycle operations
+- Exports: `handleSelfImproveFaceModel`, `handleRunInitialFaceBootstrap`
+- Exports: `handleGetFaceModelHealth`, `handleSetFaceHoldoutSet`
+- Exports: `handleGetDecisionAuditSummary`, `handleRunRetentionMaintenance`
+- OOM rule: use child-scoped fingerprint reads (`getChildFingerprints`) instead of full-cache reads for long loops
+- WHY SEPARATE FILE: keeps `background.js` as a thin router and isolates Google Photos-style model behavior in one domain module
 
 ### lib/disk-sync.js (existing — do NOT restructure)
 **Owns:** File System Access API operations
@@ -329,11 +350,24 @@ All messages from dashboard.js → background.js use `send({ type: "...", ...pay
 | `REVIEW_REJECT` | dashboard | `{ id }` | `{ ok }` |
 | `REVIEW_TRAIN_ONLY` | dashboard | `{ id, selectedFaceIndex }` | `{ ok }` |
 | `UNDO_LAST_REVIEW` | dashboard | — | `{ ok }` |
+| `SELF_IMPROVE_FACE_MODEL` | dashboard-settings | `{ childId, childName }` | `{ ok, checked, recoveredRejected, reinforcedApproved, reviewedCandidates }` |
+| `RUN_INITIAL_FACE_BOOTSTRAP` | dashboard-settings | `{ childId, childName }` | `{ ok, fingerprints, seededPositive, queuedReview, holdoutCount }` |
+| `GET_FACE_MODEL_HEALTH` | dashboard-settings | `{ childId }` | `{ ok, health, holdout }` |
+| `GET_DECISION_AUDIT_SUMMARY` | dashboard-settings | `{ childId }` | `{ ok, total, byDecision, latest }` |
+| `RUN_RETENTION_MAINTENANCE` | dashboard-settings | `{ maxDecisionEntries, negativeMaxAgeDays, fingerprintMaxAgeDays }` | `{ ok, decision, face }` |
 
 ### Database Repair Messages
 | Type | Sender | Payload | Response |
 |------|--------|---------|----------|
 | `REBUILD_DATABASE_FROM_DISK` | dashboard | `{ childId, childName, diskFolders: [{folderName, files[]}] }` | `{ ok, matched, recovered, errors, totalFolders }` |
+
+### Template preview (dashboard-settings)
+| Type | Sender | Payload | Response |
+|------|--------|---------|----------|
+| `PREVIEW_TEMPLATE_SETTINGS` | dashboard-settings | `{ settings, previewMode, targetMode }` | `{ ok, source, sourceNotes, previewNotes, truncationFlags, rawTemplate, rendered: { html, card, exifTitle }, lengths }` |
+
+- **truncationFlags**: `{ html, card, exifTitle }` booleans — whether each rendered string hit its max-length or sanitization path vs an unconstrained render of the same template for that preview.
+- **previewNotes**: human-readable notes (brief-mode body trim, general caps, per-flag “this sample was limited” lines).
 
 - **matched**: folders matched to real Storypark story IDs via API + date/title comparison
 - **recovered**: folders that couldn't be matched → `recovered_` manifest entries created
@@ -379,6 +413,9 @@ Phase advancement: `advancePhase(childId)` is called after the queue empties or 
 ---
 
 ## 8. Common Pitfalls
+
+### `refreshQuickStartStates` early return
+`dashboard.js` `refreshQuickStartStates()` must **not** `return` from the whole function when the startup health banner is hidden. That skipped later quick-start updates (e.g. Face Review step). Use `if (showIfNotDismissed) { … paint banner … }` only.
 
 ### PowerShell File Encoding
 When writing files with emoji or Unicode via PowerShell commands, always specify UTF-8 BOM encoding or the browser will fail to parse the module. Prefer using write_to_file tool directly.
@@ -482,6 +519,24 @@ const folderName = pathParts.length >= (folderIdx + 2) ? pathParts[folderIdx] : 
 ```
 The same pattern is already applied correctly in `runCleanup()` (`_sssLinked2`) — always use `_sssLinked ? 2 : 3` when parsing paths in offline scan loops.
 
+### Guided-Step Label Drift Across UI and Runtime Text
+**Bug:** Dashboard HTML labels were updated to parent-facing guided steps, but runtime text in `dashboard-settings.js` (status lines/toasts/resume messages) kept older wording. This creates confusing mismatch for users and makes AI edits harder to keep consistent.
+
+**Fix:** Centralize guided-step wording in a shared constant and reuse it for status/toast strings:
+```javascript
+const GUIDED_STEP_LABELS = Object.freeze({
+  syncCheck: "Step 1–2: Sync & Check",
+  downloadLatest: "Step 3: Download Latest",
+  checkRestore: "Step 4: Check & Restore Missing",
+});
+```
+Rule: do not hardcode step names in multiple places. Use one constant source in the module and reference it everywhere.
+
+### Decision Log Integrity and Atomic DB Writes
+**Bug:** Writing large JSON files directly can leave partially-written files after interruption, and missing decision logs makes model behavior impossible to audit.
+
+**Fix:** Critical `Database/` writes must use temp-file commit flow, and every manual/auto/self-improve face decision must append to `Database/decision_log.jsonl` with thresholds/scores/reason code. Never add face decision logic without audit logging.
+
 ### Lightbox Blob URL Memory Leak (_fullImageCache Unbounded)
 **Bug:** `openLightbox()` in `dashboard.js` created a `URL.createObjectURL()` Blob URL for every unique photo opened and stored it in `_fullImageCache` with no size limit and no `revokeObjectURL()` calls. Reviewing many photos would silently consume the 512 MB heap until the page crashed.
 
@@ -511,6 +566,81 @@ await addDownloadedStory({
   thumbnailFilename: manifest.thumbnailFilename || amFilename,
 });
 ```
+
+### Sync File-Count Mismatch Ignoring rejectedFilenames
+**Bug:** Story API sync compared local-vs-API media counts using only `approvedFilenames` (+ queued), ignoring `rejectedFilenames`. If a story had face-rejected files, sync falsely marked it as `requiresRedownload` and could trigger unnecessary full-story rebuild/download flows.
+
+**Fix:** When building `downloadedCountByKey` in `background.js`, include `rejectedFilenames` in the media count used for mismatch detection:
+```javascript
+const approved = (m.approvedFilenames || []).filter(_isMediaFilenameForApiCompare).length;
+const rejected = (m.rejectedFilenames || []).filter(_isMediaFilenameForApiCompare).length;
+const queued   = (m.queuedFilenames || []).filter(_isMediaFilenameForApiCompare).length;
+downloadedCountByKey.set(key, approved + rejected + queued);
+```
+
+**Redownload threshold rule:** set `requiresRedownload` when `localCount !== apiCount`
+(both `localCount < apiCount` and `localCount > apiCount`).
+
+**Generated-card exclusion rule:** any generated Story Card filename pattern must be excluded from media-count comparisons, not just legacy `story_card.jpg`.
+This includes templated names like `YYYY-MM-DD - {sanitized-title} card.jpg`.
+
+### Story HTML Naming Must Match Folder Base
+**Invariant:** Per-story HTML output uses folder-style naming as the primary filename:
+`{StoryDate} - {SanitizedTitle}.html`.
+
+Navigation links should target the manifest `storyHtmlFilename` (or computed folder-base HTML name), not hardcoded `story.html`.
+Optional legacy `story.html` may be written for compatibility, but it is not the primary path.
+
+### Story Card Naming Must Match Folder Base
+**Invariant:** Default Story Card filename must use the same base as the story folder name:
+`{StoryDate} - {SanitizedTitle}.jpg` (not `Story Card.jpg`).
+
+Why: keeps exported assets consistent and predictable for manual browsing/desktop workflows.
+
+### Story Card Routine Block Must Mirror HTML Style
+**Bug:** Card output could show awkward spacing around routine content (double divider look + large blank gap) and did not visually match the HTML routine treatment.
+
+**Fix:** In `offscreen-card.js`, render routine content inside a rounded, lightly tinted box with a single top separator, then flow directly into footer spacing. Keep the left footer metadata focused on educator/photo/child/centre lines (avoid duplicate Storypark branding text there).
+
+**Rule:** Card visual hierarchy should track HTML structure: full story text first, routine section second (boxed), footer metadata last.
+
+### Classroom Mapping Must Use family_centres Classrooms API
+**Invariant:** Room/class mapping should not be inferred from URL slugs or free text alone. Use:
+`GET /api/v3/family_centres/{centreId}/classrooms` as the canonical classroom roster.
+
+The response includes `id`, `name`, `child_ids[]`, `room_active`, and classroom permissions.
+Build child->room mapping by membership in `child_ids[]`, then apply filters for usable classroom context:
+- keep `room_active === true`
+- prefer `permissions.community_post.create === true`
+- treat admin/info rooms (for example policy/procedure groups) as non-primary unless explicitly requested.
+
+Why: the same child can appear in multiple groups; direct URL/community pages alone are ambiguous.
+
+### Media Reconciliation Must Use storyId + mediaId, Not Position Alone
+**Finding:** API media order is mostly stable but not guaranteed to be stable on every repeated fetch.
+Probe run showed repeated stories where one story had order drift across observations.
+
+**Rule:** For "what is missing" and re-download decisions:
+1. Compare by stable media identity (`storyId` + media item id/key/storypark_id).
+2. Use index/order only as a secondary hint for filename mapping.
+3. Do targeted per-media repair when IDs differ; reserve full-story rebuild for integrity failures.
+
+Why: CDN URLs can rotate and order can occasionally shift; identity-first avoids unnecessary full-story redownloads.
+
+### Repeated Folder Permission Prompts on Dashboard Load
+**Bug:** `getLinkedFolder()` called `verifyPermission()` which unconditionally invoked `requestPermission()` when permission wasn't already granted. Because `getLinkedFolder()` is used in passive UI checks, users could see repeated folder permission prompts even without clicking a folder action.
+
+**Fix:** `verifyPermission(dirHandle, { request })` now defaults to silent `queryPermission` only, and only calls `requestPermission` when explicitly requested by a user-initiated flow.
+
+### API Sync / Scan Proceeding While Database Folder Is Unwritable
+**Bug:** Storypark API sync and extraction flows could continue when `Database/` was unavailable (missing link or lost permission), causing file-based stores like `story_catalog.json`, `story_details.json`, and `routine_snapshots.json` to silently miss updates.
+
+**Fix:** Add a preflight write probe (`ensureDatabaseWritable()`) and fail fast before starting sync or extraction. This guarantees API-driven updates are only run when `Database/` is writable.
+
+### Download Started Before API Metadata Sync
+**Bug:** A user could start download extraction before running "Sync from Storypark", which means class/location/routine context in local records may be incomplete.
+
+**Fix:** `runExtraction()` now hard-checks sync prerequisites (`sync_state.lastSuccessAt` and child-scoped `story_catalog` rows). If missing, it exits with a clear "Run Sync from Storypark first" error.
 
 ### Dead Download State Variables in background.js (logMemorySnapshot Always Shows 0)
 **Bug:** After modularising downloads to `lib/download-pipe.js`, background.js still declared its own local `_activeDownloads`, `_downloadQueue`, `_pendingDownloadIds`, and `_releaseDownloadSlot()` that were never updated. `logMemorySnapshot()` referenced these stale locals, always reporting `active=0 queued=0`.
@@ -576,6 +706,9 @@ chrome.storage.session.set({ isScanning: true }).catch(() => {});
 | **sanitizeName** | Strips filesystem-illegal characters from child/centre/room names |
 | **ETA** | Estimated time remaining, displayed in scan progress bar |
 | **Recovery story** | Story manifest created from disk files (storyId starts with `recovered_`) |
+| **Story template tokens** | HTML/card/EXIF strings use `buildTemplateTokenMap()` + `renderTemplate()` in `metadata-helpers.js`. Canonical names include `[StoryDate]`, `[CentreName]`, `[EducatorName]`; **aliases** `[Date]`, `[Title]`, `[Daycare]`, `[Centre]`, `[Child]`, `[Room]`, `[Educator]` resolve to the same fields. |
+| **Disk naming tokens** | Folder/file names use `buildDynamicName()` in `download-pipe.js`. Common tokens include `[Date]`, `[Title]`, `[Daycare]`; **aliases** `[StoryDate]`, `[StoryTitle]`, `[CentreName]`, `[EducatorName]` resolve the same way. |
+| **Mass renamer tokens** | Settings → Mass Renamer uses `{CurlyBrace}` placeholders in `dashboard-tools.js` `_renderRenameTemplate()`. Aliases include `{Date}`/`{StoryDate}`, `{Title}`/`{StoryTitle}`, `{Child}`/`{ChildName}`, `{Centre}`/`{Daycare}`/`{CentreName}`, `{Educator}`/`{EducatorName}`; replacements run **longest-token-first** so `{EducatorName}` is not broken by `{Educator}`. |
 
 ---
 
@@ -709,12 +842,15 @@ if (msg.type === "BATCH_PROGRESS") {
 |-----------|-----|-------|
 | Scan Latest / Scan All | ✅ | `runExtraction()` background.js, PROGRESS message |
 | Audit & Repair | ✅ | AUDIT_AND_REPAIR background.js, PROGRESS message |
+| Generate HTML / Cards (Post-Processing) | ✅ | `BUILD_HTML_STRUCTURE` in background.js, PROGRESS + SCAN_COMPLETE |
 | Fix Photo Metadata | ✅ | dashboard.js `wireSettingsEvents()` |
 | Re-evaluate All Photos | ✅ | dashboard.js `runReEvaluateAll()` |
 | Download Approved (Batch) | ✅ | background.js broadcasts `eta`; dashboard shows it in BATCH_PROGRESS handler |
 | Offline Facial Scan (Scan tab) | ✅ | `triggerOfflineScan()` in dashboard.js |
 | Offline Smart Scan (Settings) | ✅ | `runOfflineScan()` in dashboard.js |
 | Clean Up Folder | ✅ | `runCleanup()` in dashboard.js |
+
+Post-Processing UX rule: operations triggered from the Post-Processing tab must write start/end/failure entries to the Activity Log, surface live progress on the shared status bar when supported by the backend loop, and honor `CANCEL_SCAN` when the backend loop checks `cancelRequested`.
 
 
 ### 12. Strict UI Decoupling (Manifest V3 Invariant)

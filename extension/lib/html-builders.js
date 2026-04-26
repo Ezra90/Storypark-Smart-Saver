@@ -8,6 +8,13 @@
  * 
  * All templates use native emoji, CSS Grid, and work offline.
  */
+import {
+  TEMPLATE_LIMITS,
+  mergeTemplateSettings,
+  buildTemplateTokenMap,
+  renderTemplate,
+  sanitizeName,
+} from "./metadata-helpers.js";
 
 /**
  * Build a complete story HTML page.
@@ -36,10 +43,24 @@ export function buildStoryPage({
   educatorName,
   routineText,
   mediaFilenames,
+  templateSettings,
 }) {
   const escHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const childFirst = (childName || "").split(/\s+/)[0];
   const dateDisplay = formatDateDMY(date) || date || "Unknown date";
+  const tmpl = mergeTemplateSettings(templateSettings);
+  const tokenMap = buildTemplateTokenMap({
+    storyDate: date,
+    storyTitle: title,
+    storyBody: body,
+    childName,
+    childAge,
+    roomName,
+    centreName,
+    educatorName,
+    routineText,
+    photoCount: (mediaFilenames || []).length,
+  });
   
   // Story Card JPEGs are generated assets for Google Photos, not gallery images
   const _scRe = /Story Card\.jpg$/i;
@@ -51,42 +72,34 @@ export function buildStoryPage({
     return `<div class="photo"><img src="./${enc}" alt="Story photo" loading="lazy"></div>`;
   }).join("\n      ");
 
-  // Attribution block
-  const attributionLines = [
-    childAge
-      ? `${escHtml(childName || "")} @ ${escHtml(childAge)}`
-      : (childName ? escHtml(childName) : ""),
-    roomName   ? escHtml(roomName)   : "",
+  const renderedBody = renderTemplate(tmpl.html.body, tokenMap, { maxLen: TEMPLATE_LIMITS.html });
+  const renderedRoutine = tmpl.html.includeRoutine
+    ? renderTemplate("[Routine]", tokenMap, { maxLen: TEMPLATE_LIMITS.html })
+    : "";
+  const mediaList = (mediaFilenames || []).filter(f => !_scRe.test(f));
+  const photoCount = mediaList.filter(f => !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)).length;
+  const videoCount = mediaList.filter(f => /\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)).length;
+  const footerInfoLines = [
+    educatorName ? `Educator: ${escHtml(educatorName)}` : "",
+    `📷 ${photoCount} photo${photoCount !== 1 ? "s" : ""}${videoCount > 0 ? ` · 🎬 ${videoCount} video${videoCount !== 1 ? "s" : ""}` : ""}`,
+    `${escHtml(childName || "")}${childAge ? ` @ ${escHtml(childAge)}` : ""}`.trim(),
+    roomName ? escHtml(roomName) : "",
     centreName ? escHtml(centreName) : "",
-    "Storypark / Storypark Smart Saver",
   ].filter(Boolean);
-  const attributionHtml = attributionLines.join("<br>");
-
-  // Routine + attribution section
-  const routineSection = routineText
+  // Routine section (displayed below photos, above footer)
+  const routineSection = renderedRoutine
     ? `
-  <div class="routine-block">
-    <div class="divider-line"></div>
+  <div class="routine-separator" aria-hidden="true"></div>
+  <section class="routine-block">
     <div class="routine-label">📋 ${childFirst ? escHtml(childFirst) + "'s" : "Daily"} Routine</div>
-    <div class="routine-text">${escHtml(routineText)}</div>
-    <div class="divider-line"></div>
-    <div class="attribution">${attributionHtml}</div>
-  </div>`
-    : `
-  <div class="attribution solo">${attributionHtml}</div>`;
+    <div class="routine-text">${escHtml(renderedRoutine)}</div>
+  </section>`
+    : "";
 
   // Story body — placeholder when empty
-  const bodyHtml = body
-    ? `<div class="body">${escHtml(body).replace(/\n/g, "<br>")}</div>`
+  const bodyHtml = renderedBody
+    ? `<div class="body">${escHtml(renderedBody).replace(/\n/g, "<br>")}</div>`
     : `<div class="body empty">📄 Story text not yet available — run a scan to restore the full story.</div>`;
-
-  // Preview card: thumbnail + date + title + educator + excerpt + photo count
-  const firstPhoto = (mediaFilenames || []).filter(f => !_scRe.test(f) && !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f))[0];
-  const previewThumb = firstPhoto
-    ? `<img src="./${encodeURIComponent(firstPhoto)}" alt="" class="preview-img" onclick="this.closest('.preview-card').nextElementSibling.scrollIntoView({behavior:'smooth'})">`
-    : `<div class="preview-img preview-placeholder">📸</div>`;
-  const previewExcerpt = (body || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().substring(0, 200);
-  const displayPhotoCount = (mediaFilenames || []).filter(f => !_scRe.test(f)).length;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -96,7 +109,7 @@ export function buildStoryPage({
   <title>${escHtml(title || "Story")} — ${dateDisplay}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 32px; color: #333; line-height: 1.6; background: #f5f7fa; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 1120px; margin: 0 auto; padding: 40px 36px; color: #333; line-height: 1.7; background: #f5f7fa; }
     nav { margin-bottom: 20px; font-size: 13px; color: #888; }
     nav a { color: #0f3460; text-decoration: none; }
     nav a:hover { text-decoration: underline; }
@@ -110,22 +123,35 @@ export function buildStoryPage({
     .preview-educator { font-size: 13px; color: #666; }
     .preview-excerpt { font-size: 13px; color: #555; line-height: 1.5; margin-top: 4px; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
     .preview-photos { font-size: 13px; color: #4a90d9; font-weight: 600; margin-top: 6px; }
-    .full-content { background: #fff; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 32px; margin-bottom: 24px; }
-    .full-content h2 { font-size: 20px; color: #0f3460; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #e8edf3; font-family: Georgia, serif; }
-    .body { font-size: 15px; margin-bottom: 20px; white-space: pre-wrap; font-family: Georgia, 'Times New Roman', serif; }
+    .full-content { background: #fff; border-radius: 20px; box-shadow: 0 3px 18px rgba(0,0,0,0.08); margin-bottom: 28px; overflow: hidden; }
+    .story-header-bar { background:#0f3460; color:#fff; padding:18px 22px; display:flex; justify-content:space-between; align-items:flex-start; gap:14px; }
+    .story-header-left { font-size:14px; line-height:1.45; font-weight:500; }
+    .story-header-left .date { font-size:30px; line-height:1.1; font-weight:700; margin-bottom:4px; }
+    .story-header-right { text-align:right; font-size:14px; line-height:1.45; font-weight:600; opacity:0.95; }
+    .story-content { padding: 44px 42px; }
+    .full-content h2 { font-size: 46px; line-height: 1.08; color: #1f2d45; margin-bottom: 14px; letter-spacing: -0.01em; max-width: 740px; }
+    .story-meta { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin-bottom:18px; padding-bottom:12px; border-bottom:1px solid #d9e2ef; font-size:13px; color:#5d6674; }
+    .story-meta .meta-pill { background:#f3f6fb; border:1px solid #dce6f4; border-radius:999px; padding:4px 10px; font-size:12px; color:#3d4e66; }
+    .body { font-size: 18px; line-height: 1.8; margin-bottom: 22px; white-space: pre-wrap; color: #313946; max-width: 820px; font-weight: 400; letter-spacing: -0.005em; }
     .body.empty { color: #999; font-style: italic; font-size: 13px; }
-    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 20px; }
-    .photo img { width: 100%; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); cursor: pointer; transition: opacity 0.15s; }
+    .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; margin-bottom: 28px; }
+    .photo:first-child { grid-column: 1 / -1; }
+    .photo img { width: 100%; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.10); cursor: pointer; transition: opacity 0.15s; display: block; }
+    .photo:first-child img { max-height: 640px; object-fit: cover; }
+    .photo video { width:100%; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.10); display:block; background:#000; }
     .photo img:hover { opacity: 0.88; }
     .photo img.zoomed { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; background: rgba(0,0,0,0.92); z-index: 9999; border-radius: 0; cursor: zoom-out; padding: 24px; opacity: 1; }
     .divider-line { border-top: 2px solid #c5d3e8; margin: 16px 0; }
-    .routine-block { margin-bottom: 0; }
-    .routine-label { font-size: 14px; font-weight: bold; color: #0f3460; margin-bottom: 8px; }
-    .routine-text { font-size: 13px; white-space: pre-line; color: #444; line-height: 1.9; margin-bottom: 14px; }
-    .attribution { font-size: 12px; color: #666; line-height: 2.0; }
-    .attribution.solo { border-top: 1px solid #e8edf3; padding-top: 14px; }
-    .footer { font-size: 11px; color: #aaa; text-align: center; margin-top: 24px; }
-    @media (max-width: 600px) { .preview-card { flex-direction: column; } .preview-img, .preview-placeholder { width: 100%; min-width: 0; height: 200px; } body { padding: 16px; } .full-content { padding: 20px; } }
+    .routine-separator { border-top: 2px solid #c5d3e8; margin: 12px 0 14px; width: 100%; }
+    .routine-block { margin: 0 0 24px; padding: 16px 18px; background:#f7f9fc; border:1px solid #dce6f4; border-radius:12px; }
+    .routine-label { font-size: 16px; font-weight: 700; color: #0f3460; margin-bottom: 10px; }
+    .routine-text { font-size: 15px; white-space: pre-line; color: #2f3a48; line-height: 1.9; margin-bottom: 0; max-width: 820px; }
+    .story-footer { border-top:1px solid #cdd9e7; margin-top:22px; padding-top:10px; display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+    .story-footer-left { font-size:11px; color:#666; line-height:1.65; }
+    .story-footer-right { text-align:right; font-size:11px; color:#9aa3b2; line-height:1.5; }
+    .footer { font-size: 11px; color: #aaa; text-align: center; margin-top: 16px; }
+    @media (max-width: 900px) { .full-content h2 { font-size: 36px; } .body { font-size: 16px; } }
+    @media (max-width: 600px) { .preview-card { flex-direction: column; } .preview-img, .preview-placeholder { width: 100%; min-width: 0; height: 200px; } body { padding: 16px; } .story-header-bar { padding:12px; } .story-header-left .date { font-size:20px; } .story-content { padding: 22px; } .full-content h2 { font-size: 30px; } .body { font-size: 16px; max-width: 100%; } .photos { grid-template-columns: 1fr; } }
     @media print { body { background: #fff; padding: 20px; } .preview-card { box-shadow: none; } nav { display: none; } .photo img.zoomed { display: none; } }
   </style>
   <script>
@@ -142,29 +168,87 @@ export function buildStoryPage({
     <a href="../../../index.html">← All children</a>
   </nav>
 
-  <div class="preview-card" onclick="document.querySelector('.full-content').scrollIntoView({behavior:'smooth'})">
-    ${previewThumb}
-    <div class="preview-info">
-      <div class="preview-date">📅 ${dateDisplay}</div>
-      <div class="preview-title">${escHtml(title || "Story")}</div>
-      ${educatorName ? `<div class="preview-educator">👩‍🏫 ${escHtml(educatorName)}</div>` : ""}
-      <div class="preview-excerpt">${escHtml(previewExcerpt)}${previewExcerpt.length >= 200 ? "…" : ""}</div>
-      <div class="preview-photos">${displayPhotoCount} photo${displayPhotoCount !== 1 ? "s" : ""}</div>
-    </div>
-  </div>
-
   <div class="full-content">
+    <div class="story-header-bar">
+      <div class="story-header-left">
+        <div class="date">${dateDisplay}</div>
+        <div>${escHtml(childName || "Child")}${childAge ? ` · ${escHtml(childAge)}` : ""}</div>
+      </div>
+      <div class="story-header-right">
+        ${escHtml(centreName || "")}<br>${escHtml(roomName || "")}
+      </div>
+    </div>
+    <div class="story-content">
     <h2>${escHtml(title || "Story")}</h2>
+    <div class="story-meta">
+      <span class="meta-pill">📅 ${dateDisplay}</span>
+      ${educatorName ? `<span class="meta-pill">👩‍🏫 ${escHtml(educatorName)}</span>` : ""}
+      ${childName ? `<span class="meta-pill">👶 ${escHtml(childName)}${childAge ? ` @ ${escHtml(childAge)}` : ""}</span>` : ""}
+      ${roomName ? `<span class="meta-pill">🏠 ${escHtml(roomName)}</span>` : ""}
+      ${centreName ? `<span class="meta-pill">📍 ${escHtml(centreName)}</span>` : ""}
+      <span class="meta-pill">🖼 ${photoCount} photo${photoCount !== 1 ? "s" : ""}</span>
+      ${videoCount > 0 ? `<span class="meta-pill">🎬 ${videoCount} video${videoCount !== 1 ? "s" : ""}</span>` : ""}
+    </div>
     ${bodyHtml}
     ${mediaHtml ? `<div class="photos">\n      ${mediaHtml}\n    </div>` : ""}
     ${routineSection}
+    <div class="story-footer">
+      <div class="story-footer-left">
+        ${footerInfoLines.join("<br>")}
+      </div>
+      <div class="story-footer-right">
+        Storypark Smart Saver<br>
+        storypark.com
+      </div>
+    </div>
+    </div>
   </div>
 
-  <div class="footer">
-    Saved from Storypark by Storypark Smart Saver — ${new Date().toISOString().split("T")[0]}
-  </div>
+  <div class="footer">Saved from Storypark by Storypark Smart Saver</div>
 </body>
 </html>`;
+}
+
+/**
+ * Build a stable export base name that matches story folder naming:
+ *   "YYYY-MM-DD - Story Title"
+ */
+export function getStoryExportBaseName(folderName, storyDate, storyTitle) {
+  const raw = String(folderName || "").trim()
+    || `${String(storyDate || "").trim() || "story"} - ${String(storyTitle || "Story").trim() || "Story"}`;
+  // Windows-safe filename base:
+  // - remove illegal path chars (sanitizeName)
+  // - strip non-ASCII/emoji
+  // - collapse spacing
+  // - cap length to avoid path/FS issues
+  const asciiSafe = sanitizeName(raw)
+    .replace(/_/g, " ")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const MAX_BASE_LEN = 100;
+  return (asciiSafe.slice(0, MAX_BASE_LEN).trim() || "story");
+}
+
+/**
+ * Return HTML export filename(s) for a story folder.
+ * Primary is folder-style naming:
+ *   "YYYY-MM-DD - Story Title.html"
+ * A legacy fallback is kept for backward compatibility with old exports.
+ */
+export function getStoryHtmlFilenames(storyDate, storyTitle, folderName = "") {
+  const base = getStoryExportBaseName(folderName, storyDate, storyTitle);
+  const primary = `${base || "story"}.html`;
+  const legacy = primary.toLowerCase() === "story.html" ? "" : "story.html";
+  return { primary, legacy };
+}
+
+/**
+ * Return card filename aligned to story folder structure:
+ *   "YYYY-MM-DD - Story Title.jpg"
+ */
+export function getStoryCardFilename(storyDate, storyTitle, folderName = "") {
+  return `${getStoryExportBaseName(folderName, storyDate, storyTitle)}.jpg`;
 }
 
 /**
@@ -254,7 +338,9 @@ export function buildMasterIndexHtml(childName, manifests) {
     ].filter(Boolean).join(" · ");
     const photoCount = (m.approvedFilenames || []).length;
 
-    return `<a href="./${encodeURIComponent(m.folderName)}/story.html" class="story-card">
+    const htmlNames = getStoryHtmlFilenames(m.storyDate, m.storyTitle, m.folderName);
+    const storyHtmlTarget = m.storyHtmlFilename || htmlNames.primary;
+    return `<a href="./${encodeURIComponent(m.folderName)}/${encodeURIComponent(storyHtmlTarget)}" class="story-card">
       <div class="card-thumb">${thumb}</div>
       <div class="card-body">
         <div class="card-date">${date}</div>

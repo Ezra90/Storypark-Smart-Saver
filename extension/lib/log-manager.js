@@ -182,10 +182,14 @@ export function createLogger(opts = {}) {
 export async function flushActivityLogToDisk(folderHandle, entries = null) {
   if (!folderHandle) return { written: 0 };
   try {
+    let usedCursor = false;
     // Get entries from storage if not provided
     if (!entries) {
-      const data = await chrome.storage.local.get("activityLog");
-      entries = data.activityLog || [];
+      const data = await chrome.storage.local.get(["activityLog", "activityLogDiskCursor"]);
+      const activityLog = data.activityLog || [];
+      const cursor = Number.isFinite(data.activityLogDiskCursor) ? data.activityLogDiskCursor : 0;
+      entries = activityLog.slice(Math.max(0, cursor));
+      usedCursor = true;
     }
     if (entries.length === 0) return { written: 0 };
 
@@ -205,6 +209,11 @@ export async function flushActivityLogToDisk(folderHandle, entries = null) {
     const lines = entries.map(e => JSON.stringify(e)).join("\n") + "\n";
     await writable.write(lines);
     await writable.close();
+
+    if (usedCursor) {
+      const { activityLog = [] } = await chrome.storage.local.get("activityLog");
+      await chrome.storage.local.set({ activityLogDiskCursor: activityLog.length });
+    }
 
     return { written: entries.length };
   } catch (err) {
@@ -236,7 +245,7 @@ export async function getActivityLog(newestFirst = false) {
  * @returns {Promise<void>}
  */
 export async function clearActivityLog() {
-  await chrome.storage.local.set({ activityLog: [] });
+  await chrome.storage.local.set({ activityLog: [], activityLogDiskCursor: 0 });
 }
 
 /**
@@ -262,7 +271,7 @@ export async function deleteActivityLogFromDisk(folderHandle) {
     }
 
     // Also clear chrome.storage.local
-    await chrome.storage.local.set({ activityLog: [] });
+    await chrome.storage.local.set({ activityLog: [], activityLogDiskCursor: 0 });
     return { deleted: true };
   } catch (err) {
     console.warn("[log-manager] deleteActivityLogFromDisk failed (non-fatal):", err.message);

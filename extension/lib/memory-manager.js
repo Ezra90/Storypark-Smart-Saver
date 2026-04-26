@@ -58,7 +58,7 @@ export const OOM_THRESHOLDS = {
   WARN:      0.60,
   /** Dump all dumpable caches including offscreen descriptor cache. */
   CRITICAL:  0.75,
-  /** Pause operation until heap drops below 70%, max 30 seconds. */
+  /** Pause operation until heap drops below 70%, max ~6 seconds. */
   EMERGENCY: 0.85,
 };
 

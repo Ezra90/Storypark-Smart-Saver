@@ -23,11 +23,13 @@
  *   ADD_FILE_TO_MANIFEST, GET_CACHE_STATS, CLEAR_CACHES,
  *   CLEAR_ALL_REJECTIONS, RECYCLE_OFFSCREEN, ACTIVE_DATABASE_INFO,
  *   GET_ACTIVITY_LOG, CLEAR_ACTIVITY_LOG, LOG_TO_ACTIVITY,
- *   REWRITE_EXIF_ONLY, GENERATE_STORY_CARD, GENERATE_STORY_CARD_SINGLE
+ *   REWRITE_EXIF_ONLY, GENERATE_STORY_CARD, GENERATE_STORY_CARD_SINGLE,
+ *   REHYDRATE_STORY_BODIES
  */
 
 import {
   getDownloadedStories, addDownloadedStory, getAllDownloadedStories,
+  getStoryDetailRecords, getCachedStory, getRoutineSnapshotRecords,
   countImageFingerprints, countCachedStories,
   clearAllImageFingerprints, clearAllCachedStories,
   clearAllRejections,
@@ -36,6 +38,7 @@ import {
   assignStoryNumbers,
   getCentreGPS,
 } from "./db.js";
+import { normaliseStoryText, stripHtml } from "./metadata-helpers.js";
 import { apiFetch, STORYPARK_BASE } from "./api-client.js";
 import { getActivityLog, clearActivityLog } from "./log-manager.js";
 import { requireId } from "./msg-validator.js";
@@ -344,7 +347,7 @@ export async function handleFixStoryMetadata(msg, ctx) {
       for (const m of updatedManifests) {
         try {
           const { downloadDataUrl: _dl, downloadHtmlFile: _dh } = await import("./download-pipe.js");
-          const { buildStoryPage: _bp } = await import("./html-builders.js");
+          const { buildStoryPage: _bp, getStoryHtmlFilenames: _getHtmlNames, getStoryCardFilename: _getCardName } = await import("./html-builders.js");
           const { sanitizeName: _sn } = await import("./metadata-helpers.js");
 
           const storyBasePath = `Storypark Smart Saver/${_sn(m.childName)}/Stories/${m.folderName}`;
@@ -360,12 +363,20 @@ export async function handleFixStoryMetadata(msg, ctx) {
             educatorName: m.educatorName || "", routineText: routineStr,
             mediaFilenames: approvedOnly,
           });
-          const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/story.html`, mimeType: "text/html" });
-          if (htmlRes?.dataUrl && htmlRes?.savePath) { await _dh(htmlRes.dataUrl, htmlRes.savePath); htmlBuilt++; }
+          const htmlNames = _getHtmlNames(m.storyDate, m.storyTitle, m.folderName);
+          const htmlRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.primary}`, mimeType: "text/html" });
+          if (htmlRes?.dataUrl && htmlRes?.savePath) {
+            await _dh(htmlRes.dataUrl, htmlRes.savePath);
+            if (htmlNames.legacy) {
+              const namedRes = await ctx.sendToOffscreen({ type: "DOWNLOAD_TEXT", text: htmlContent, savePath: `${storyBasePath}/${htmlNames.legacy}`, mimeType: "text/html" });
+              if (namedRes?.dataUrl && namedRes?.savePath) await _dh(namedRes.dataUrl, namedRes.savePath);
+            }
+            htmlBuilt++;
+          }
 
           if (saveStoryCard && m.storyBody && approvedOnly.length > 0) {
             const gpsCoords = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
-            const cardPath  = `${storyBasePath}/${m.storyCardFilename || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "story - Story Card.jpg")}`;
+            const cardPath  = `${storyBasePath}/${m.storyCardFilename || _getCardName(m.storyDate, m.storyTitle, m.folderName)}`;
             const cr = await ctx.sendToOffscreen({ type: "GENERATE_STORY_CARD", title: m.storyTitle, date: m.storyDate, body: m.storyBody, centreName: m.centreName || "", roomName: m.roomName || "", educatorName: m.educatorName || "", childName: m.childName, childAge: m.childAge || "", routineText: routineStr, photoCount: approvedOnly.filter(f => !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)).length, gpsCoords, savePath: cardPath });
             if (cr?.ok && cr?.dataUrl) { await _dl(cr.dataUrl, cardPath); cardBuilt++; }
           }
@@ -378,6 +389,170 @@ export async function handleFixStoryMetadata(msg, ctx) {
     }
 
     return { ok: true, updated, regenerated: regenerateHtml ? updatedManifests.length : 0 };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * REHYDRATE_STORY_BODIES — One-time repair that restores improved story-body
+ * formatting in existing manifests using story_details/cache (no API rescan).
+ *
+ * @param {{
+ *   childId?: string,
+ *   regenerateHtml?: boolean,
+ *   regenerateCards?: boolean
+ * }} msg
+ */
+export async function handleRehydrateStoryBodies(msg, ctx) {
+  try {
+    const {
+      childId = null,
+      regenerateHtml = true,
+      regenerateCards = false,
+    } = msg || {};
+
+    const manifests = childId
+      ? await getDownloadedStories(String(childId))
+      : await getAllDownloadedStories();
+    if (!Array.isArray(manifests) || manifests.length === 0) {
+      return { ok: true, scanned: 0, updated: 0, regeneratedHtml: 0, regeneratedCards: 0 };
+    }
+
+    const details = await getStoryDetailRecords(childId ? String(childId) : null).catch(() => []);
+    const routineRows = await getRoutineSnapshotRecords(childId ? String(childId) : null).catch(() => []);
+    const detailMap = new Map();
+    for (const d of (details || [])) {
+      const key = d?.key || `${d?.childId || ""}_${d?.storyId || ""}`;
+      if (key) detailMap.set(String(key), d);
+    }
+    const routineMap = new Map();
+    for (const r of (routineRows || [])) {
+      const key = `${r?.childId || ""}_${r?.storyDate || ""}`;
+      if (!key) continue;
+      const text = (r?.routineDetailed || r?.routineSummary || "").trim();
+      if (text) routineMap.set(key, text);
+    }
+
+    const updatedManifests = [];
+    let updated = 0;
+    for (const m of manifests) {
+      const key = `${m.childId}_${m.storyId}`;
+      const d = detailMap.get(key) || null;
+      const cached = (!d && m.storyId) ? await getCachedStory(String(m.storyId)).catch(() => null) : null;
+
+      const rawBody =
+        d?.rawDisplayContent ?? d?.display_content ?? d?.storyBody ?? d?.body ??
+        cached?.display_content ?? cached?.body ?? cached?.excerpt ??
+        m.storyBody ?? m.excerpt ?? "";
+      const repairedBody = normaliseStoryText(rawBody);
+      const routineText = (m?.storyRoutine || "").trim() || routineMap.get(`${m.childId}_${m.storyDate}`) || "";
+      if (!repairedBody && !routineText) continue;
+
+      if ((m.storyBody || "") !== repairedBody || ((m.storyRoutine || "").trim() !== routineText.trim())) {
+        const patched = {
+          ...m,
+          storyBody: repairedBody || m.storyBody || "",
+          excerpt: stripHtml(repairedBody || m.storyBody || "").slice(0, 200),
+          storyRoutine: routineText || m.storyRoutine || "",
+        };
+        await addDownloadedStory(patched).catch(() => {});
+        updatedManifests.push(patched);
+        updated++;
+      }
+    }
+
+    let regeneratedHtmlCount = 0;
+    let regeneratedCardCount = 0;
+    if (updatedManifests.length > 0 && ctx.sendToOffscreen && (regenerateHtml || regenerateCards)) {
+      const { downloadDataUrl: _dl, downloadHtmlFile: _dh } = await import("./download-pipe.js");
+      const { buildStoryPage: _bp, getStoryHtmlFilenames: _getHtmlNames, getStoryCardFilename: _getCardName } = await import("./html-builders.js");
+      const { sanitizeName: _sn } = await import("./metadata-helpers.js");
+      const { saveStoryCard = true } = await chrome.storage.local.get("saveStoryCard");
+
+      for (const m of updatedManifests) {
+        const storyBasePath = `Storypark Smart Saver/${_sn(m.childName)}/Stories/${m.folderName}`;
+        const rejectedSet = new Set(m.rejectedFilenames || []);
+        const approvedOnly = (m.approvedFilenames || []).filter((f) => !rejectedSet.has(f));
+        if (approvedOnly.length === 0) continue;
+
+        const routineStr = typeof m.storyRoutine === "string" ? m.storyRoutine : (m.storyRoutine?.detailed || m.storyRoutine?.summary || "");
+
+        if (regenerateHtml) {
+          try {
+            const htmlContent = _bp({
+              title: m.storyTitle, date: m.storyDate, body: m.storyBody || "",
+              childName: m.childName, childAge: m.childAge || "",
+              roomName: m.roomName || "", centreName: m.centreName || "",
+              educatorName: m.educatorName || "", routineText: routineStr,
+              mediaFilenames: approvedOnly,
+            });
+            const htmlNames = _getHtmlNames(m.storyDate, m.storyTitle, m.folderName);
+            const htmlRes = await ctx.sendToOffscreen({
+              type: "DOWNLOAD_TEXT",
+              text: htmlContent,
+              savePath: `${storyBasePath}/${htmlNames.primary}`,
+              mimeType: "text/html",
+            });
+            if (htmlRes?.dataUrl && htmlRes?.savePath) {
+              await _dh(htmlRes.dataUrl, htmlRes.savePath);
+              if (htmlNames.legacy) {
+                const namedRes = await ctx.sendToOffscreen({
+                  type: "DOWNLOAD_TEXT",
+                  text: htmlContent,
+                  savePath: `${storyBasePath}/${htmlNames.legacy}`,
+                  mimeType: "text/html",
+                });
+                if (namedRes?.dataUrl && namedRes?.savePath) await _dh(namedRes.dataUrl, namedRes.savePath);
+              }
+              regeneratedHtmlCount++;
+            }
+          } catch (err) {
+            console.warn("[handleRehydrateStoryBodies] HTML regen failed for", m.storyId, err.message);
+          }
+        }
+
+        if (regenerateCards && saveStoryCard && m.storyBody) {
+          try {
+            const gpsCoords = m.centreName ? await getCentreGPS(m.centreName).catch(() => null) : null;
+            const cardPath = `${storyBasePath}/${m.storyCardFilename || _getCardName(m.storyDate, m.storyTitle, m.folderName)}`;
+            const cr = await ctx.sendToOffscreen({
+              type: "GENERATE_STORY_CARD",
+              title: m.storyTitle,
+              date: m.storyDate,
+              body: m.storyBody,
+              centreName: m.centreName || "",
+              roomName: m.roomName || "",
+              educatorName: m.educatorName || "",
+              childName: m.childName,
+              childAge: m.childAge || "",
+              routineText: routineStr,
+              photoCount: approvedOnly.filter((f) => !/\.(mp4|mov|avi|webm|m4v|3gp|mkv)$/i.test(f)).length,
+              gpsCoords,
+              savePath: cardPath,
+            });
+            if (cr?.ok && cr?.dataUrl) {
+              await _dl(cr.dataUrl, cardPath);
+              regeneratedCardCount++;
+            }
+          } catch (err) {
+            console.warn("[handleRehydrateStoryBodies] card regen failed for", m.storyId, err.message);
+          }
+        }
+      }
+    }
+
+    await ctx.logger(
+      "SUCCESS",
+      `🧩 Rehydrate complete: ${updated}/${manifests.length} story manifests repaired from cached details.`
+    );
+    return {
+      ok: true,
+      scanned: manifests.length,
+      updated,
+      regeneratedHtml: regeneratedHtmlCount,
+      regeneratedCards: regeneratedCardCount,
+    };
   } catch (err) {
     return { ok: false, error: err.message };
   }

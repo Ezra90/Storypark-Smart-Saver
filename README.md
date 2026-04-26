@@ -20,6 +20,23 @@ Everything happens privately inside your Chrome browser. No accounts to create. 
 
 ---
 
+## 🧭 Guided 4-Step Flow (Recommended)
+
+For most families, the easiest routine is:
+
+1. **Step 1 — Link Folder**  
+   Link your Downloads folder so the app can track what is already saved.
+2. **Step 2 — Sync Storypark Info**  
+   Pull metadata from Storypark (stories, routines, centres, educators, media counts) into local `Database/` files.
+3. **Step 3 — Download Latest**  
+   Fetch only new stories since your last run.
+4. **Step 4 — Check & Restore Missing**  
+   If local files were deleted after uploading to Apple Photos/Google Photos, run Check & Restore to recover missing media.
+
+This flow is designed for ongoing use (every few days or weekly), not just one-off backups.
+
+---
+
 ## 🛡️ Privacy & Safety
 
 | | |
@@ -192,6 +209,8 @@ Storypark sometimes rate-limits requests, especially for large accounts. If this
 - A purple **▶ Resume from story X (Y remaining)** button appears
 - Just click Resume — it picks up exactly where it stopped, even if you close and reopen Chrome
 
+The Storypark metadata sync also keeps a durable checkpoint and journal in `Database/`, so long sync jobs can resume safely.
+
 ---
 
 ## 📥 Downloading Your Approved Photos
@@ -227,6 +246,57 @@ This feature lets the extension check which photos are already saved on your com
 3. Click **🔍 Verify On Disk** to see a report of what's saved vs what's missing
 
 > 💡 The extension saves files into `Downloads → Storypark Smart Saver → [Child's Name] → Stories`. Link the **Downloads** folder so the extension can find them.
+
+### Directory Layout + Restore Notes
+
+Use this structure as your reference:
+
+- `Parent folder you choose` (commonly `Downloads`, but can be `Desktop` or another location)
+  - `Storypark Smart Saver/`
+    - `Database/` (JSON state, sync snapshots, logs)
+    - `{Child Name}/Stories/{Story Folder}/...` (media + `story.html` + story card)
+
+Important behavior:
+
+- Set the **parent folder** that contains `Storypark Smart Saver` (not the `Database` folder directly).
+- `Verify Directory` rebuilds verified records from story folders that include `metadata.json` (common in newer installs).
+- `Verify Files on Disk` compares real files against expected records and is the preferred option for older/restored libraries.
+- If you move the `Storypark Smart Saver` folder (example: `Desktop` -> `Downloads`), the stored folder handle can become invalid.  
+  Re-link once to the new parent folder and the app will continue from your existing `Database/` files.
+
+---
+
+## 🗄 Database Files (What Is Saved)
+
+Inside `Downloads/Storypark Smart Saver/Database/`, the app keeps structured JSON/text files as the source of truth:
+
+- `manifests.json` — local story/file tracking
+- `story_catalog.json` — lightweight per-story API index
+- `story_details.json` — heavier story details/body text
+- `routine_snapshots.json` — per-child/day routine snapshots
+- `sync_state.json` — last sync status + checkpoint
+- `sync_journal.json` — recent sync event history
+- `sync_schema.json` — schema version metadata
+- `activity_log.json` + `activity_log.txt` — readable operation logs
+- `decision_log.jsonl` — append-only face decision audit log
+- `model_health.json` — per-child face model health snapshots
+- `holdout_sets.json` — validation/holdout samples for quality tracking
+- `jobs_state.json` — job lock/idempotency state for long tasks
+
+You can clear in-app logs from the UI; this also clears persisted activity log files.
+
+---
+
+## 🧠 Google Photos-Style Face Learning
+
+The face model now supports continuous self-improvement:
+
+- **Initial Face Build** in Settings bootstraps from existing manifests + fingerprint cache.
+- **Self-Improve Now** re-checks previously approved/rejected items with the latest model.
+- **Model Health panel** shows descriptor counts, confidence trend, recoveries, and holdout size.
+- **Decision Audit Summary** gives a quick breakdown of approve/reject/requeue outcomes.
+
+This keeps matching quality improving over time without needing full re-downloads.
 
 ---
 
@@ -302,6 +372,9 @@ Look in your Downloads folder for a folder called **Storypark Smart Saver**, the
 
 **Q: I uploaded everything to Google Photos and deleted my local copies. Will "Download Latest" still work?**
 Yes — completely. The extension tracks which stories have been scanned inside Chrome's own database (separate from your Downloads folder). Deleting local files has no effect on that record. Run "⬇ Download Latest" and it will only fetch new stories that appeared after your last scan. **Tip:** Export a Full Backup before deleting your local files — that way, even if Chrome is reinstalled, you can restore the backup and Download Latest still knows exactly where you got up to.
+
+**Q: If local files are deleted to save disk space, can I restore them later?**
+Yes. Run **Step 4 — Check What Is Missing** then **Restore Missing Files**. This compares local files to API expectations and re-downloads what is missing.
 
 **Q: Something went wrong. How do I start fresh for one child?**
 Go to **Settings → Face Training**, select the child, and click **🗑 Reset Face Data**. This resets the AI back to Phase 1 for that child only.

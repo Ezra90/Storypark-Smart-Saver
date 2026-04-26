@@ -179,7 +179,8 @@ export async function fetchChildProfile(childId, childName, activeCentreFallback
     try {
       const fcData = await apiFetch(`${STORYPARK_BASE}/api/v3/family_centres`);
       const centres = fcData.centres || fcData.services || [];
-      const matched = centres.find(c => child.centre_ids.includes(String(c.id)));
+      const centreIds = new Set((child.centre_ids || []).map(id => String(id)));
+      const matched = centres.find(c => centreIds.has(String(c.id)));
       if (matched) derivedCentreName = matched.name || matched.display_name || "";
     } catch { /* ignore */ }
   }
@@ -485,7 +486,7 @@ export async function bulkFetchAttendanceDates(childId, maxPages = 100) {
       pageToken = data.next_page_token;
       if (!pageToken) break;
       pages++;
-      await new Promise(r => setTimeout(r, 800)); // Nominatim-style rate limit
+      await smartDelay("FEED_SCROLL");
     } catch { break; }
   }
 

@@ -28,8 +28,6 @@ export function setIsRunning(val) { isRunning = val; }
 const $childSelect  = document.getElementById("childSelect");
 const $btnRefresh   = document.getElementById("btnRefresh");
 const $btnScanMissing = document.getElementById("btnScanMissing");
-const $btnLatest    = document.getElementById("btnExtractLatest");
-const $btnDeep      = document.getElementById("btnDeepRescan");
 const $btnTest      = document.getElementById("btnTestConnection");
 const $btnStop      = document.getElementById("btnStopScan");
 const $statusDot    = document.getElementById("statusDot");
@@ -41,7 +39,14 @@ const $btnFollowScanLog = document.getElementById("btnFollowScanLog");
 const $phaseBadge   = document.getElementById("phaseBadge");
 const $btnResume    = document.getElementById("btnResumeScan");
 const $resumeInfo   = document.getElementById("resumeInfo");
-const $btnOfflineScanMain = document.getElementById("btnOfflineScanMain");
+const $btnGlobalToggleLog = document.getElementById("btnGlobalToggleLog");
+const $globalScanLogPanel = document.getElementById("globalScanLogPanel");
+const $globalScanLogBox = document.getElementById("globalScanLogBox");
+
+let _globalLogOpen = false;
+let _globalLogFollowing = true;
+const GLOBAL_LOG_MAX_LINES = 200;
+const _globalLogBuffer = [];
 
 /**
  * Initialize the Scan Tab.
@@ -75,6 +80,72 @@ export function initScanTab(helpers) {
     }
   }
 
+  function appendGlobalLogLine(line, className = "") {
+    if (!$globalScanLogBox) return;
+    if ($globalScanLogBox.firstElementChild?.textContent === "Waiting for activity…") {
+      $globalScanLogBox.innerHTML = "";
+    }
+    const p = document.createElement("p");
+    if (className) p.className = className;
+    p.textContent = line;
+    $globalScanLogBox.appendChild(p);
+    if (_globalLogFollowing) $globalScanLogBox.scrollTop = $globalScanLogBox.scrollHeight;
+  }
+
+  function _normaliseGlobalEntry(entry) {
+    const ts = entry?.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "";
+    const level = String(entry?.level || "INFO").toUpperCase();
+    const message = String(entry?.message || "").trim();
+    return {
+      level,
+      className: `level-${level}`,
+      line: `${ts ? `[${ts}] ` : ""}${message}`,
+    };
+  }
+
+  function _pushGlobalEntry(entry) {
+    const normal = _normaliseGlobalEntry(entry);
+    if (!normal.line.trim()) return;
+    _globalLogBuffer.push(normal);
+    if (_globalLogBuffer.length > GLOBAL_LOG_MAX_LINES) {
+      _globalLogBuffer.splice(0, _globalLogBuffer.length - GLOBAL_LOG_MAX_LINES);
+    }
+  }
+
+  function _renderGlobalLogFromBuffer() {
+    if (!$globalScanLogBox) return;
+    $globalScanLogBox.innerHTML = "";
+    if (_globalLogBuffer.length === 0) {
+      $globalScanLogBox.innerHTML = "<p>Waiting for activity…</p>";
+      return;
+    }
+    for (const item of _globalLogBuffer) {
+      appendGlobalLogLine(item.line, item.className);
+    }
+  }
+
+  function toggleGlobalLog(open) {
+    _globalLogOpen = typeof open === "boolean" ? open : !_globalLogOpen;
+    if ($globalScanLogPanel) $globalScanLogPanel.style.display = _globalLogOpen ? "block" : "none";
+    if ($btnGlobalToggleLog) $btnGlobalToggleLog.textContent = _globalLogOpen ? "📜 Hide Log" : "📜 Open Log";
+    const $globalBanner = document.getElementById("globalScanBanner");
+    if ($globalBanner) $globalBanner.classList.toggle("log-open", _globalLogOpen);
+    if (_globalLogOpen) {
+      _renderGlobalLogFromBuffer();
+    }
+    if (_globalLogOpen && _globalLogBuffer.length === 0) {
+      if ($globalScanLogBox) $globalScanLogBox.innerHTML = "<p>Loading recent activity…</p>";
+      send({ type: "GET_ACTIVITY_LOG" }).then((res) => {
+        if (!$globalScanLogBox || !_globalLogOpen) return;
+        const entries = (res?.entries || res?.activityLog || []).slice(-GLOBAL_LOG_MAX_LINES);
+        for (const e of entries) {
+          _pushGlobalEntry(e);
+        }
+        _renderGlobalLogFromBuffer();
+      });
+    }
+  }
+
   $scanLog?.addEventListener("scroll", () => {
     _scanLogFollowing = _isAtBottom($scanLog);
     _updateFollowBtn();
@@ -86,15 +157,21 @@ export function initScanTab(helpers) {
     _updateFollowBtn();
   });
 
+  $globalScanLogBox?.addEventListener("scroll", () => {
+    _globalLogFollowing =
+      $globalScanLogBox.scrollTop + $globalScanLogBox.clientHeight >= $globalScanLogBox.scrollHeight - 16;
+  });
+
+  $btnGlobalToggleLog?.addEventListener("click", () => {
+    toggleGlobalLog();
+  });
+
   function setRunning(running) {
+    const wasRunning = isRunning;
     isRunning = running;
-    if ($btnLatest) $btnLatest.disabled = running;
-    if ($btnDeep) $btnDeep.disabled = running;
     if ($btnScanMissing) $btnScanMissing.disabled = running;
     if ($childSelect) $childSelect.disabled = running;
     if ($btnRefresh) $btnRefresh.disabled = running;
-    if ($btnLatest) $btnLatest.style.display = running ? "none" : "";
-    if ($btnDeep) $btnDeep.style.display = running ? "none" : "";
     if ($btnScanMissing) $btnScanMissing.style.display = running ? "none" : "";
     if ($btnStop) $btnStop.style.display = running ? "inline-flex" : "none";
 
@@ -106,10 +183,6 @@ export function initScanTab(helpers) {
       $globalStop.textContent = "🛑 Stop Scan";
     }
 
-    if ($btnOfflineScanMain) {
-      $btnOfflineScanMain.disabled = running || !$childSelect.value;
-    }
-
     if (!running) {
       if ($btnStop) {
         $btnStop.disabled = false;
@@ -117,6 +190,32 @@ export function initScanTab(helpers) {
       }
       if ($progressBar) $progressBar.style.display = "none";
       if ($progressText) $progressText.style.display = "none";
+      const $globalBar = document.getElementById("globalScanBar");
+      const $globalText = document.getElementById("globalScanText");
+      if ($globalBar) { $globalBar.value = 0; $globalBar.max = 100; }
+      if ($globalText) $globalText.textContent = "Scan in progress… overall time remaining will appear after enough samples.";
+      toggleGlobalLog(false);
+    } else if (!wasRunning) {
+      // Start each run with a clean, run-scoped status-bar log.
+      _globalLogBuffer.length = 0;
+      if ($globalScanLogBox) $globalScanLogBox.innerHTML = "<p>Waiting for activity…</p>";
+    }
+  }
+
+  function updateGlobalBannerProgress(msg) {
+    const $globalBar = document.getElementById("globalScanBar");
+    const $globalText = document.getElementById("globalScanText");
+    if ($globalBar) {
+      $globalBar.max = Math.max(1, msg.total || 100);
+      $globalBar.value = Math.min(msg.current || 0, $globalBar.max);
+    }
+    if ($globalText) {
+      const hasEta = typeof msg.eta === "string" && msg.eta.trim().length > 0;
+      const etaPart = hasEta
+        ? ` · ⏱ Overall time remaining: ${msg.eta}`
+        : " · ⏱ Overall time remaining: calculating…";
+      const label = msg.childName || "Scan";
+      $globalText.textContent = `${label}: ${msg.current || 0}/${msg.total || 0}${etaPart}`;
     }
   }
 
@@ -124,8 +223,6 @@ export function initScanTab(helpers) {
     $childSelect.innerHTML = "";
     if (!children || children.length === 0) {
       $childSelect.innerHTML = '<option value="">No children found — open Storypark first</option>';
-      if ($btnLatest) $btnLatest.disabled = true;
-      if ($btnDeep) $btnDeep.disabled = true;
       if ($btnScanMissing) $btnScanMissing.disabled = true;
       return;
     }
@@ -145,8 +242,6 @@ export function initScanTab(helpers) {
         if (exists) $childSelect.value = lastSelectedChildId;
       }
       if (!isRunning && $childSelect.value) {
-        if ($btnLatest) $btnLatest.disabled = false;
-        if ($btnDeep) $btnDeep.disabled = false;
         if ($btnScanMissing) $btnScanMissing.disabled = false;
       }
     });
@@ -568,23 +663,18 @@ export function initScanTab(helpers) {
     setStatus("green", "Smart Sort complete");
     const summary = `✅ Smart Sort Done — ${totalAutoApproved} confirmed, ${totalQueued} to review, ${totalRejected} moved to Rejected Matches`;
     scanLog(`\n${summary}`);
-    if (totalQueued > 0) scanLog(`💡 Go to the 👀 Pending Review tab — ${totalQueued} photos need your decision.`);
+    if (totalQueued > 0) scanLog(`💡 Go to 👀 Face Review — ${totalQueued} photos need your decision.`);
     toast(summary, "success", 6000);
   }
 
   // Event listeners
   $childSelect?.addEventListener("change", () => {
     chrome.storage.local.set({ lastSelectedChildId: $childSelect.value });
+    if (window._updateDbInfo) window._updateDbInfo();
     if (!isRunning && $childSelect.value) {
-      if ($btnLatest) $btnLatest.disabled = false;
-      if ($btnDeep) $btnDeep.disabled = false;
       if ($btnScanMissing) $btnScanMissing.disabled = false;
-      if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = false;
     } else if (!$childSelect.value) {
-      if ($btnLatest) $btnLatest.disabled = true;
-      if ($btnDeep) $btnDeep.disabled = true;
       if ($btnScanMissing) $btnScanMissing.disabled = true;
-      if ($btnOfflineScanMain) $btnOfflineScanMain.disabled = true;
     }
     loadChildPhase();
     checkForResume();
@@ -592,8 +682,6 @@ export function initScanTab(helpers) {
 
   $btnRefresh?.addEventListener("click", () => {
     $childSelect.innerHTML = "<option>Refreshing…</option>";
-    if ($btnLatest) $btnLatest.disabled = true;
-    if ($btnDeep) $btnDeep.disabled = true;
     if ($btnScanMissing) $btnScanMissing.disabled = true;
     send({ type: "REFRESH_PROFILE" }).then(res => {
       if (res?.ok) { populateChildren(res.children); updateCentreInfo(); }
@@ -601,10 +689,7 @@ export function initScanTab(helpers) {
     });
   });
 
-  $btnLatest?.addEventListener("click", () => triggerExtraction("EXTRACT_LATEST"));
-  $btnDeep?.addEventListener("click", () => triggerExtraction("DEEP_RESCAN"));
   $btnScanMissing?.addEventListener("click", () => triggerExtraction("EXTRACT_LATEST"));
-  $btnOfflineScanMain?.addEventListener("click", () => runSmartSort());
 
   $btnStop?.addEventListener("click", () => {
     send({ type: "CANCEL_SCAN" });
@@ -669,16 +754,22 @@ export function initScanTab(helpers) {
 
   // Export progress update function for central message listener
   window._scanUpdateProgress = (msg) => {
+    // Keep all open dashboard windows in sync with active scan state.
+    if (!isRunning) setRunning(true);
     if ($progressBar) {
       $progressBar.value = msg.current;
       $progressBar.max = msg.total;
       $progressBar.style.display = "block";
     }
     if ($progressText) {
-      const etaPart = msg.eta ? ` · ⏱ ${msg.eta}` : "";
+      const hasEta = typeof msg.eta === "string" && msg.eta.trim().length > 0;
+      const etaPart = hasEta
+        ? ` · ⏱ Overall time remaining: ${msg.eta}`
+        : " · ⏱ Overall time remaining: calculating…";
       $progressText.style.display = "block";
       $progressText.textContent = `${msg.current}/${msg.total} · ${msg.date || ""}${etaPart}`;
     }
+    updateGlobalBannerProgress(msg);
   };
 
   window._scanComplete = () => {
@@ -687,8 +778,30 @@ export function initScanTab(helpers) {
     checkForResume();
   };
 
+  // Called from dashboard.js on LOG_ENTRY to mirror logs in global banner.
+  window._appendGlobalScanLog = (entry) => {
+    _pushGlobalEntry(entry);
+    if (!_globalLogOpen || !$globalScanLogBox) return;
+    const latest = _globalLogBuffer[_globalLogBuffer.length - 1];
+    if (!latest) return;
+    appendGlobalLogLine(latest.line, latest.className);
+  };
+
   // Initial load
   loadChildren();
   loadChildPhase();
   checkForResume();
+
+  // If scan started in another dashboard window, mirror running state.
+  send({ type: "GET_SCAN_STATUS" }).then((res) => {
+    if (res?.ok && res.isScanning) {
+      setRunning(true);
+      setStatus("yellow", res.cancelRequested ? "Cancelling…" : "Scan in progress…");
+      if (res.cancelRequested) {
+        if ($btnStop) { $btnStop.disabled = true; $btnStop.textContent = "⏳ Cancelling…"; }
+        const $gs = document.getElementById("btnGlobalStop");
+        if ($gs) { $gs.disabled = true; $gs.textContent = "⏳ Cancelling…"; }
+      }
+    }
+  });
 }

@@ -42,12 +42,16 @@
     <nav class="sidebar-nav">
       <button class="nav-btn active" data-tab="sync">
         <span class="nav-icon">🔄</span>
-        <span class="nav-label">Sync &amp; Status</span>
+        <span class="nav-label">Sync</span>
         <span class="nav-badge" id="reviewBadge" style="display:none;"></span>
+      </button>
+      <button class="nav-btn" data-tab="review">
+        <span class="nav-icon">👀</span>
+        <span class="nav-label">Review</span>
       </button>
       <button class="nav-btn" data-tab="download">
         <span class="nav-icon">⬇</span>
-        <span class="nav-label">Download Engine</span>
+        <span class="nav-label">Download</span>
       </button>
       <button class="nav-btn" data-tab="post">
         <span class="nav-icon">⚙</span>
@@ -72,6 +76,75 @@
   ════════════════════════════════════════════════════════ -->
   <main class="main">
 
+    <section class="quick-start-strip" id="quickStartStrip" aria-label="Quick Start">
+      <div class="quick-start-title">Quick Start</div>
+      <div class="quick-start-banner" id="qsFirstTimeBanner" style="display:none;">
+        No saved data detected — start at Step 1.
+      </div>
+      <div class="quick-start-buttons">
+        <div class="quick-step-card">
+          <span class="qs-label">1) Set Working Directory</span>
+          <span class="qs-state" id="qsState1">Not started</span>
+          <span class="qs-hint">Menu: Sync</span>
+          <button class="quick-step-btn" id="qsStep1">Run Step 1</button>
+        </div>
+        <div class="quick-step-card">
+          <span class="qs-label">2) Sync Storypark Info</span>
+          <span class="qs-state" id="qsState2">Not started</span>
+          <span class="qs-hint">Menu: Settings → Sync from Storypark</span>
+          <button class="quick-step-btn" id="qsStep2">Run Step 2</button>
+        </div>
+        <div class="quick-step-card">
+          <span class="qs-label">3) Download Latest</span>
+          <span class="qs-state" id="qsState3">Not started</span>
+          <span class="qs-hint">Menu: Download · Face matches: Review</span>
+          <button class="quick-step-btn" id="qsStep3">Run Step 3</button>
+        </div>
+        <div class="quick-step-card">
+          <span class="qs-label">4) Check &amp; Restore Missing</span>
+          <span class="qs-state" id="qsState4">Not started</span>
+          <span class="qs-hint">Menu: Sync → Verify Files on Disk</span>
+          <button class="quick-step-btn" id="qsStep4">Run Step 4</button>
+        </div>
+        <div class="quick-step-card">
+          <span class="qs-label">5) Face Review</span>
+          <span class="qs-state" id="qsState5">Not started</span>
+          <span class="qs-hint">Menu: Review · After a scan if matches need you</span>
+          <button class="quick-step-btn" id="qsStep5">Open Review</button>
+        </div>
+      </div>
+      <p class="quick-start-note">
+        Full-history downloads can take several hours for large accounts. Example: a 3-year history may take around 12 hours, depending on Storypark response speed, your internet, and media volume.
+      </p>
+      <div class="quick-setup-checklist" id="quickSetupChecklist">
+        <div class="quick-setup-title">Setup Checklist</div>
+        <label class="quick-check-item">
+          <input type="checkbox" id="qsCheckAutoSave">
+          <span>Chrome auto-save is set (no popup per file)</span>
+        </label>
+        <label class="quick-check-item">
+          <input type="checkbox" id="qsCheckSleep">
+          <span>Computer sleep is disabled for long runs</span>
+        </label>
+        <label class="quick-check-item">
+          <input type="checkbox" id="qsCheckLogin">
+          <span>I am logged in to Storypark in Chrome</span>
+        </label>
+        <div style="margin-top:8px;">
+          <button class="btn-secondary" id="btnOpenChromeDownloadsSettings" style="font-size:12px;padding:6px 10px;">
+            ⚙ Open Chrome Downloads Settings
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Batch download progress (Review tab actions; visible from any tab) -->
+    <div id="batchProgress" style="display:none;background:var(--surface);border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+      <div id="batchProgressText" style="font-size:12px;color:var(--muted);margin-bottom:6px;">📥 Preparing batch…</div>
+      <progress id="batchProgressBar" value="0" max="100"
+        style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+    </div>
+
     <!-- ────────────────────────────────────────
          TAB: SYNC & STATUS
     ──────────────────────────────────────── -->
@@ -80,34 +153,49 @@
       <div class="page-header">
         <div>
           <div class="page-title">🔄 Sync &amp; Status</div>
-          <div class="page-subtitle">Monitor your storage target and track download telemetry.</div>
+          <div class="page-subtitle">Step 1: Set the parent folder that contains "Storypark Smart Saver" (for example Downloads or Desktop). Step 2: Sync Storypark info and check what is missing.</div>
+        </div>
+      </div>
+
+      <div id="startupHealthBanner" style="display:none;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.25);border-radius:10px;padding:10px 12px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div style="font-size:12px;line-height:1.6;">
+            <strong id="startupHealthTitle">Status</strong><br>
+            <span id="startupHealthBody">Checking local Storypark status…</span><br>
+            <span id="startupHealthMeta" style="color:var(--muted);"></span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+            <button class="btn-secondary" id="startupHealthSecondary" style="display:none;">Review details</button>
+            <button class="btn-primary" id="startupHealthPrimary" style="display:none;">Sync from Storypark</button>
+            <button class="btn-secondary" id="startupHealthDismiss" style="display:none;">Not now</button>
+          </div>
         </div>
       </div>
 
       <div class="card-grid">
 
         <!-- Storage Target card -->
-        <div class="card">
+        <div class="card post-card">
           <div class="card-header">
-            <span class="card-title">📁 Storage Target</span>
+            <span class="card-title">📁 Storypark Working Directory</span>
             <div style="display:flex;align-items:center;gap:7px;">
               <span class="dot" id="syncStatusDot"></span>
-              <span style="font-size:12px;color:var(--muted);" id="syncStatusText">Not linked</span>
+              <span style="font-size:12px;color:var(--muted);" id="syncStatusText">Not set</span>
             </div>
           </div>
 
           <div class="storage-path-box">
             <span class="storage-path-icon">📂</span>
             <span class="storage-path-text" id="syncFolderPath">
-              No folder linked. Click Link Folder to get started.
+              No working directory set. Click Set Working Directory to get started.
             </span>
           </div>
 
           <div class="storage-btn-row">
-            <button class="btn-primary btn-muted" id="btnLinkFolder">📁 Link Folder</button>
-            <button class="btn-primary" id="btnVerifyDirectory" disabled>✅ Verify Directory</button>
-            <button class="btn-secondary" id="btnUnlinkFolder" style="display:none;">✕ Unlink</button>
-            <button class="btn-secondary" id="btnReconcileFolder" style="display:none;">🔍 Verify Files on Disk</button>
+            <button class="btn-primary btn-muted" id="btnLinkFolder">📁 Set Working Directory</button>
+            <button class="btn-primary" id="btnVerifyDirectory" disabled title="Rebuild verified records from story folders that contain metadata.json (mainly newer installs).">✅ Verify Directory</button>
+            <button class="btn-secondary" id="btnUnlinkFolder" style="display:none;">✕ Clear Directory</button>
+            <button class="btn-secondary" id="btnReconcileFolder" style="display:none;" title="Compare files currently on disk with expected media from your Database/API records (recommended for restores and older installs).">🔍 Verify Files on Disk</button>
           </div>
 
           <!-- JS writes folder path/status here -->
@@ -116,9 +204,9 @@
         </div>
 
         <!-- Telemetry card -->
-        <div class="card">
+        <div class="card post-card">
           <div class="card-header">
-            <span class="card-title">📊 Telemetry</span>
+            <span class="card-title">📊 Library Summary</span>
             <button class="btn-secondary" id="btnTestConnection" style="font-size:11px;padding:5px 12px;">🔌 Test Connection</button>
           </div>
 
@@ -129,15 +217,15 @@
             </div>
             <div class="stat-box">
               <div class="stat-value blue" id="telMediaCount">—</div>
-              <div class="stat-label">Media Count</div>
+              <div class="stat-label">Images (No cards/HTML)</div>
             </div>
             <div class="stat-box">
               <div class="stat-value yellow" id="telFaceApproved">—</div>
-              <div class="stat-label">Face Approved</div>
+              <div class="stat-label">Total Media (No cards/HTML)</div>
             </div>
             <div class="stat-box">
               <div class="stat-value red" id="telPending">—</div>
-              <div class="stat-label">Pending Review</div>
+              <div class="stat-label">Pending Facial Match Review</div>
             </div>
           </div>
 
@@ -155,7 +243,7 @@
           <span class="card-title">📂 Active Database</span>
         </div>
         <div id="activeDatabasePanel" style="background:var(--bg);border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;color:var(--muted);min-height:60px;">
-          <em>Link a folder to see database info…</em>
+          <em>Set a Storypark working directory to see database info…</em>
         </div>
       </div>
 
@@ -171,10 +259,8 @@
       <div class="page-header">
         <div>
           <div class="page-title">⬇ Download Engine</div>
-          <div class="page-subtitle">Scan Storypark for new or missing media and download it to your linked folder.</div>
+          <div class="page-subtitle">Step 3: Download only new stories, or recover missing media when needed.</div>
         </div>
-        <!-- btnShowGuide — JS shows/hides this -->
-        <button id="btnShowGuide">📖 Show Guide</button>
       </div>
 
       <!-- Delta Scan card -->
@@ -245,54 +331,63 @@
             style="border:none;background:none;color:#f87171;cursor:pointer;font-size:16px;line-height:1;padding:0;flex-shrink:0;" title="Dismiss">✕</button>
         </div>
 
-        <!-- ══════════════════════════════════════════════════
-             HIDDEN LEGACY SCAN CONTROLS
-             All elements below are wired by dashboard.js.
-             They live here so JS can find them by ID.
-             They will be surfaced in the Step 2 JS refactor.
-        ══════════════════════════════════════════════════ -->
-        <div id="legacyScanControls" style="display:none;position:absolute;left:-9999px;" aria-hidden="true">
-
-          <!-- Original scan buttons -->
-          <button id="btnExtractLatest" disabled>⬇ Scan Latest</button>
-          <button id="btnDeepRescan" disabled>🔁 Scan All Stories</button>
-          <button id="btnOfflineScanMain" disabled>🧠 Smart Sort</button>
-
-          <!-- Download All Media toggle -->
-          <div id="downloadAllMediaRow">
-            <label>
-              <input type="checkbox" id="chkSkipFaceRecMain">
-              📥 Download All Media
-            </label>
-            <div id="downloadAllMediaWarning" style="display:none;"></div>
-            <a href="#" id="linkToSettingsGps">→ Open Settings → Centre Locations</a>
-          </div>
-
-          <!-- Date range selector -->
-          <div id="scanDateRangeRow">
-            <label>
-              <input type="radio" name="scanDateMode" id="scanDateModeAll" value="all" checked>
-              All time
-            </label>
-            <label>
-              <input type="radio" name="scanDateMode" id="scanDateModeCustom" value="custom">
-              Custom date range:
-            </label>
-            <div id="scanDatePickerRow">
-              <input type="date" id="scanFromDate" disabled>
-              <input type="date" id="scanToDate" disabled>
-            </div>
-            <p id="scanDateRangeNote"></p>
-          </div>
-
-        </div>
-        <!-- end legacyScanControls -->
-
       </div>
       <!-- end Delta Scan card -->
 
     </div>
     <!-- end tabDownload -->
+
+
+    <!-- ────────────────────────────────────────
+         TAB: FACE REVIEW
+    ──────────────────────────────────────── -->
+    <div id="tabReview" class="tab-panel">
+
+      <div class="page-header">
+        <div>
+          <div class="page-title">👀 Face Review</div>
+          <div class="page-subtitle">Confirm or reject suggested matches before approved photos are saved. Shortcuts: A approve, R reject, Z undo.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="review-header">
+          <div>
+            <h2>Review queue</h2>
+            <span class="count" id="reviewCount">Loading…</span>
+          </div>
+          <div class="review-actions-bar">
+            <button class="btn-secondary" id="btnBatchDownload"
+              style="background:rgba(74,222,128,0.15);color:var(--success);">
+              📥 Download Approved
+            </button>
+            <button class="btn-secondary" id="btnBuildHtml"
+              style="background:rgba(96,165,250,0.15);color:var(--info);"
+              title="Open Post-Processing where the canonical Generate HTML / Cards action lives.">
+              ↗ Open Post-Processing
+            </button>
+            <button class="btn-secondary" id="btnFinalVerify"
+              style="background:rgba(251,191,36,0.15);color:var(--warning);"
+              title="Re-check all pending photos against the mature face model">
+              ✅ Final Verification
+            </button>
+            <button class="btn-secondary" id="btnUndo" disabled style="opacity:0.4;">⤺ Undo Last</button>
+            <button class="btn-secondary" id="btnRefreshReview">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="reviewStatusBar"
+          style="display:none;background:var(--surface);border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);align-items:center;gap:10px;">
+          <span id="reviewStatusText"></span>
+        </div>
+        <div id="reviewEmpty">
+          <p>🎉 No media pending review.</p>
+          <p style="margin-top:8px;color:var(--muted);font-size:13px;">New matches appear here during a scan.</p>
+        </div>
+        <div class="review-grid" id="reviewGrid"></div>
+      </div>
+
+    </div>
+    <!-- end tabReview -->
 
 
     <!-- ────────────────────────────────────────
@@ -313,7 +408,7 @@
       <div class="post-grid">
 
         <!-- Facial Recognition card -->
-        <div class="card">
+        <div class="card post-card">
           <span class="post-card-icon">🧠</span>
           <div class="post-card-title">Facial Recognition</div>
           <div class="post-card-desc">
@@ -359,6 +454,9 @@
 
       </div>
       <!-- end post-grid -->
+      <div style="margin-top:10px;">
+        <button id="btnPostStop" class="btn-danger" style="display:none;">🛑 Stop Current Post-Processing Task</button>
+      </div>
 
     </div>
     <!-- end tabPost -->
@@ -376,8 +474,15 @@
         </div>
       </div>
 
+      <details id="advancedCustomisationPanel" style="margin:0 0 18px;">
+        <summary>Advanced customisation (optional): naming templates, renamer, and metadata templates</summary>
+        <p class="help" style="margin:8px 0 14px;">
+          Default mode now uses the fixed Storypark-style layout and standard naming flow.
+          Open this only if you want power-user template or bulk-rename tools.
+        </p>
+
       <!-- ══ NEW: Naming Conventions card ══ -->
-      <div class="card">
+      <div class="card" id="namingConventionsCard">
         <div class="card-header">
           <span class="card-title">✏️ Naming Conventions</span>
         </div>
@@ -386,6 +491,7 @@
           token's data is not available for a story it is removed cleanly, with no dangling dashes or empty
           segments. Illegal Windows characters and emojis are stripped automatically. File names are
           truncated to a maximum of 100 characters.
+          <strong style="color:var(--text);">Cross-use:</strong> <code>[StoryDate]</code> / <code>[StoryTitle]</code> / <code>[CentreName]</code> / <code>[EducatorName]</code> work here too (same values as <code>[Date]</code>, <code>[Title]</code>, <code>[Daycare]</code>/<code>[Centre]</code>, <code>[Educator]</code>).
         </p>
 
         <!-- Folder Template -->
@@ -404,11 +510,20 @@
             automatically along with its surrounding delimiter.
           </div>
           <div class="token-list">
-            <span class="token-chip" title="Child's full name">[ChildName]</span>
-            <span class="token-chip" title="Daycare / centre name">[Daycare]</span>
-            <span class="token-chip" title="Classroom / room name">[Class]</span>
-            <span class="token-chip" title="Story date (YYYY-MM-DD)">[Date]</span>
-            <span class="token-chip" title="Story title from Storypark">[Title]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Child's full name">[ChildName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Daycare / centre name">[Daycare]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Classroom / room name">[Class]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Story date (YYYY-MM-DD)">[Date]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Story title from Storypark">[Title]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Same as [Date]">[StoryDate]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Same as [Title]">[StoryTitle]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Centre display name">[CentreName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Primary educator">[EducatorName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Original media filename">[OriginalName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Alias of [ChildName]">[Child]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Alias of [Class]">[Room]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Alias of [Daycare]">[Centre]</span>
+            <span class="token-chip naming-template-chip" data-token-target="folder" title="Alias of [EducatorName]">[Educator]</span>
           </div>
         </div>
 
@@ -427,11 +542,20 @@
             (<code>.jpg</code>, <code>.mp4</code>, etc.) is always preserved. Works for all media types.
           </div>
           <div class="token-list">
-            <span class="token-chip" title="Child's full name">[ChildName]</span>
-            <span class="token-chip" title="Daycare / centre name">[Daycare]</span>
-            <span class="token-chip" title="Classroom / room name">[Class]</span>
-            <span class="token-chip" title="Story date (YYYY-MM-DD)">[Date]</span>
-            <span class="token-chip" title="Story title from Storypark">[Title]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Child's full name">[ChildName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Daycare / centre name">[Daycare]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Classroom / room name">[Class]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Story date (YYYY-MM-DD)">[Date]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Story title from Storypark">[Title]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Same as [Date]">[StoryDate]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Same as [Title]">[StoryTitle]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Centre display name">[CentreName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Primary educator">[EducatorName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Original media filename">[OriginalName]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Alias of [ChildName]">[Child]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Alias of [Class]">[Room]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Alias of [Daycare]">[Centre]</span>
+            <span class="token-chip naming-template-chip" data-token-target="file" title="Alias of [EducatorName]">[Educator]</span>
           </div>
         </div>
 
@@ -443,7 +567,142 @@
         <p id="applyTemplateStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <div class="section-divider">Account &amp; Safety</div>
+      <!-- Mass Renamer -->
+      <div class="card" id="renamerCard">
+        <h2>✏️ Custom Filename &amp; Mass Renamer</h2>
+        <div style="margin-bottom:12px;">
+          <label for="renamerChildSelect">Rename files for child:</label>
+          <select id="renamerChildSelect"><option value="">— select a child —</option></select>
+        </div>
+        <label>Filename Template</label>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.8;">
+          Click a chip to insert at the cursor (curly tokens). <code>{Date}</code> / <code>{Title}</code> match folder naming <code>[Date]</code> / <code>[Title]</code>.
+        </div>
+        <div class="token-list" style="margin-bottom:10px;">
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{StoryDate}" title="Story date YYYY-MM-DD">{StoryDate}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Date}" title="Alias of {StoryDate}">{Date}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{ChildName}" title="Child name (file-safe)">{ChildName}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Child}" title="Alias of {ChildName}">{Child}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Room}" title="Room / class">{Room}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Class}" title="Alias of {Room}">{Class}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{OriginalName}" title="Full original filename">{OriginalName}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{OriginalBase}" title="Filename without extension">{OriginalBase}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Ext}" title="Extension only">{Ext}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{StoryTitle}" title="Story title (file-safe)">{StoryTitle}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Title}" title="Alias of {StoryTitle}">{Title}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Centre}" title="Centre / daycare">{Centre}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Daycare}" title="Alias of {Centre}">{Daycare}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{CentreName}" title="Alias of {Centre}">{CentreName}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{Educator}" title="Educator (file-safe)">{Educator}</span>
+          <span class="token-chip renamer-token-chip" data-renamer-insert="{EducatorName}" title="Alias of {Educator}">{EducatorName}</span>
+        </div>
+        <input type="text" id="renamerTemplate" value="{StoryDate}_{ChildName}_{Room}_{OriginalName}"
+          placeholder="e.g. {StoryDate}_{ChildName}_{Room}_{OriginalName}"
+          style="width:100%;padding:8px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:13px;margin-bottom:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+        <p class="help" style="margin:0 0 12px;">Windows-illegal characters are stripped automatically.</p>
+        <label>Live Preview</label>
+        <div id="renamerPreview"
+          style="background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;font-family:monospace;min-height:44px;margin-bottom:12px;word-break:break-all;line-height:1.8;color:var(--muted);">
+          Enter a template above to see a preview…
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <button class="btn-primary btn-muted" id="btnPreviewRename" disabled>🔍 Preview Rename</button>
+          <button class="btn-primary" id="btnApplyRename" style="background:#a855f7;" disabled>✅ Apply Rename</button>
+        </div>
+        <div id="renamerProgress" style="display:none;margin-bottom:8px;">
+          <div id="renamerProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
+          <progress id="renamerProgressBar" value="0" max="100"
+            style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;accent-color:#a855f7;"></progress>
+        </div>
+        <div id="renamerReport"
+          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;line-height:1.8;color:var(--muted);max-height:320px;overflow-y:auto;">
+        </div>
+      </div>
+
+      <div class="card" id="metadataTemplateCard">
+        <div class="card-header">
+          <span class="card-title">🧩 Metadata & Template Rules</span>
+        </div>
+        <p class="help">Controls how story text appears in HTML, Story Cards, and EXIF metadata. Tokens resolve to empty text if missing, and EXIF is always safely truncated.</p>
+        <div class="form-group">
+          <label class="form-label">HTML Body Template</label>
+          <input type="text" class="form-input" id="templateHtmlBody" value="[StoryBody]">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Card Title Template</label>
+          <input type="text" class="form-input" id="templateCardTitle" value="[StoryTitle]">
+        </div>
+        <div class="form-group">
+          <label class="form-label">EXIF Title Template</label>
+          <input type="text" class="form-input" id="templateExifTitle" value="[ChildName] - [ChildAge]">
+          <div class="form-help">Max 120 chars (ellipsis is applied when exceeded).</div>
+        </div>
+        <div class="form-group" style="margin-top:4px;">
+          <span class="form-label">Quick insert</span>
+          <p class="help" style="margin:0 0 8px;">Click a token to insert at the cursor in the matching field (same tokens as Template Commands below).</p>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">HTML body</div>
+          <div class="token-list" style="margin-top:4px;">
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[StoryBody]" title="Insert into HTML body">[StoryBody]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[Routine]" title="Insert into HTML body">[Routine]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[StoryTitle]" title="Insert into HTML body">[StoryTitle]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[StoryDate]" title="Insert into HTML body">[StoryDate]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[Date]" title="Insert into HTML body">[Date]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="html" data-token="[ChildName]" title="Insert into HTML body">[ChildName]</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:8px;margin-bottom:4px;">Card title</div>
+          <div class="token-list" style="margin-top:4px;">
+            <span class="token-chip metadata-template-chip" data-insert-target="card" data-token="[StoryTitle]" title="Insert into card title">[StoryTitle]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="card" data-token="[Title]" title="Insert into card title">[Title]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="card" data-token="[ChildName]" title="Insert into card title">[ChildName]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="card" data-token="[StoryDate]" title="Insert into card title">[StoryDate]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="card" data-token="[CentreName]" title="Insert into card title">[CentreName]</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:8px;margin-bottom:4px;">EXIF title</div>
+          <div class="token-list" style="margin-top:4px;">
+            <span class="token-chip metadata-template-chip" data-insert-target="exif" data-token="[ChildName]" title="Insert into EXIF title">[ChildName]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="exif" data-token="[ChildAge]" title="Insert into EXIF title">[ChildAge]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="exif" data-token="[StoryTitle]" title="Insert into EXIF title">[StoryTitle]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="exif" data-token="[StoryDate]" title="Insert into EXIF title">[StoryDate]</span>
+            <span class="token-chip metadata-template-chip" data-insert-target="exif" data-token="[CentreName]" title="Insert into EXIF title">[CentreName]</span>
+          </div>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="templateIncludeRoutine" checked>
+          <div><label for="templateIncludeRoutine">Include routine section in HTML/Card/EXIF comments</label></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn-secondary" id="btnPreviewTemplates">👁 Preview</button>
+          <button class="btn-primary btn-muted" id="btnSaveTemplateSettings">💾 Save Template Settings</button>
+        </div>
+        <p id="templatePreviewStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🧾 Template Commands</span>
+        </div>
+        <p class="help">These tokens apply to <strong>story HTML, card titles, and EXIF text</strong>. <code>[Date]</code>, <code>[Title]</code>, <code>[Daycare]</code>, <code>[Centre]</code>, <code>[Child]</code>, <code>[Room]</code>, and <code>[Educator]</code> are accepted as aliases of the canonical names below (same values as in Naming Conventions).</p>
+        <div id="templateCommandHelp" style="background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.6;color:var(--muted);"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
+          <label for="templatePreviewMode" style="font-size:12px;color:var(--muted);">Preview mode</label>
+          <select id="templatePreviewMode" title="Brief story trims long body text before substitution so the preview stays fast. Full story uses the entire body (can be slow for very long stories)." style="width:auto;padding:4px 8px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.12);font-size:12px;">
+            <option value="brief">Brief story</option>
+            <option value="full">Full story</option>
+          </select>
+          <label for="templateTargetMode" style="font-size:12px;color:var(--muted);">Target</label>
+          <select id="templateTargetMode" title="Choose which template field Insert uses and which raw template line the preview labels as selected." style="width:auto;padding:4px 8px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.12);font-size:12px;">
+            <option value="html">HTML body</option>
+            <option value="card">Card title</option>
+            <option value="exif">EXIF title</option>
+          </select>
+        </div>
+        <p class="help" style="margin-top:8px;margin-bottom:0;">Preview mode affects sample story body length. Target chooses which saved template line is shown as &quot;raw&quot; and where token Insert goes.</p>
+        <p id="templateLimitsRef" class="help" style="margin-top:10px;font-size:11px;line-height:1.55;"></p>
+        <div id="templateLivePreviewPanel" style="margin-top:10px;background:var(--bg);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.6;color:var(--muted);"></div>
+      </div>
+      </details>
+
+      <div class="section-divider">Setup</div>
 
       <!-- Human.js warning (shown by JS if face AI not loaded) -->
       <div id="humanWarning">
@@ -457,7 +716,32 @@
         <p class="help">Automatically fetched from your Storypark account. Children appear here after
           you log in to Storypark in another tab.</p>
         <div id="childrenListSettings"></div>
-        <button class="btn-secondary" id="btnRefreshChildren" style="margin-top:8px;">↻ Refresh from Storypark</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn-secondary" id="btnRefreshChildren">↻ Refresh from Storypark</button>
+          <button class="btn-primary btn-muted" id="btnSyncStoryparkInfo">🗄 Sync from Storypark</button>
+        </div>
+        <p class="help" style="margin-top:8px;">
+          Updates your local Database with Storypark info (children, centres, stories, routines, educators, and media counts).
+          Progress shows estimated time remaining, and this remembers progress if the browser closes.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);">
+            <input type="checkbox" id="chkAutoStoryparkSync" style="width:auto;margin:0;">
+            Keep Storypark info up to date automatically
+          </label>
+          <select id="autoStoryparkSyncHours" style="width:auto;padding:4px 8px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.12);font-size:12px;">
+            <option value="48">Every 2 days</option>
+            <option value="72" selected>Every 3 days</option>
+            <option value="168">Every week</option>
+            <option value="336">Every 2 weeks</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+          <button class="btn-secondary" id="btnResumeStoryparkSync">▶ Resume Last Sync</button>
+          <button class="btn-secondary" id="btnRefreshSyncHealth">🩺 Refresh Sync Health</button>
+        </div>
+        <div id="storyparkSyncHealthPanel" style="display:none;background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:11px;color:var(--muted);line-height:1.6;"></div>
+        <p id="syncStoryparkInfoStatus" style="font-size:12px;color:var(--muted);min-height:16px;"></p>
       </div>
 
       <!-- Rebuild Pages & Cards -->
@@ -468,12 +752,12 @@
           No photos are re-downloaded. Handy after updating GPS coordinates, educator text, or naming templates.
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn-primary btn-muted" id="btnGenerateStoryCardsAll">🔄 Rebuild Pages &amp; Cards</button>
+          <button class="btn-primary btn-muted" id="btnGenerateStoryCardsAll">↗ Open Post-Processing</button>
         </div>
         <p id="storyCardsStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <div class="section-divider">Download Settings</div>
+      <div class="section-divider">Setup Options</div>
 
       <!-- What Gets Downloaded -->
       <div class="card">
@@ -554,27 +838,27 @@
         <button class="btn-primary btn-muted" id="btnSaveLocations" style="margin-top:10px;">💾 Save Locations</button>
       </div>
 
-      <!-- Face Recognition Thresholds -->
+      <!-- Face Matching Thresholds -->
       <div class="card">
-        <h2>🎯 Face Recognition Thresholds</h2>
-        <p class="help">Fine-tune how the AI decides which photos to download automatically vs. send to the Review queue.</p>
+        <h2>🎯 Face Review Sensitivity</h2>
+        <p class="help">Choose how strict matching should be before a photo is saved automatically or sent to Face Review.</p>
         <div>
-          <label>Auto-Approve Threshold</label>
+          <label>Auto Save Match Score</label>
           <div class="threshold-controls">
             <input type="range" id="autoThresholdRange" min="0" max="100" value="85">
             <input type="number" id="autoThresholdNumber" min="0" max="100" value="85" class="threshold-num">
             <span style="font-size:14px;color:var(--muted);">%</span>
           </div>
-          <p class="help">Photos above this match % are downloaded automatically. Default 85%.</p>
+          <p class="help">Photos above this score are saved automatically. Default 85%.</p>
         </div>
         <div style="margin-top:12px;">
-          <label>Manual Review Threshold</label>
+          <label>Send to Face Review Score</label>
           <div class="threshold-controls">
             <input type="range" id="minThresholdRange" min="0" max="100" value="50">
             <input type="number" id="minThresholdNumber" min="0" max="100" value="50" class="threshold-num">
             <span style="font-size:14px;color:var(--muted);">%</span>
           </div>
-          <p class="help">Photos between this and Auto-Approve go to Pending Review. Default 50%.</p>
+          <p class="help">Photos between this value and Auto Save go to Face Review. Default 50%.</p>
         </div>
       </div>
 
@@ -585,11 +869,12 @@
         Checkboxes above save automatically on change. This button saves threshold sliders and GPS locations.
       </p>
 
-      <div class="section-divider">Face Recognition</div>
+      <details class="settings-advanced-details">
+        <summary>Advanced — face training and skipped-photo reset</summary>
 
-      <!-- Face Training card -->
+      <!-- Face Review Training card -->
       <div class="card" id="trainingCard">
-        <h2>🧠 Face Training Data</h2>
+        <h2>🧠 Face Review Training</h2>
         <p class="help">Upload 10+ clear, well-lit face photos per child from different angles. More photos = better recognition accuracy.</p>
         <div style="margin-bottom:12px;">
           <label for="trainingChildSelect">Training for child:</label>
@@ -604,6 +889,15 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
           <button class="btn-secondary" id="btnExportProfile">📤 Export Profile</button>
           <button class="btn-secondary" id="btnImportProfile">📥 Import Profile</button>
+          <button class="btn-secondary" id="btnRunFaceBootstrap">🧱 Build Face Review Starting Point</button>
+          <button class="btn-secondary" id="btnRunSelfImproveNow">🧠 Improve Face Review Now</button>
+          <button class="btn-secondary" id="btnDecisionAuditSummary">📊 Decision Audit Summary</button>
+        </div>
+        <div style="margin-top:10px;">
+          <h3 style="font-size:14px;margin:0 0 6px 0;">Face Review Health</h3>
+          <div id="faceModelHealthPanel" style="background:var(--bg);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--muted);line-height:1.6;min-height:36px;">
+            <em>Select a child to load model health…</em>
+          </div>
         </div>
         <input type="file" id="importProfileInput" accept=".json,application/json" style="display:none;">
         <button class="btn-danger" id="btnResetFaceData" style="margin-top:12px;">🗑 Reset Face Data</button>
@@ -611,13 +905,16 @@
 
       <!-- Reset Rejections card -->
       <div class="card" style="border:1px solid rgba(233,69,96,0.2);">
-        <h2>🔄 Reset Rejected Images</h2>
-        <p class="help">Clears all "rejected" image records so previously-skipped photos will be re-evaluated on the next scan. Use this after retraining the face model — your improved model may now recognise photos it previously rejected.</p>
-        <button class="btn-danger" id="btnClearAllRejections">🔄 Reset All Rejected Images</button>
+        <h2>🔄 Reset Skipped Photos</h2>
+        <p class="help">Clears all skipped-photo records so previously skipped photos can be checked again on the next scan. Use this after improving face training.</p>
+        <button class="btn-danger" id="btnClearAllRejections">🔄 Reset All Skipped Photos</button>
         <p id="clearRejectionsStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
 
-      <div class="section-divider">Developer</div>
+      </details>
+
+      <details class="settings-advanced-details">
+        <summary>Developer — debug tools and activity log</summary>
 
       <!-- Debug card -->
       <div class="card" style="border:1px solid rgba(251,191,36,0.3);">
@@ -633,417 +930,57 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-secondary" id="btnDownloadDebugLog">📥 Download Debug Log</button>
           <button class="btn-danger" id="btnClearDebugLog">🗑 Clear Debug Log</button>
+          <button class="btn-secondary" id="btnRunRetentionNow">🧹 Run Retention Now</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <input type="number" id="retentionDecisionMax" min="1000" step="1000" value="25000" style="max-width:130px;" title="Decision log max entries">
+          <input type="number" id="retentionNegativeDays" min="30" step="30" value="365" style="max-width:130px;" title="Negative descriptor max age (days)">
+          <input type="number" id="retentionFingerprintDays" min="30" step="30" value="365" style="max-width:130px;" title="Fingerprint max age (days)">
         </div>
         <p id="debugLogStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
       </div>
+
+      <!-- Activity log management -->
+      <div class="card">
+        <h2>📋 Activity Log</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <p class="help" style="margin:0;">Review recent activity and export/delete log data when needed.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn-secondary" id="btnClearLog">🗑 Clear in-app log</button>
+            <button class="btn-secondary" id="btnDeleteLogFile"
+              style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent);"
+              title="Delete Database/activity_log.jsonl from your linked folder.">
+              🗑 Delete log file
+            </button>
+            <button class="btn-secondary" id="btnExportLog"
+              style="background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.3);color:var(--info);"
+              title="Export the current activity log as a JSON file for AI analysis">
+              📤 Export for AI
+            </button>
+          </div>
+        </div>
+        <div id="logTabInfo"
+          style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,0.06);border-radius:6px;border:1px solid rgba(96,165,250,0.15);">
+          📁 Log saved to: <span id="logFilePath" style="font-family:monospace;color:var(--info);"></span>
+        </div>
+        <div style="position:relative;">
+          <div class="log-container" id="activityLogBox" style="height:320px;">
+            <p class="level-INFO">No activity yet.</p>
+          </div>
+          <button id="btnFollowActivityLog"
+            style="display:none;position:absolute;bottom:10px;right:18px;padding:5px 12px;border:none;border-radius:12px;background:rgba(96,165,250,0.18);color:var(--info);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
+            ↓ Follow Log
+          </button>
+        </div>
+      </div>
+
+      </details>
 
     </div>
     <!-- end tabSettings -->
 
   </main>
   <!-- end .main -->
-
-
-  <!-- ════════════════════════════════════════════════════════
-       HIDDEN LEGACY PANELS
-       These panels are off-screen and invisible to the user.
-       All element IDs inside are wired by dashboard.js and
-       will be migrated to the new visible UI in Step 2.
-  ════════════════════════════════════════════════════════ -->
-  <div aria-hidden="true"
-    style="display:none!important;position:fixed;left:-9999px;top:-9999px;pointer-events:none;overflow:hidden;width:0;height:0;">
-
-    <!-- Legacy nav compatibility — JS uses data-tab and .nav-btn selectors -->
-    <nav id="legacyNavCompat">
-      <button class="nav-btn" data-tab="scan"></button>
-      <button class="nav-btn" data-tab="review"></button>
-      <button class="nav-btn" data-tab="log"></button>
-      <button class="nav-btn" data-tab="tools"></button>
-    </nav>
-
-    <!-- ── OLD TAB: SCAN ── -->
-    <div id="tabScan" class="tab-panel">
-      <div class="scan-layout" id="scanLayout">
-        <div class="scan-controls">
-          <!-- Original scan action buttons — scanLogBox and progressBar live in tabDownload -->
-          <div class="action-btns">
-            <!-- Stubs; real buttons are in tabDownload -->
-          </div>
-          <div class="log-wrapper">
-            <!-- scanLogBox lives in tabDownload for real-time visibility -->
-          </div>
-        </div>
-        <!-- Tutorial / User Guide panel -->
-        <div class="tutorial-card" id="tutorialPanel">
-          <div class="guide-tabs">
-            <button class="guide-tab-btn active" data-guide-tab="guide">📖 Guide</button>
-            <button class="guide-tab-btn" data-guide-tab="changelog">📋 What's New</button>
-          </div>
-          <div class="guide-tab-content active" id="guideTabGuide">
-            <p class="guide-loading">⏳ Loading guide…</p>
-          </div>
-          <div class="guide-tab-content" id="guideTabChangelog">
-            <p class="guide-loading">⏳ Loading changelog…</p>
-          </div>
-          <button class="btn-dismiss-tutorial" id="btnDismissTutorial" style="margin-top:16px;flex-shrink:0;">
-            ✕ Hide this guide
-          </button>
-        </div>
-      </div>
-    </div>
-    <!-- end tabScan (legacy) -->
-
-
-    <!-- ── OLD TAB: REVIEW ── -->
-    <div id="tabReview" class="tab-panel">
-      <div class="review-header">
-        <div>
-          <h2>👀 Pending Review</h2>
-          <span class="count" id="reviewCount">Loading…</span>
-        </div>
-        <div class="review-actions-bar">
-          <button class="btn-secondary" id="btnBatchDownload"
-            style="display:none;background:rgba(74,222,128,0.15);color:var(--success);">
-            📥 Download Approved
-          </button>
-          <button class="btn-secondary" id="btnBuildHtml"
-            style="display:none;background:rgba(96,165,250,0.15);color:var(--info);"
-            title="Regenerates all story.html pages, Story Card JPEGs, and index pages from stored data.">
-            🔄 Rebuild Pages &amp; Cards
-          </button>
-          <button class="btn-secondary" id="btnFinalVerify"
-            style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);"
-            title="Re-check all pending photos against the mature face model">
-            ✅ Final Verification
-          </button>
-          <button class="btn-secondary" id="btnUndo" disabled style="opacity:0.4;">⤺ Undo Last</button>
-          <button class="btn-secondary" id="btnRefreshReview">↻ Refresh</button>
-        </div>
-      </div>
-      <div id="reviewStatusBar"
-        style="display:none;background:var(--surface);border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);align-items:center;gap:10px;">
-        <span id="reviewStatusText"></span>
-      </div>
-      <div id="reviewEmpty">
-        <p>🎉 No media pending review.</p>
-        <p style="margin-top:8px;color:var(--muted);font-size:13px;">New matches appear here during a scan.</p>
-      </div>
-      <div class="review-grid" id="reviewGrid"></div>
-    </div>
-    <!-- end tabReview (legacy) -->
-
-
-    <!-- ── OLD TAB: ACTIVITY LOG ── -->
-    <div id="tabLog" class="tab-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-        <h2 style="font-size:20px;">📋 Activity Log</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-secondary" id="btnClearLog">🗑 Clear in-app log</button>
-          <button class="btn-secondary" id="btnDeleteLogFile"
-            style="background:rgba(233,69,96,0.08);border-color:rgba(233,69,96,0.3);color:var(--accent);"
-            title="Delete Database/activity_log.jsonl from your linked folder.">
-            🗑 Delete log file
-          </button>
-          <button class="btn-secondary" id="btnExportLog"
-            style="background:rgba(96,165,250,0.08);border-color:rgba(96,165,250,0.3);color:var(--info);"
-            title="Export the current activity log as a JSON file for AI analysis">
-            📤 Export for AI
-          </button>
-        </div>
-      </div>
-      <div id="logTabInfo"
-        style="display:none;font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:rgba(96,165,250,0.06);border-radius:6px;border:1px solid rgba(96,165,250,0.15);">
-        📁 Log saved to: <span id="logFilePath" style="font-family:monospace;color:var(--info);"></span>
-      </div>
-      <div style="position:relative;">
-        <div class="log-container" id="activityLogBox" style="height:500px;">
-          <p class="level-INFO">No activity yet.</p>
-        </div>
-        <button id="btnFollowActivityLog"
-          style="display:none;position:absolute;bottom:10px;right:18px;padding:5px 12px;border:none;border-radius:12px;background:rgba(96,165,250,0.18);color:var(--info);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
-          ↓ Follow Log
-        </button>
-      </div>
-    </div>
-    <!-- end tabLog (legacy) -->
-
-
-    <!-- ── OLD TAB: TOOLS & MAINTENANCE ── -->
-    <div id="tabTools" class="tab-panel">
-
-      <!-- Link Download Folder card (legacy, tools tab version) -->
-      <div class="card">
-        <h2>📁 Link Download Folder</h2>
-        <!-- JS writes folder status here -->
-        <div id="linkedFolderStatus2"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);">
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <button class="btn-secondary" id="btnRepairManifest"
-            style="display:none;background:rgba(251,191,36,0.12);color:var(--warning);border-color:rgba(251,191,36,0.3);">
-            🔧 Repair Database from Disk
-          </button>
-          <button class="btn-secondary" id="btnRebuildDatabase"
-            style="display:none;background:rgba(99,102,241,0.12);color:var(--accent);border-color:rgba(99,102,241,0.3);"
-            title="Missing or old Database/ files? Fetches your story list from Storypark and matches on-disk folders to real story IDs.">
-            🔄 Rebuild Database from Disk (API)
-          </button>
-          <button class="btn-secondary" id="btnRewriteMetadata"
-            style="display:none;background:rgba(74,155,143,0.1);color:#4A9B8F;border-color:rgba(74,155,143,0.3);"
-            title="Re-stamp EXIF Artist, GPS, date and IPTC keywords on all downloaded photos.">
-            🏷️ Fix Photo Metadata
-          </button>
-        </div>
-
-        <!-- Rebuild enrichment toggle -->
-        <div id="enrichStoriesRow" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.2);border-radius:8px;font-size:12px;">
-          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:0;">
-            <input type="checkbox" id="chkEnrichStories" checked style="width:auto;margin:3px 0 0;flex-shrink:0;">
-            <div>
-              <strong style="color:var(--accent);font-size:12px;">🔄 Fetch full story data</strong>
-              <p style="margin:2px 0 0;color:var(--muted);font-size:11px;line-height:1.5;">
-                After matching story IDs, fetch each story's text, educator name, classroom, centre, and daily routine —
-                then rebuild <code style="font-size:10px;">story.html</code> + Story Cards with complete information.
-                <em style="color:var(--warning);">⏱ ~45–60 min for 500 stories</em>
-              </p>
-            </div>
-          </label>
-        </div>
-
-        <!-- Repair child selector -->
-        <div id="repairChildRow" style="display:none;align-items:center;gap:8px;margin-top:6px;">
-          <label style="font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;">Repair for child:</label>
-          <select id="repairChildSelect"
-            style="flex:1;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
-            <option value="__ALL__">👨‍👩‍👧‍👦 All Children</option>
-          </select>
-        </div>
-
-        <!-- Fix Photo Metadata config panel -->
-        <div id="rewriteMetadataConfig"
-          style="display:none;background:rgba(74,155,143,0.05);border:1px solid rgba(74,155,143,0.2);border-radius:8px;padding:12px 14px;margin-top:10px;font-size:12px;">
-          <div style="font-weight:600;color:#4A9B8F;margin-bottom:8px;font-size:13px;">🏷️ Fix Photo Metadata</div>
-          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;">Apply to:</label>
-          <select id="rewriteChildSelect"
-            style="width:100%;margin-bottom:10px;padding:5px 8px;border-radius:5px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:12px;">
-            <option value="">All children</option>
-          </select>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
-            <input type="checkbox" id="chkRewriteGps" checked style="width:auto;margin:0;"> 📍 GPS coordinates
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
-            <input type="checkbox" id="chkRewriteDate" checked style="width:auto;margin:0;"> 📅 Date / time
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:4px;">
-            <input type="checkbox" id="chkRewriteIptc" checked style="width:auto;margin:0;"> 🏷️ Artist + story text
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-top:6px;margin-bottom:4px;">
-            <input type="checkbox" id="chkVerifyMetadata" style="width:auto;margin:0;"> ✅ Verify metadata accuracy after writing
-          </label>
-          <p style="font-size:11px;color:var(--muted);margin:0 0 10px 22px;line-height:1.5;">Re-reads each photo after writing to confirm EXIF fields were stored correctly. Adds ~5% time.</p>
-          <div id="metadataFixProgress" style="display:none;">
-            <div id="metadataFixProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
-            <progress id="metadataFixProgressBar" value="0" max="100"
-              style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;margin-bottom:6px;accent-color:#4A9B8F;"></progress>
-            <button id="btnStopMetadataFix"
-              style="padding:3px 10px;border:none;border-radius:5px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;">
-              🛑 Stop
-            </button>
-          </div>
-          <div id="metadataFixReport"
-            style="display:none;background:var(--bg);border-radius:5px;padding:7px 10px;margin-top:6px;font-size:11px;line-height:1.7;color:var(--muted);">
-          </div>
-        </div>
-      </div>
-
-      <!-- Clean Up Folder card -->
-      <div class="card" id="cleanupFolderCard">
-        <h2>🧹 Clean Up Folder</h2>
-        <div style="margin-bottom:12px;">
-          <label for="cleanupChildSelect">Clean up for child:</label>
-          <select id="cleanupChildSelect"><option value="">— select a child —</option></select>
-        </div>
-        <div style="margin-bottom:12px;">
-          <label>Mode</label>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;">
-            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="dry-run" checked style="width:auto;margin:0;"> 🔍 Dry-run (preview only)
-            </label>
-            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="safe" style="width:auto;margin:0;"> 🛡 Safe (move to _rejected/)
-            </label>
-            <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;font-weight:normal;">
-              <input type="radio" name="cleanupMode" value="destructive" style="width:auto;margin:0;"> 🗑 Destructive (permanent delete)
-            </label>
-          </div>
-        </div>
-        <div style="margin-bottom:12px;">
-          <label>Keep threshold — photos with a face match score above this % are kept</label>
-          <div class="threshold-controls" style="margin-top:4px;">
-            <input type="range" id="cleanupThresholdRange" min="0" max="100" value="40"
-              style="flex:1;height:6px;accent-color:var(--warning);">
-            <input type="number" id="cleanupThresholdNumber" min="0" max="100" value="40" class="threshold-num">
-            <span style="font-size:14px;color:var(--muted);">%</span>
-          </div>
-          <p class="help" style="margin:0;">Photos below this threshold will be moved or deleted.</p>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <button class="btn-primary" id="btnRunCleanup" style="background:#a855f7;" disabled>🧹 Run Clean Up</button>
-          <button class="btn-primary" id="btnOfflineScan" style="background:var(--primary);display:none;" disabled>🔍 Offline Smart Scan</button>
-          <button class="btn-secondary" id="btnReEvaluateAll"
-            style="display:none;background:rgba(96,165,250,0.1);color:var(--info);border-color:rgba(96,165,250,0.3);"
-            title="Re-run face matching on all downloaded photos using the current improved model.">
-            🔄 Re-evaluate All
-          </button>
-          <button class="btn-secondary" id="btnUndoCleanup"
-            style="display:none;background:rgba(251,191,36,0.15);color:var(--warning);">
-            ⤺ Undo (removing in <span id="cleanupUndoTimer">60</span>s)
-          </button>
-        </div>
-        <p class="help" id="offlineScanHelp" style="display:none;">🔍 <strong>Offline Smart Scan</strong> reads photos from your linked folder and runs face detection locally. No internet needed.</p>
-        <div id="cleanupProgress" style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);">
-          <div id="cleanupProgressText">Preparing…</div>
-          <progress id="cleanupProgressBar" value="0" max="100"
-            style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
-        </div>
-        <div id="cleanupReport"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:12px;line-height:1.7;color:var(--muted);">
-        </div>
-      </div>
-
-      <!-- Audit & Repair card -->
-      <div class="card" id="auditRepairCard" style="border:1px solid rgba(96,165,250,0.2);">
-        <h2>🛠 Audit &amp; Repair Stories</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-          <button class="btn-primary" id="btnAuditStories" style="background:var(--primary);">🔍 1. Audit Stories</button>
-          <button class="btn-primary" id="btnRepairAll" style="display:none;background:#a855f7;">🛠 2. Repair Broken Stories</button>
-          <button class="btn-secondary" id="btnSyncProcessed" title="Mark every downloaded story as processed so Scan Latest only fetches NEW stories.">🔄 Sync Scan Progress</button>
-          <button class="btn-secondary" id="btnRebuildRejections" title="Walk the Rejected Matches/ folders and rebuild Database/rejections.json.">🔄 Rebuild Rejections</button>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:8px;">
-          <input type="checkbox" id="chkRepairSkipFaceRec" checked style="width:auto;margin:0;">
-          Match my scan settings (bypass face recognition — don't re-download files that already exist)
-        </label>
-        <div id="auditProgress"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12px;line-height:1.7;color:var(--muted);">
-          <div id="auditProgressText">Preparing…</div>
-          <progress id="auditProgressBar" value="0" max="100"
-            style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
-        </div>
-        <div id="auditReport"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.7;color:var(--muted);">
-        </div>
-      </div>
-
-      <!-- Full Backup card -->
-      <div class="card">
-        <h2>💾 Full Backup</h2>
-        <p class="help">Export everything (all children's face data, scan progress, settings) to a single file. Import after reinstalling Chrome or on another computer to pick up exactly where you left off.</p>
-        <div id="backupMeta"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7;color:var(--muted);">
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-primary" id="btnFullBackupExport" style="background:#a855f7;">📤 Export Full Backup</button>
-          <button class="btn-secondary" id="btnFullBackupImport">📥 Import Full Backup</button>
-        </div>
-        <input type="file" id="fullBackupInput" accept=".json,.json.gz,.gz,application/json,application/gzip" style="display:none;">
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
-            <input type="radio" name="importMode" value="merge" checked style="width:auto;margin:0;"> Merge with existing
-          </label>
-          <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;">
-            <input type="radio" name="importMode" value="replace" style="width:auto;margin:0;"> Replace all
-          </label>
-        </div>
-        <p class="help" style="margin-top:4px;">Merge: keeps higher progress + combines face data. Replace: overwrites everything.</p>
-        <p id="backupStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
-      </div>
-
-      <!-- Fix Story Metadata card -->
-      <div class="card" id="fixMetadataCard" style="border:1px solid rgba(251,191,36,0.2);">
-        <h2 style="color:var(--warning);">✏️ Fix Story Metadata</h2>
-        <div style="margin-bottom:10px;">
-          <label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:4px;">Apply to child:</label>
-          <select id="fixMetaChildSelect"
-            style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.1);font-size:13px;">
-            <option value="">Loading children…</option>
-          </select>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-          <input type="date" id="fixMetaFromDate"
-            style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
-          <span style="font-size:12px;color:var(--muted);">→</span>
-          <input type="date" id="fixMetaToDate"
-            style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:var(--bg);color:var(--text);">
-        </div>
-        <input type="text" id="fixMetaCentreName" placeholder="New centre name (leave blank to keep existing)"
-          style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;margin-bottom:8px;">
-        <input type="text" id="fixMetaRoomName" placeholder='New room name (use "-" to clear room)'
-          style="width:100%;padding:6px 10px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid rgba(255,255,255,0.15);font-size:13px;margin-bottom:12px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:12px;font-size:12px;">
-          <input type="checkbox" id="chkFixMetaRegenerate" checked style="width:auto;margin:0;">
-          <span style="color:var(--text);">Regenerate story HTML + Story Cards after patching</span>
-        </label>
-        <button class="btn-primary" id="btnFixMetadata"
-          style="background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.4);color:var(--warning);">
-          ✏️ Apply Metadata Fix
-        </button>
-        <p id="fixMetadataStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
-      </div>
-
-      <!-- Story Numbers card -->
-      <div class="card" id="storyNumbersCard">
-        <h2>🔢 Story Numbers</h2>
-        <p class="help">Assign sequential numbers to all stories — oldest story gets number 1. Runs automatically after every scan and rebuild, but you can trigger it manually here.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button class="btn-primary btn-muted" id="btnAssignStoryNumbers">🔢 Number Stories (Oldest=1)</button>
-        </div>
-        <p id="storyNumbersStatus" style="font-size:12px;color:var(--muted);margin-top:8px;min-height:16px;"></p>
-      </div>
-
-      <!-- Mass Renamer card -->
-      <div class="card" id="renamerCard">
-        <h2>✏️ Custom Filename &amp; Mass Renamer</h2>
-        <div style="margin-bottom:12px;">
-          <label for="renamerChildSelect">Rename files for child:</label>
-          <select id="renamerChildSelect"><option value="">— select a child —</option></select>
-        </div>
-        <label>Filename Template</label>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.8;">
-          Available tokens:
-          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{ChildName}</code>
-          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{StoryDate}</code>
-          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{Room}</code>
-          <code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">{OriginalName}</code>
-        </div>
-        <input type="text" id="renamerTemplate" value="{StoryDate}_{ChildName}_{Room}_{OriginalName}"
-          placeholder="e.g. {StoryDate}_{ChildName}_{Room}_{OriginalName}"
-          style="width:100%;padding:8px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:13px;margin-bottom:4px;background:var(--bg);color:var(--text);font-family:monospace;">
-        <p class="help" style="margin:0 0 12px;">Windows-illegal characters are stripped automatically.</p>
-        <label>Live Preview</label>
-        <div id="renamerPreview"
-          style="background:var(--bg);border-radius:8px;padding:10px 14px;font-size:12px;font-family:monospace;min-height:44px;margin-bottom:12px;word-break:break-all;line-height:1.8;color:var(--muted);">
-          Enter a template above to see a preview…
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <button class="btn-primary btn-muted" id="btnPreviewRename" disabled>🔍 Preview Rename</button>
-          <button class="btn-primary" id="btnApplyRename" style="background:#a855f7;" disabled>✅ Apply Rename</button>
-        </div>
-        <div id="renamerProgress" style="display:none;margin-bottom:8px;">
-          <div id="renamerProgressText" style="font-size:11px;color:var(--muted);margin-bottom:4px;">Preparing…</div>
-          <progress id="renamerProgressBar" value="0" max="100"
-            style="width:100%;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;accent-color:#a855f7;"></progress>
-        </div>
-        <div id="renamerReport"
-          style="display:none;background:var(--bg);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;line-height:1.8;color:var(--muted);max-height:320px;overflow-y:auto;">
-        </div>
-      </div>
-
-    </div>
-    <!-- end tabTools (legacy) -->
-
-  </div>
-  <!-- end hidden legacy panels -->
 
 
   <!-- ════════════════════════════════════════════════════════
@@ -1059,13 +996,22 @@
           Scan in progress…
         </span>
       </div>
-      <button id="btnGlobalStop"
-        style="padding:6px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;font-family:inherit;">
-        🛑 Stop Scan
-      </button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="btnGlobalToggleLog"
+          style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:#0f172a;color:#e5e7eb;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;font-family:inherit;">
+          📜 Open Log
+        </button>
+        <button id="btnGlobalStop"
+          style="padding:6px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap;font-family:inherit;">
+          🛑 Stop Scan
+        </button>
+      </div>
     </div>
     <progress id="globalScanBar" value="0" max="100"
       style="width:100%;height:4px;margin-top:6px;border-radius:2px;appearance:none;-webkit-appearance:none;"></progress>
+    <div id="globalScanLogPanel" style="display:none;margin-top:8px;">
+      <div id="globalScanLogBox" class="terminal log-container" style="height:160px;max-height:30vh;"></div>
+    </div>
   </div>
 
 
@@ -1084,7 +1030,7 @@
 
 
   <!-- ════════════════════════════════════════════════════════
-       GLOBAL: KEYBOARD HINTS (shown in review tab)
+       GLOBAL: KEYBOARD HINTS (Face Review tab)
   ════════════════════════════════════════════════════════ -->
   <div class="keyboard-hints" id="keyboardHints">
     <kbd>A</kbd> Approve &nbsp; <kbd>R</kbd> Reject &nbsp; <kbd>Z</kbd> Undo

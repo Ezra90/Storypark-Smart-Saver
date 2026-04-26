@@ -15,6 +15,35 @@ Storypark Smart Saver is a Chrome MV3 extension that:
 
 ---
 
+## Recent Architecture Additions
+
+The extension now includes a durable Storypark metadata sync subsystem:
+
+- **Storypark API metadata sync** (`SYNC_STORYPARK_INFORMATION`) with:
+  - anti-abuse pacing and retry handling
+  - durable checkpointing (`Database/sync_state.json`)
+  - sync event journal (`Database/sync_journal.json`)
+  - resumable runs (`RESUME_STORYPARK_SYNC_NOW`)
+- **Optional scheduled sync** using `chrome.alarms` (`alarms` permission)
+- **Split sync storage model**:
+  - `story_catalog.json` (light index)
+  - `story_details.json` (heavier story payloads)
+  - `routine_snapshots.json` (per-child/day routine snapshots)
+- **Sync health + integrity reporting**:
+  - `GET_STORYPARK_SYNC_HEALTH`
+  - file integrity hashes/sizes/timestamps via `getDatabaseIntegrityReport()`
+- **Activity log dual persistence**:
+  - machine-readable `activity_log.json`
+  - human-readable `activity_log.txt`
+- **Story template preview (Settings)**:
+  - `dashboard-settings.js` renders a **Template Commands** dictionary with native **`title` tooltips** (full token description on hover) and **Insert** actions; **Preview mode** / **Target** `<select>` elements have `title` tooltips plus inline help for preview behaviour.
+  - **Cross-engine token aliases**: `buildTemplateTokenMap()` accepts disk-style names (`[Date]`, `[Title]`, …); `buildDynamicName()` accepts story-style names (`[StoryDate]`, `[StoryTitle]`, …) so the same mental model works in both places (see AI_RULES §9 Glossary).
+  - **Naming + Mass Renamer chips**: `dashboard.html` token chips under Naming Conventions and Mass Renamer insert at the cursor into the adjacent template field (`dashboard-tools.js` `insertAtCursor`); renamer `{…}` map includes the same alias family with longest-token-first replacement.
+- **Quick Start strip**: includes a **Face Review** step (`dashboard.js`) driven by `GET_REVIEW_QUEUE` count plus local DB presence; startup health banner logic no longer returns early from `refreshQuickStartStates()` when the banner is hidden, so downstream state (including step 5) always updates.
+  - `PREVIEW_TEMPLATE_SETTINGS` (background) returns real-or-mock story data, **`truncationFlags`**, and **`previewNotes`** so the UI can show when HTML, card title, or EXIF title hits caps (`TEMPLATE_LIMITS`, **`CARD_TITLE_MAX_CHARS`** for canvas titles — see `lib/metadata-helpers.js`).
+
+---
+
 ## Module Dependency Tree
 
 ```
@@ -96,6 +125,7 @@ dashboard.js (Extension Page)
 | `GET_REVIEW_QUEUE` | — | `{ ok, queue }` |
 | `REVIEW_APPROVE` | `id, selectedFaceIndex` | `{ ok }` |
 | `REVIEW_REJECT` | `id` | `{ ok }` |
+| `SELF_IMPROVE_FACE_MODEL` | `childId, childName` | `{ ok, checked, recoveredRejected, reinforcedApproved, reviewedCandidates }` |
 | `REVIEW_TRAIN_ONLY` | `id, selectedFaceIndex` | `{ ok }` |
 | `UNDO_LAST_REVIEW` | — | `{ ok }` |
 | `GET_ACTIVITY_LOG` | — | `{ ok, activityLog }` |
@@ -136,6 +166,20 @@ dashboard.js (Extension Page)
 | `ADD_FILE_TO_MANIFEST` | `childId, storyId, filename` | `{ ok }` |
 | `LOG_TO_ACTIVITY` | `level, message, meta?` | `{ ok }` |
 | `GET_SCAN_CHECKPOINT` | `childId` | `{ ok, checkpoint? }` |
+| `SYNC_STORYPARK_INFORMATION` | — | `{ ok, stats }` |
+| `RESUME_STORYPARK_SYNC_NOW` | — | `{ ok, stats }` |
+| `GET_STORYPARK_SYNC_STATUS` | — | `{ ok, state, schedule }` |
+| `SET_STORYPARK_SYNC_SCHEDULE` | `enabled, hours` | `{ ok, enabled, hours }` |
+| `GET_STORYPARK_SYNC_HEALTH` | — | `{ ok, state, health }` |
+| `SAVE_CENTRE_LOCATIONS` | `centreLocations` | `{ ok, count }` |
+| `GET_FACE_MODEL_HEALTH` | `childId?` | `{ ok, health, holdout }` |
+| `SET_FACE_HOLDOUT_SET` | `childId, keys[]` | `{ ok, holdout }` |
+| `RUN_INITIAL_FACE_BOOTSTRAP` | `childId, childName` | `{ ok, fingerprints, seededPositive, queuedReview, holdoutCount }` |
+| `GET_DECISION_AUDIT_SUMMARY` | `childId?` | `{ ok, total, byDecision, latest }` |
+| `RUN_RETENTION_MAINTENANCE` | `maxDecisionEntries, negativeMaxAgeDays, fingerprintMaxAgeDays` | `{ ok, decision, face }` |
+| `GET_TEMPLATE_SETTINGS` | — | `{ ok, settings }` |
+| `SAVE_TEMPLATE_SETTINGS` | `settings` (merged HTML/card/exif template blocks) | `{ ok }` |
+| `PREVIEW_TEMPLATE_SETTINGS` | `settings, previewMode, targetMode` | `{ ok, source, sourceNotes, previewNotes, truncationFlags, rawTemplate, rendered, lengths }` |
 
 ### background → dashboard (broadcast sendMessage)
 
@@ -147,6 +191,7 @@ dashboard.js (Extension Page)
 | `BATCH_PROGRESS` | During batch download | `{ done, total, downloaded, failed }` |
 | `REVIEW_QUEUE_UPDATED` | Review queue changes | — |
 | `SCAN_COMPLETE` | Scan finishes (any reason) | — |
+| `SCAN_COMPLETE` | Also sent after sync/resume jobs | — |
 | `PHASE_ADVANCED` | Child advances phase | `{ phase }` |
 | `AUDIT_REPAIR_DONE` | AUDIT_AND_REPAIR finishes | `{ summary }` |
 | `VIDEO_DOWNLOAD_PROGRESS` | Video streaming progress | `{ savePath, percent, mb, totalBytes }` |
@@ -315,6 +360,9 @@ Storypark-Smart-Saver/
 ├── package-lock.json        ← npm lockfile — exact pinned versions of all dev deps (auto-generated, do not edit)
 ├── scripts/
 │   ├── verify-imports.js    ← Import checker (run: node scripts/verify-imports.js)
+│   ├── generate-output-examples.mjs ← Desktop sample folders (real JPEGs + regenerated story.html + EXIF preview); run: npm run examples:output
+│   ├── rehydrate-manifests-from-details.mjs ← One-time repair: restore paragraph formatting from story_details.json into manifests + regenerate story.html; run: npm run repair:rehydrate
+│   ├── face-regression-smoke.js ← Face-matching regression smoke test
 │   ├── generate-icons.js
 │   └── setup-libs.js
 └── extension/
@@ -340,6 +388,7 @@ Storypark-Smart-Saver/
         ├── human.js         ← Human AI model loader
         ├── matching.js      ← Pure-math face matching (SW-safe)
         ├── handlers-rebuild.js ← REBUILD_DATABASE_FROM_DISK handler (cold-start DB repair via API)
-        ├── metadata-helpers.js ← Pure string/date/EXIF helpers
+        ├── handlers-face-model.js ← Face self-improve/bootstrap/health/retention handlers
+        ├── metadata-helpers.js ← Pure string/date/EXIF helpers; `buildTemplateTokenMap`, `renderTemplate`, `TEMPLATE_LIMITS`, `CARD_TITLE_MAX_CHARS`
         └── scan-engine.js   ← Main scan pipeline (runExtraction)
 ```

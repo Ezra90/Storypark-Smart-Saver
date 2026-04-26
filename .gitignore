@@ -13,3 +13,6 @@ extension/client_secret.json
 
 # OS
 Thumbs.db
+
+# Dependencies
+node_modules/

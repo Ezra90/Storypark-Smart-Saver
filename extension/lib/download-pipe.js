@@ -165,16 +165,27 @@ export function buildDynamicName(templateString, apiStoryData, index) {
   const data = apiStoryData || {};
   
   // Token map — maps [Token] to actual data field
+  const storyDate = data.storyDate || data.date || "";
+  const storyTitle = data.storyTitle || data.title || "";
+  const centre = data.centreName || data.centre || "";
+  const child = data.childName || "";
+  const room = data.roomName || data.room || "";
+  const educator = data.educatorName || data.educator || "";
+
   const tokenMap = {
-    "[Date]":        data.storyDate || data.date || "",
-    "[Child]":       data.childName || "",
-    "[ChildName]":   data.childName || "",
-    "[Class]":       data.roomName || data.room || "",
-    "[Room]":        data.roomName || data.room || "",
-    "[Title]":       data.storyTitle || data.title || "",
-    "[Daycare]":     data.centreName || data.centre || "",
-    "[Centre]":      data.centreName || data.centre || "",
-    "[Educator]":    data.educatorName || data.educator || "",
+    "[Date]": storyDate,
+    "[StoryDate]": storyDate,
+    "[Child]": child,
+    "[ChildName]": child,
+    "[Class]": room,
+    "[Room]": room,
+    "[Title]": storyTitle,
+    "[StoryTitle]": storyTitle,
+    "[Daycare]": centre,
+    "[Centre]": centre,
+    "[CentreName]": centre,
+    "[Educator]": educator,
+    "[EducatorName]": educator,
     "[OriginalName]": data.originalFilename || "",
   };
   

@@ -14,7 +14,8 @@
     "unlimitedStorage",
     "offscreen",
     "downloads",
-    "notifications"
+    "notifications",
+    "alarms"
   ],
   "host_permissions": [
     "*://app.storypark.com/*",

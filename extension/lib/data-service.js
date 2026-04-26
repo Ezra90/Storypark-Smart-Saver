@@ -191,6 +191,7 @@ export async function listCentres() {
 export async function mergeCentres(entries) {
   if (!entries || entries.length === 0) return 0;
   let added = 0;
+  const pendingWrites = [];
 
   // Read current state once
   const { centreLocations = {} } = await chrome.storage.local.get("centreLocations").catch(() => ({ centreLocations: {} }));
@@ -208,17 +209,24 @@ export async function mergeCentres(entries) {
       storageChanged = true;
       added++;
       // Persist to IDB
-      saveCentreProfile({ centreName: name, lat: null, lng: null, address }).catch(() => {});
+      pendingWrites.push(
+        saveCentreProfile({ centreName: name, lat: null, lng: null, address }).catch(() => {})
+      );
     } else if (address && centreLocations[name].address == null) {
       // Existing centre — update address if we now have one
       centreLocations[name].address = address;
       storageChanged = true;
-      saveCentreProfile({ centreName: name, lat: centreLocations[name].lat, lng: centreLocations[name].lng, address }).catch(() => {});
+      pendingWrites.push(
+        saveCentreProfile({ centreName: name, lat: centreLocations[name].lat, lng: centreLocations[name].lng, address }).catch(() => {})
+      );
     }
   }
 
   if (storageChanged) {
     await chrome.storage.local.set({ centreLocations }).catch(() => {});
+  }
+  if (pendingWrites.length > 0) {
+    await Promise.allSettled(pendingWrites);
   }
 
   return added;

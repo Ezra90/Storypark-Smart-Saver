@@ -55,6 +55,19 @@ const _DB_FILE_NEG_DESCS = "negative_descriptors.json";
 const _DB_FILE_PRINTS    = "fingerprints.json";
 const _DB_FILE_MANIFESTS = "manifests.json";
 const _DB_FILE_REJECTIONS = "rejections.json";   // v2.3: persisted rejection ledger
+const _DB_FILE_TEMPLATE_SETTINGS = "template_settings.json";
+const _DB_FILE_ACTIVITY_LOG = "activity_log.json";
+const _DB_FILE_ACTIVITY_LOG_TXT = "activity_log.txt";
+const _DB_FILE_STORY_CATALOG = "story_catalog.json";
+const _DB_FILE_STORY_DETAILS = "story_details.json";
+const _DB_FILE_ROUTINE_SNAPSHOTS = "routine_snapshots.json";
+const _DB_FILE_SYNC_STATE = "sync_state.json";
+const _DB_FILE_SYNC_JOURNAL = "sync_journal.json";
+const _DB_FILE_SYNC_SCHEMA = "sync_schema.json";
+const _DB_FILE_DECISION_LOG = "decision_log.jsonl";
+const _DB_FILE_MODEL_HEALTH = "model_health.json";
+const _DB_FILE_HOLDOUT_SETS = "holdout_sets.json";
+const _DB_FILE_JOBS_STATE = "jobs_state.json";
 
 /** Session-level in-memory cache — cleared on service worker restart. */
 const _fileCache = {
@@ -63,6 +76,16 @@ const _fileCache = {
   fingerprints:   null,   // { [key]: record }
   manifests:      null,   // { [key]: manifest }
   rejections:     null,   // { [storyId_imageUrl]: 1 }  v2.3
+  templateSettings: null, // { html, card, exif }
+  activityLog:    null,   // ActivityLogEntry[]
+  storyCatalog:   null,   // { [childId_storyId]: StoryCatalogRecord }
+  storyDetails:   null,   // { [childId_storyId]: StoryDetailRecord }
+  routineSnapshots: null, // { [childId_yyyy-mm-dd]: RoutineSnapshotRecord }
+  syncState:      null,   // { ...sync status/checkpoint... }
+  syncJournal:    null,   // SyncJournalEntry[]
+  modelHealth:    null,   // { [childId]: metrics }
+  holdoutSets:    null,   // { [childId]: HoldoutSet }
+  jobsState:      null,   // { [jobKey]: JobState }
 };
 
 /** Get or create the Database/ folder inside the linked folder. */
@@ -72,6 +95,28 @@ async function _getDbFolder() {
     if (!root) return null;
     return await root.getDirectoryHandle(_DB_FOLDER, { create: true });
   } catch { return null; }
+}
+
+/**
+ * Verify the linked Database/ folder is writable right now.
+ * Returns false when no linked folder is set, permission was lost, or writes fail.
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function ensureDatabaseWritable() {
+  try {
+    const folder = await _getDbFolder();
+    if (!folder) return false;
+    const probeName = "__write_probe__.tmp";
+    const fh = await folder.getFileHandle(probeName, { create: true });
+    const w = await fh.createWritable();
+    await w.write("ok");
+    await w.close();
+    await folder.removeEntry(probeName).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Read a JSON file from Database/. Returns null on any error. */
@@ -84,17 +129,43 @@ async function _readDbFile(filename) {
   } catch { return null; }
 }
 
-/** Write data as JSON to Database/filename. Returns true on success. */
+/** Write data as JSON to Database/filename. Returns true on success.
+ * Uses temp-file commit to reduce partial-write risk.
+ */
 async function _writeDbFile(filename, data) {
   try {
     const folder = await _getDbFolder();
     if (!folder) return false;
+    const tmpName = `${filename}.tmp`;
+    const tmpFh = await folder.getFileHandle(tmpName, { create: true });
+    const tmpW = await tmpFh.createWritable();
+    await tmpW.write(JSON.stringify(data));
+    await tmpW.close();
+
+    const tmpText = await (await tmpFh.getFile()).text();
     const fh = await folder.getFileHandle(filename, { create: true });
-    const w  = await fh.createWritable();
-    await w.write(JSON.stringify(data));
+    const w = await fh.createWritable();
+    await w.write(tmpText);
     await w.close();
+    await folder.removeEntry(tmpName).catch(() => {});
     return true;
   } catch { return false; }
+}
+
+async function _appendDbTextFile(filename, lines) {
+  try {
+    const folder = await _getDbFolder();
+    if (!folder) return false;
+    const fh = await folder.getFileHandle(filename, { create: true });
+    const file = await fh.getFile();
+    const w = await fh.createWritable({ keepExistingData: true });
+    await w.seek(file.size);
+    await w.write(lines);
+    await w.close();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* Cache loaders — read once per session, then use in-memory copy */
@@ -133,6 +204,68 @@ async function _loadRejections() {
   return _fileCache.rejections;
 }
 
+async function _loadTemplateSettings() {
+  if (_fileCache.templateSettings !== null) return _fileCache.templateSettings;
+  _fileCache.templateSettings = (await _readDbFile(_DB_FILE_TEMPLATE_SETTINGS)) || {};
+  return _fileCache.templateSettings;
+}
+
+async function _loadActivityLogFile() {
+  if (_fileCache.activityLog !== null) return _fileCache.activityLog;
+  const raw = (await _readDbFile(_DB_FILE_ACTIVITY_LOG)) || [];
+  _fileCache.activityLog = Array.isArray(raw) ? raw : [];
+  return _fileCache.activityLog;
+}
+
+async function _loadStoryCatalog() {
+  if (_fileCache.storyCatalog !== null) return _fileCache.storyCatalog;
+  _fileCache.storyCatalog = (await _readDbFile(_DB_FILE_STORY_CATALOG)) || {};
+  return _fileCache.storyCatalog;
+}
+
+async function _loadStoryDetails() {
+  if (_fileCache.storyDetails !== null) return _fileCache.storyDetails;
+  _fileCache.storyDetails = (await _readDbFile(_DB_FILE_STORY_DETAILS)) || {};
+  return _fileCache.storyDetails;
+}
+
+async function _loadRoutineSnapshots() {
+  if (_fileCache.routineSnapshots !== null) return _fileCache.routineSnapshots;
+  _fileCache.routineSnapshots = (await _readDbFile(_DB_FILE_ROUTINE_SNAPSHOTS)) || {};
+  return _fileCache.routineSnapshots;
+}
+
+async function _loadSyncState() {
+  if (_fileCache.syncState !== null) return _fileCache.syncState;
+  _fileCache.syncState = (await _readDbFile(_DB_FILE_SYNC_STATE)) || {};
+  return _fileCache.syncState;
+}
+
+async function _loadSyncJournal() {
+  if (_fileCache.syncJournal !== null) return _fileCache.syncJournal;
+  const raw = (await _readDbFile(_DB_FILE_SYNC_JOURNAL)) || [];
+  _fileCache.syncJournal = Array.isArray(raw) ? raw : [];
+  return _fileCache.syncJournal;
+}
+
+async function _loadModelHealth() {
+  if (_fileCache.modelHealth !== null) return _fileCache.modelHealth;
+  _fileCache.modelHealth = (await _readDbFile(_DB_FILE_MODEL_HEALTH)) || {};
+  return _fileCache.modelHealth;
+}
+
+async function _loadHoldoutSets() {
+  if (_fileCache.holdoutSets !== null) return _fileCache.holdoutSets;
+  _fileCache.holdoutSets = (await _readDbFile(_DB_FILE_HOLDOUT_SETS)) || {};
+  return _fileCache.holdoutSets;
+}
+
+async function _loadJobsState() {
+  if (_fileCache.jobsState !== null) return _fileCache.jobsState;
+  _fileCache.jobsState = (await _readDbFile(_DB_FILE_JOBS_STATE)) || {};
+  return _fileCache.jobsState;
+}
+
 /* ================================================================== */
 /*  Active Database info — for "📂 Active Database" settings panel     */
 /*                                                                     */
@@ -164,6 +297,18 @@ export async function getActiveDatabaseInfo() {
     { name: _DB_FILE_NEG_DESCS, exists: false, sizeBytes: 0, lastModified: null },
     { name: _DB_FILE_PRINTS,    exists: false, sizeBytes: 0, lastModified: null },
     { name: _DB_FILE_REJECTIONS,exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_STORY_CATALOG, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_STORY_DETAILS, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_ROUTINE_SNAPSHOTS, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_SYNC_STATE, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_SYNC_JOURNAL, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_SYNC_SCHEMA, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_ACTIVITY_LOG, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_ACTIVITY_LOG_TXT, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_DECISION_LOG, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_MODEL_HEALTH, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_HOLDOUT_SETS, exists: false, sizeBytes: 0, lastModified: null },
+    { name: _DB_FILE_JOBS_STATE, exists: false, sizeBytes: 0, lastModified: null },
   ];
   let linkedFolderName = null;
   let folderPath = null;
@@ -212,13 +357,631 @@ export async function getActiveDatabaseInfo() {
  * @returns {Promise<{manifests: number, rejections: number, descriptors: number, negative: number, fingerprints: number}>}
  */
 export async function eagerLoadHotCaches() {
-  const out = { manifests: 0, rejections: 0, descriptors: 0, negative: 0, fingerprints: 0 };
+  const out = { manifests: 0, rejections: 0, descriptors: 0, negative: 0, fingerprints: 0, templateSettings: 0 };
   try { out.manifests      = Object.keys(await _loadManifests()).length;      } catch {}
   try { out.rejections     = Object.keys(await _loadRejections()).length;     } catch {}
   try { out.descriptors    = Object.keys(await _loadDescriptors()).length;    } catch {}
   try { out.negative       = Object.keys(await _loadNegDescriptors()).length; } catch {}
   try { out.fingerprints   = Object.keys(await _loadFingerprints()).length;   } catch {}
+  try { out.templateSettings = Object.keys(await _loadTemplateSettings()).length; } catch {}
   return out;
+}
+
+/* ================================================================== */
+/*  templateSettings — HTML/Card/EXIF template configuration           */
+/* ================================================================== */
+
+/**
+ * Returns persisted template settings from Database/template_settings.json.
+ * Falls back to IDB only when file-backed settings are not present.
+ * @returns {Promise<Object>}
+ */
+export async function getTemplateSettings() {
+  const fromFile = await _loadTemplateSettings();
+  if (fromFile && typeof fromFile === "object" && Object.keys(fromFile).length > 0) {
+    return fromFile;
+  }
+
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(STORE_FILE_SYSTEM_STATE, "readonly");
+    const req = tx.objectStore(STORE_FILE_SYSTEM_STATE).get("__template_settings__");
+    req.onsuccess = async () => {
+      db.close();
+      const legacy = req.result?.settings || {};
+      if (legacy && Object.keys(legacy).length > 0) {
+        const cache = await _loadTemplateSettings();
+        Object.assign(cache, legacy);
+        _writeDbFile(_DB_FILE_TEMPLATE_SETTINGS, cache).catch(() => {});
+      }
+      resolve(legacy || {});
+    };
+    req.onerror = () => {
+      db.close();
+      resolve({});
+    };
+  });
+}
+
+/**
+ * Persists template settings to Database/template_settings.json (primary)
+ * and mirrors to IDB for backward compatibility.
+ * @param {Object} settings
+ */
+export async function saveTemplateSettings(settings) {
+  const safe = settings && typeof settings === "object" ? settings : {};
+  const cache = await _loadTemplateSettings();
+  _fileCache.templateSettings = { ...cache, ...safe };
+  _writeDbFile(_DB_FILE_TEMPLATE_SETTINGS, _fileCache.templateSettings).catch(() => {});
+
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_FILE_SYSTEM_STATE, "readwrite");
+    tx.objectStore(STORE_FILE_SYSTEM_STATE).put({
+      filePath: "__template_settings__",
+      childId: "__system__",
+      storyId: "__system__",
+      filename: "__template_settings__",
+      settings: _fileCache.templateSettings,
+      downloadedAt: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+    });
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/* ================================================================== */
+/*  activityLog — Database/activity_log.json                           */
+/* ================================================================== */
+
+/**
+ * Append batched activity log entries to Database/activity_log.json.
+ * Primary purpose: durable in-folder log history for later forensics/export.
+ *
+ * @param {Array<Object>} entries
+ * @param {number} [maxEntries=20000]
+ * @returns {Promise<number>} total entries stored after append
+ */
+export async function appendActivityLogEntries(entries, maxEntries = 20000) {
+  const batch = Array.isArray(entries) ? entries.filter(e => e && typeof e === "object") : [];
+  if (batch.length === 0) return (await _loadActivityLogFile()).length;
+  const cache = await _loadActivityLogFile();
+  cache.push(...batch);
+  if (cache.length > maxEntries) {
+    cache.splice(0, cache.length - maxEntries);
+  }
+  _writeDbFile(_DB_FILE_ACTIVITY_LOG, cache).catch(() => {});
+  const lines = batch
+    .map((e) => {
+      const ts = e?.timestamp ? new Date(e.timestamp).toLocaleString() : "";
+      const level = String(e?.level || "INFO").toUpperCase();
+      const msg = String(e?.message || "");
+      return `[${ts}] [${level}] ${msg}`;
+    })
+    .join("\n");
+  if (lines) {
+    _appendDbTextFile(_DB_FILE_ACTIVITY_LOG_TXT, `${lines}\n`).catch(() => {});
+  }
+  return cache.length;
+}
+
+/**
+ * Read the persisted Database/activity_log.json entries.
+ * @param {boolean} [newestFirst=false]
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getPersistedActivityLog(newestFirst = false) {
+  const cache = await _loadActivityLogFile();
+  return newestFirst ? cache.slice().reverse() : cache.slice();
+}
+
+export async function clearPersistedActivityLog() {
+  _fileCache.activityLog = [];
+  await _writeDbFile(_DB_FILE_ACTIVITY_LOG, []);
+  try {
+    const folder = await _getDbFolder();
+    if (!folder) return;
+    const fh = await folder.getFileHandle(_DB_FILE_ACTIVITY_LOG_TXT, { create: true });
+    const w = await fh.createWritable();
+    await w.write("");
+    await w.close();
+  } catch {
+    // non-fatal
+  }
+}
+
+/* ================================================================== */
+/*  storyCatalog — API snapshot for story/file-count drift detection   */
+/* ================================================================== */
+
+/**
+ * Upsert a single Storypark API catalog record.
+ * Primary storage: Database/story_catalog.json
+ *
+ * @param {Object} record
+ * @param {string} record.childId
+ * @param {string|number} record.storyId
+ * @returns {Promise<void>}
+ */
+export async function upsertStoryCatalogRecord(record) {
+  const childId = String(record?.childId || "");
+  const storyId = String(record?.storyId || "");
+  if (!childId || !storyId) return;
+  const key = `${childId}_${storyId}`;
+  const cache = await _loadStoryCatalog();
+  cache[key] = {
+    ...cache[key],
+    ...record,
+    childId,
+    storyId,
+    key,
+    lastSyncedAt: new Date().toISOString(),
+  };
+  await _writeDbFile(_DB_FILE_STORY_CATALOG, cache);
+}
+
+/**
+ * Bulk-upsert Storypark API catalog records.
+ *
+ * @param {Array<Object>} records
+ * @returns {Promise<number>} number of records upserted
+ */
+export async function upsertStoryCatalogRecords(records) {
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) return 0;
+  const cache = await _loadStoryCatalog();
+  let updated = 0;
+  for (const r of list) {
+    const childId = String(r?.childId || "");
+    const storyId = String(r?.storyId || "");
+    if (!childId || !storyId) continue;
+    const key = `${childId}_${storyId}`;
+    cache[key] = {
+      ...cache[key],
+      ...r,
+      childId,
+      storyId,
+      key,
+      lastSyncedAt: new Date().toISOString(),
+    };
+    updated++;
+  }
+  await _writeDbFile(_DB_FILE_STORY_CATALOG, cache);
+  return updated;
+}
+
+/**
+ * Get all API catalog records, optionally for one child.
+ *
+ * @param {string|null} [childId=null]
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getStoryCatalogRecords(childId = null) {
+  const cache = await _loadStoryCatalog();
+  const rows = Object.values(cache);
+  if (!childId) return rows;
+  return rows.filter(r => String(r.childId) === String(childId));
+}
+
+/* ================================================================== */
+/*  storyDetails — heavier story payloads (body, long text, etc.)      */
+/* ================================================================== */
+
+/**
+ * Bulk-upsert heavier story detail records in Database/story_details.json.
+ *
+ * @param {Array<Object>} records
+ * @returns {Promise<number>}
+ */
+export async function upsertStoryDetailRecords(records) {
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) return 0;
+  const cache = await _loadStoryDetails();
+  let updated = 0;
+  const now = new Date().toISOString();
+  for (const r of list) {
+    const childId = String(r?.childId || "");
+    const storyId = String(r?.storyId || "");
+    if (!childId || !storyId) continue;
+    const key = `${childId}_${storyId}`;
+    cache[key] = {
+      ...cache[key],
+      ...r,
+      key,
+      childId,
+      storyId,
+      lastSyncedAt: now,
+    };
+    updated++;
+  }
+  await _writeDbFile(_DB_FILE_STORY_DETAILS, cache);
+  return updated;
+}
+
+/**
+ * Get heavy story detail records.
+ *
+ * @param {string|null} [childId=null]
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getStoryDetailRecords(childId = null) {
+  const cache = await _loadStoryDetails();
+  const rows = Object.values(cache);
+  if (!childId) return rows;
+  return rows.filter(r => String(r.childId) === String(childId));
+}
+
+/* ================================================================== */
+/*  routineSnapshots — per-child per-day routine data                  */
+/* ================================================================== */
+
+/**
+ * Upsert per-day routine snapshots in Database/routine_snapshots.json.
+ * Keyed by childId + storyDate so repeated stories on same day share one record.
+ *
+ * @param {Array<Object>} records
+ * @returns {Promise<number>}
+ */
+export async function upsertRoutineSnapshotRecords(records) {
+  const list = Array.isArray(records) ? records : [];
+  if (list.length === 0) return 0;
+  const cache = await _loadRoutineSnapshots();
+  let updated = 0;
+  const now = new Date().toISOString();
+  for (const r of list) {
+    const childId = String(r?.childId || "");
+    const storyDate = String(r?.storyDate || "");
+    if (!childId || !storyDate) continue;
+    const key = `${childId}_${storyDate}`;
+    cache[key] = {
+      ...cache[key],
+      ...r,
+      key,
+      childId,
+      storyDate,
+      lastSyncedAt: now,
+    };
+    updated++;
+  }
+  await _writeDbFile(_DB_FILE_ROUTINE_SNAPSHOTS, cache);
+  return updated;
+}
+
+/**
+ * Get routine snapshots.
+ *
+ * @param {string|null} [childId=null]
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getRoutineSnapshotRecords(childId = null) {
+  const cache = await _loadRoutineSnapshots();
+  const rows = Object.values(cache);
+  if (!childId) return rows;
+  return rows.filter(r => String(r.childId) === String(childId));
+}
+
+/* ================================================================== */
+/*  syncState + syncJournal — resilient Storypark API sync bookkeeping */
+/* ================================================================== */
+
+/**
+ * Merge-persist sync state to Database/sync_state.json.
+ *
+ * @param {Object} patch
+ * @returns {Promise<Object>}
+ */
+export async function saveSyncState(patch = {}) {
+  const current = await _loadSyncState();
+  const next = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  _fileCache.syncState = next;
+  await _writeDbFile(_DB_FILE_SYNC_STATE, next);
+  return next;
+}
+
+/**
+ * Read persisted sync state.
+ *
+ * @returns {Promise<Object>}
+ */
+export async function getSyncState() {
+  const state = await _loadSyncState();
+  return { ...state };
+}
+
+/**
+ * Append sync journal entries, keeping a bounded history.
+ *
+ * @param {Array<Object>} entries
+ * @param {number} [maxEntries=5000]
+ * @returns {Promise<number>}
+ */
+export async function appendSyncJournal(entries, maxEntries = 5000) {
+  const batch = Array.isArray(entries) ? entries.filter(e => e && typeof e === "object") : [];
+  if (batch.length === 0) return (await _loadSyncJournal()).length;
+  const journal = await _loadSyncJournal();
+  for (const e of batch) {
+    journal.push({
+      timestamp: e.timestamp || new Date().toISOString(),
+      level: e.level || "INFO",
+      event: e.event || "sync",
+      ...e,
+    });
+  }
+  if (journal.length > maxEntries) {
+    journal.splice(0, journal.length - maxEntries);
+  }
+  await _writeDbFile(_DB_FILE_SYNC_JOURNAL, journal);
+  return journal.length;
+}
+
+/**
+ * Read sync journal entries.
+ *
+ * @param {boolean} [newestFirst=false]
+ * @returns {Promise<Array<Object>>}
+ */
+export async function getSyncJournal(newestFirst = false) {
+  const journal = await _loadSyncJournal();
+  return newestFirst ? journal.slice().reverse() : journal.slice();
+}
+
+export async function ensureSyncSchema() {
+  const now = new Date().toISOString();
+  const previous = (await _readDbFile(_DB_FILE_SYNC_SCHEMA)) || {};
+  const fileVersions = {
+    manifests: { file: _DB_FILE_MANIFESTS, version: 2 },
+    descriptors: { file: _DB_FILE_DESCS, version: 1 },
+    negativeDescriptors: { file: _DB_FILE_NEG_DESCS, version: 1 },
+    fingerprints: { file: _DB_FILE_PRINTS, version: 1 },
+    rejections: { file: _DB_FILE_REJECTIONS, version: 1 },
+    storyCatalog: { file: _DB_FILE_STORY_CATALOG, version: 1 },
+    storyDetails: { file: _DB_FILE_STORY_DETAILS, version: 1 },
+    routineSnapshots: { file: _DB_FILE_ROUTINE_SNAPSHOTS, version: 1 },
+    syncState: { file: _DB_FILE_SYNC_STATE, version: 1 },
+    syncJournal: { file: _DB_FILE_SYNC_JOURNAL, version: 1 },
+    activityLogJson: { file: _DB_FILE_ACTIVITY_LOG, version: 1 },
+    activityLogTxt: { file: _DB_FILE_ACTIVITY_LOG_TXT, version: 1 },
+    decisionLog: { file: _DB_FILE_DECISION_LOG, version: 1 },
+    modelHealth: { file: _DB_FILE_MODEL_HEALTH, version: 1 },
+    holdoutSets: { file: _DB_FILE_HOLDOUT_SETS, version: 1 },
+    jobsState: { file: _DB_FILE_JOBS_STATE, version: 1 },
+  };
+  const schema = {
+    schema: "storypark-smart-saver-sync",
+    version: 2,
+    updatedAt: now,
+    files: fileVersions,
+    migrations: Array.isArray(previous.migrations) ? previous.migrations : [],
+  };
+  if (!previous.version || previous.version !== schema.version) {
+    schema.migrations.push({
+      at: now,
+      fromVersion: previous.version || 0,
+      toVersion: schema.version,
+      note: "Expanded schema with decision log, model health, holdout sets, and jobs state.",
+    });
+  }
+  await _writeDbFile(_DB_FILE_SYNC_SCHEMA, schema);
+  return schema;
+}
+
+export async function appendDecisionLogEntries(entries) {
+  const batch = Array.isArray(entries) ? entries.filter((e) => e && typeof e === "object") : [];
+  if (batch.length === 0) return 0;
+  const lines = batch.map((e) => JSON.stringify({
+    schemaVersion: 1,
+    timestamp: e.timestamp || new Date().toISOString(),
+    ...e,
+  })).join("\n") + "\n";
+  await _appendDbTextFile(_DB_FILE_DECISION_LOG, lines);
+  return batch.length;
+}
+
+export async function getDecisionLogEntries(limit = 200) {
+  try {
+    const folder = await _getDbFolder();
+    if (!folder) return [];
+    const fh = await folder.getFileHandle(_DB_FILE_DECISION_LOG);
+    const text = await (await fh.getFile()).text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const sliced = lines.slice(Math.max(0, lines.length - Math.max(0, limit)));
+    return sliced.map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export async function rotateDecisionLog(maxEntries = 25000) {
+  try {
+    const folder = await _getDbFolder();
+    if (!folder) return { total: 0, removed: 0 };
+    const fh = await folder.getFileHandle(_DB_FILE_DECISION_LOG);
+    const text = await (await fh.getFile()).text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    const keep = lines.slice(Math.max(0, lines.length - Math.max(1000, maxEntries)));
+    if (keep.length === lines.length) return { total: lines.length, removed: 0 };
+    const w = await fh.createWritable();
+    await w.write(keep.join("\n") + (keep.length ? "\n" : ""));
+    await w.close();
+    return { total: lines.length, removed: lines.length - keep.length };
+  } catch {
+    return { total: 0, removed: 0 };
+  }
+}
+
+export async function saveModelHealth(childId, patch = {}) {
+  const id = String(childId || "");
+  if (!id) return null;
+  const cache = await _loadModelHealth();
+  const current = cache[id] || {};
+  const next = { ...current, ...patch, childId: id, updatedAt: new Date().toISOString() };
+  cache[id] = next;
+  await _writeDbFile(_DB_FILE_MODEL_HEALTH, cache);
+  return next;
+}
+
+export async function getModelHealth(childId = null) {
+  const cache = await _loadModelHealth();
+  if (childId == null) return { ...cache };
+  return cache[String(childId || "")] || null;
+}
+
+export async function saveHoldoutSet(childId, holdout = {}) {
+  const id = String(childId || "");
+  if (!id) return null;
+  const cache = await _loadHoldoutSets();
+  cache[id] = { childId: id, ...holdout, updatedAt: new Date().toISOString() };
+  await _writeDbFile(_DB_FILE_HOLDOUT_SETS, cache);
+  return cache[id];
+}
+
+export async function getHoldoutSet(childId = null) {
+  const cache = await _loadHoldoutSets();
+  if (childId == null) return { ...cache };
+  return cache[String(childId || "")] || null;
+}
+
+export async function pruneAgedFaceData({ negativeMaxAgeDays = 365, fingerprintMaxAgeDays = 365 } = {}) {
+  const now = Date.now();
+  const negCutoff = now - Math.max(1, Number(negativeMaxAgeDays) || 365) * 86400000;
+  const printCutoff = now - Math.max(1, Number(fingerprintMaxAgeDays) || 365) * 86400000;
+
+  const neg = await _loadNegDescriptors();
+  let negativePruned = 0;
+  for (const key of Object.keys(neg)) {
+    const rec = neg[key];
+    if (!rec?.updatedAt) continue;
+    const at = Date.parse(rec.updatedAt);
+    if (Number.isFinite(at) && at < negCutoff) {
+      delete neg[key];
+      negativePruned++;
+    }
+  }
+  if (negativePruned > 0) {
+    await _writeDbFile(_DB_FILE_NEG_DESCS, neg);
+  }
+
+  const prints = await _loadFingerprints();
+  let fingerprintsPruned = 0;
+  for (const key of Object.keys(prints)) {
+    const rec = prints[key];
+    const at = Date.parse(rec?.cachedAt || rec?.updatedAt || "");
+    if (Number.isFinite(at) && at < printCutoff) {
+      delete prints[key];
+      fingerprintsPruned++;
+    }
+  }
+  if (fingerprintsPruned > 0) {
+    await _writeDbFile(_DB_FILE_PRINTS, prints);
+  }
+
+  return { negativePruned, fingerprintsPruned };
+}
+
+export async function getJobsState() {
+  const cache = await _loadJobsState();
+  return { ...cache };
+}
+
+export async function acquireJobLock(jobKey, ttlMs = 10 * 60 * 1000) {
+  const key = String(jobKey || "");
+  if (!key) return { ok: false, reason: "missing_key" };
+  const cache = await _loadJobsState();
+  const now = Date.now();
+  const existing = cache[key];
+  if (existing?.status === "running" && existing.expiresAt && existing.expiresAt > now) {
+    return { ok: false, reason: "already_running", state: existing };
+  }
+  const runId = `${key}_${now}`;
+  cache[key] = {
+    key,
+    runId,
+    status: "running",
+    startedAt: new Date(now).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    expiresAt: now + Math.max(30_000, Number(ttlMs) || 0),
+    attempts: (existing?.attempts || 0) + 1,
+  };
+  await _writeDbFile(_DB_FILE_JOBS_STATE, cache);
+  return { ok: true, state: cache[key] };
+}
+
+export async function releaseJobLock(jobKey, patch = {}) {
+  const key = String(jobKey || "");
+  if (!key) return null;
+  const cache = await _loadJobsState();
+  const prev = cache[key] || { key };
+  cache[key] = {
+    ...prev,
+    ...patch,
+    status: patch.status || "idle",
+    updatedAt: new Date().toISOString(),
+    expiresAt: 0,
+  };
+  await _writeDbFile(_DB_FILE_JOBS_STATE, cache);
+  return cache[key];
+}
+
+async function _sha256Hex(text) {
+  const data = new TextEncoder().encode(String(text ?? ""));
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  const bytes = Array.from(new Uint8Array(hash));
+  return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function getDatabaseIntegrityReport() {
+  const files = [
+    _DB_FILE_MANIFESTS,
+    _DB_FILE_DESCS,
+    _DB_FILE_NEG_DESCS,
+    _DB_FILE_PRINTS,
+    _DB_FILE_REJECTIONS,
+    _DB_FILE_STORY_CATALOG,
+    _DB_FILE_STORY_DETAILS,
+    _DB_FILE_ROUTINE_SNAPSHOTS,
+    _DB_FILE_SYNC_STATE,
+    _DB_FILE_SYNC_JOURNAL,
+    _DB_FILE_SYNC_SCHEMA,
+    _DB_FILE_ACTIVITY_LOG,
+    _DB_FILE_ACTIVITY_LOG_TXT,
+    _DB_FILE_DECISION_LOG,
+    _DB_FILE_MODEL_HEALTH,
+    _DB_FILE_HOLDOUT_SETS,
+    _DB_FILE_JOBS_STATE,
+  ];
+  const out = [];
+  for (const name of files) {
+    try {
+      const folder = await _getDbFolder();
+      if (!folder) {
+        out.push({ name, exists: false, sizeBytes: 0, sha256: null, lastModified: null });
+        continue;
+      }
+      const fh = await folder.getFileHandle(name);
+      const f = await fh.getFile();
+      const text = await f.text();
+      out.push({
+        name,
+        exists: true,
+        sizeBytes: f.size || 0,
+        sha256: await _sha256Hex(text),
+        lastModified: f.lastModified ? new Date(f.lastModified).toISOString() : null,
+      });
+    } catch {
+      out.push({ name, exists: false, sizeBytes: 0, sha256: null, lastModified: null });
+    }
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    files: out,
+  };
 }
 
 /**
@@ -418,15 +1181,22 @@ function _lazyMigrateManifest(m) {
     }
   }
 
-  // Default storyCardFilename follows the established convention
+  // Default storyCardFilename follows story folder naming:
+  //   "{storyDate} - {title}.jpg" (same base as folderName when available)
+  const _folderBase = String(m.folderName || "").trim()
+    || `${String(m.storyDate || "").trim() || "story"} - ${String(m.storyTitle || "Story").trim() || "Story"}`;
+  const _safeBase = _folderBase.replace(/[/\\:*?"<>|]/g, "_").trim();
   const storyCardFilename = m.storyCardFilename
-    || (m.storyDate ? `${m.storyDate} - Story Card.jpg` : "");
+    || (_safeBase ? `${_safeBase}.jpg` : "");
+
+  const storyHtmlFilename = m.storyHtmlFilename
+    || (_safeBase ? `${_safeBase}.html` : "story.html");
 
   return {
     ...m,
     rejectedFilenames,
     storyCardFilename,
-    storyHtmlFilename: m.storyHtmlFilename || "story.html",
+    storyHtmlFilename,
     mediaTypes,
     savedAt: m.savedAt || new Date().toISOString(),
     schemaVersion: 2,
@@ -1158,6 +1928,30 @@ export async function addRejection(storyId, imageUrl) {
 }
 
 /**
+ * Remove a rejected image record from both Database/rejections.json and IDB.
+ * Used when self-improving re-checks confidently recover a previously rejected photo.
+ *
+ * @param {string} storyId
+ * @param {string} imageUrl
+ * @returns {Promise<boolean>}
+ */
+export async function removeRejection(storyId, imageUrl) {
+  const key = `${storyId}_${imageUrl}`;
+  const cache = await _loadRejections();
+  if (cache[key]) {
+    delete cache[key];
+    _writeDbFile(_DB_FILE_REJECTIONS, cache).catch(() => {});
+  }
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_REJECTED_IMAGES, "readwrite");
+    tx.objectStore(STORE_REJECTED_IMAGES).delete(key);
+    tx.oncomplete = () => { db.close(); resolve(true); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+/**
  * Check whether an image was previously rejected.
  * Checks the file-backed cache first (O(1), no DB open), then falls back
  * to IDB if the cache hasn't been loaded or a legacy record is only in IDB.
@@ -1502,7 +2296,7 @@ export async function appendNegativeDescriptor(childId, descriptor) {
   const existing = cache[childId]?.descriptors || [];
   existing.push(Array.from(descriptor));
   if (existing.length > MAX_NEGATIVE_DESCRIPTORS) existing.splice(0, existing.length - MAX_NEGATIVE_DESCRIPTORS);
-  const record = { childId, descriptors: existing };
+  const record = { childId, descriptors: existing, updatedAt: new Date().toISOString() };
   cache[childId] = record;
   _writeDbFile(_DB_FILE_NEG_DESCS, cache).catch(() => {});
   const db = await openDB();
@@ -2278,7 +3072,7 @@ export async function clearFileSystemRecordsForChild(childId) {
  */
 export async function migrateLargeStoresToFiles() {
   const folder = await _getDbFolder();
-  if (!folder) return { ok: false, reason: "No folder linked — link your Storypark Smart Saver folder first." };
+  if (!folder) return { ok: false, reason: "No working directory set — set your Storypark Smart Saver folder first." };
 
   let migrated = 0;
   const _idbGetAll = async (store) => {
